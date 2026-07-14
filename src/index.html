@@ -249,17 +249,6 @@
   }
   .seg-mini button[aria-pressed="true"] { background:var(--surface-hi); color:var(--amber); }
 
-  /* 大文本编辑框：核心 */
-  .editor-textarea {
-    flex:1; width:100%; min-height:0; resize:none;
-    border:none; outline:none; background:transparent;
-    padding:22px 26px;
-    font-family:var(--font-mono);
-    font-size:14px; line-height:1.85; color:var(--text);
-    tab-size:2;
-  }
-  .editor-textarea::placeholder { color:var(--faint); }
-
   /* 预览层（替换变量后，只读渲染）— 与编辑框互斥显示 */
   .editor-preview {
     flex:1; width:100%; min-height:0; overflow-y:auto;
@@ -276,6 +265,68 @@
   .editor-preview .pv-var:hover { background:var(--amber-glow); }
   .editor-preview .pv-var.unfilled { background:var(--warn-soft); color:var(--warn); border-color:var(--warn); }
   .editor-preview-empty { color:var(--faint); }
+
+  /* ---------- 块化编辑器（Notion 式，每个 ## 段落一张卡片） ---------- */
+  .blocks {
+    flex:1; width:100%; min-height:0; overflow-y:auto;
+    padding:16px 18px 40px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .block {
+    display:flex; align-items:stretch; gap:2px;
+    border:1px solid transparent; border-radius:var(--radius-sm);
+    transition:border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, opacity 0.15s ease, transform 0.1s ease;
+  }
+  .block:hover { background:rgba(255,255,255,0.012); }
+  .block:focus-within { border-color:var(--line-hi); background:rgba(255,255,255,0.02); }
+  .block.dragging { opacity:0.92; box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px var(--amber-deep); background:var(--surface); border-color:var(--amber-deep); }
+  .block.drop-before { box-shadow:0 -2px 0 0 var(--amber); }
+  .block.drop-after  { box-shadow:0 2px 0 0 var(--amber); }
+
+  .block-gutter {
+    flex:none; width:26px;
+    display:flex; flex-direction:column; align-items:center; padding-top:9px; gap:2px;
+    opacity:0; transition:opacity 0.12s ease;
+  }
+  .block:hover .block-gutter, .block:focus-within .block-gutter { opacity:1; }
+  .block-handle {
+    width:22px; height:22px; border-radius:5px;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--faint); cursor:grab; user-select:none; font-size:15px;
+    touch-action:none; transition:color 0.12s ease, background 0.12s ease;
+  }
+  .block-handle:hover { color:var(--amber); background:var(--amber-soft); }
+  .block-handle:active { cursor:grabbing; }
+  .block-del {
+    width:22px; height:22px; border:none; background:transparent; cursor:pointer;
+    color:var(--faint); border-radius:5px; display:flex; align-items:center; justify-content:center;
+    transition:color 0.12s ease, background 0.12s ease;
+  }
+  .block-del svg { width:12px; height:12px; }
+  .block-del:hover { color:var(--warn); background:var(--warn-soft); }
+
+  .block-body { flex:1; min-width:0; padding:4px 6px 4px 0; }
+  .block-textarea {
+    width:100%; resize:none; overflow:hidden;
+    border:none; outline:none; background:transparent;
+    padding:6px 8px;
+    font-family:var(--font-mono); font-size:14px; line-height:1.8; color:var(--text);
+    tab-size:2; display:block;
+  }
+  .block-textarea::placeholder { color:var(--faint); }
+
+  .blocks-empty {
+    color:var(--faint); padding:26px 8px; font-size:13px; line-height:1.7;
+  }
+  .blocks-empty code { font-family:var(--font-mono); color:var(--amber); background:var(--amber-soft); padding:0 4px; border-radius:4px; }
+
+  .block-add {
+    display:flex; align-items:center; gap:8px; margin:4px 0 0 26px;
+    padding:8px 10px; border:1px dashed var(--line-hi); border-radius:var(--radius-sm);
+    background:transparent; color:var(--muted); cursor:pointer; font-size:12.5px;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+  }
+  .block-add:hover { border-color:var(--amber-deep); color:var(--amber); background:var(--amber-soft); }
 
   /* 底部：只有输出动作 */
   .editor-foot { display:flex; align-items:center; gap:12px; padding:16px 28px 20px; flex:none; }
@@ -392,8 +443,7 @@
           <span class="et-stat" id="editorStat"></span>
         </div>
 
-        <textarea class="editor-textarea" id="editorTextarea" spellcheck="false"
-          placeholder="在此直接书写你的提示词全文…&#10;&#10;用 ## 标题 组织段落，用 {{变量}} 占位——变量会自动出现在左侧供你填值。&#10;不知从何下手？点左下角「载入示例」。"></textarea>
+        <div class="blocks" id="blocks"></div>
 
         <div class="editor-preview" id="editorPreview" hidden></div>
       </div>
@@ -401,7 +451,7 @@
 
     <div class="editor-foot">
       <span class="foot-hint">
-        <kbd>Ctrl</kbd> <kbd>C</kbd> 复制 · <kbd>Ctrl</kbd> <kbd>S</kbd> 下载 · <kbd>Ctrl</kbd> <kbd>L</kbd> 切换语言 · <kbd>Ctrl</kbd> <kbd>P</kbd> 预览
+        <kbd>Alt</kbd> <kbd>↑↓</kbd> 移动块 · <kbd>Ctrl</kbd> <kbd>C</kbd> 复制 · <kbd>Ctrl</kbd> <kbd>S</kbd> 下载 · <kbd>Ctrl</kbd> <kbd>L</kbd> 切换语言 · <kbd>Ctrl</kbd> <kbd>P</kbd> 预览
       </span>
       <button class="btn btn-outline" id="btnCopy" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -632,7 +682,7 @@
   var $etLabel = document.getElementById('etLabel');
   var $editorSub = document.getElementById('editorSub');
   var $editorStat = document.getElementById('editorStat');
-  var $textarea = document.getElementById('editorTextarea');
+  var $blocks = document.getElementById('blocks');
   var $preview = document.getElementById('editorPreview');
   var $btnCopy = document.getElementById('btnCopy');
   var $btnDownload = document.getElementById('btnDownload');
@@ -657,31 +707,80 @@
   }
 
   /* ============================================================
-   * 6. 在光标处插入文本（编辑器核心交互）
+   * 6. 块模型：正文 ⇄ 块 的解析与回写
+   * ------------------------------------------------------------
+   * 真相源仍是 state.content[lang] 大文本。块只是视图：
+   *   parseBlocks(text) 把文本按 "## " 开头切成块（首个 ## 之前的
+   *   内容作为一个无标题“前言块”）；编辑/拖拽后由 collectText() 从
+   *   DOM 顺序收集各块文本并以空行拼回，写入 state。
    * ============================================================ */
-  function insertAtCursor(snippet) {
-    var el = $textarea;
-    var value = el.value;
-    var focused = document.activeElement === el;
-    var start = focused ? el.selectionStart : value.length;
-    var end = focused ? el.selectionEnd : value.length;
+  function parseBlocks(text) {
+    text = text || '';
+    if (!text.trim()) return [];
+    var lines = text.split('\n');
+    var blocks = [];
+    var cur = null;
+    lines.forEach(function (line) {
+      if (/^##\s/.test(line) || /^##$/.test(line)) {
+        if (cur !== null) blocks.push(cur);
+        cur = line;
+      } else {
+        if (cur === null) cur = line;            // 前言块
+        else cur += '\n' + line;
+      }
+    });
+    if (cur !== null) blocks.push(cur);
+    // 去掉纯空白块（多为块间的空行）
+    return blocks.filter(function (b) { return b.trim() !== ''; });
+  }
 
-    var before = value.slice(0, start);
-    // 段落型（含换行/以 ## 开头）前后补空行；短句只在需要时补一个换行
-    var isBlock = snippet.indexOf('\n') !== -1 || snippet.slice(0, 2) === '##';
-    var pre = '';
-    if (before.length > 0) {
-      if (isBlock) pre = before.endsWith('\n\n') ? '' : (before.endsWith('\n') ? '\n' : '\n\n');
-      else pre = before.endsWith('\n') ? '' : '\n';
+  // 从 DOM 中所有块 textarea 收集文本，拼成正文并写回 state。
+  function collectText() {
+    var areas = $blocks.querySelectorAll('.block-textarea');
+    var parts = [];
+    areas.forEach(function (a) {
+      var v = a.value.replace(/\s+$/, ''); // 去块尾多余空白，避免累积空行
+      if (v !== '') parts.push(v);
+    });
+    var text = parts.join('\n\n');
+    state.content[state.lang] = text;
+    return text;
+  }
+
+  // 在当前聚焦块的光标处插入片段；无聚焦块则新建一个块（追加到末尾）。
+  function insertSnippet(snippet) {
+    var active = document.activeElement;
+    var isBlockArea = active && active.classList && active.classList.contains('block-textarea');
+    var isModuleTemplate = snippet.slice(0, 2) === '##';
+
+    if (isBlockArea && !isModuleTemplate) {
+      // 短句：插入到当前块光标处
+      var el = active;
+      var start = el.selectionStart, end = el.selectionEnd;
+      var before = el.value.slice(0, start);
+      var pre = (before.length > 0 && !before.endsWith('\n')) ? '\n' : '';
+      var insertText = pre + snippet;
+      el.value = before + insertText + el.value.slice(end);
+      var caret = before.length + insertText.length;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+      autosize(el);
+      onBlocksChanged();
+    } else {
+      // 模块模板，或未聚焦任何块：作为新块追加
+      var text = collectText();
+      var joined = text ? (text + '\n\n' + snippet) : snippet;
+      state.content[state.lang] = joined;
+      renderBlocks();
+      syncValues();
+      renderVarList();
+      refreshStat();
+      scheduleSave();
+      // 聚焦新块末尾
+      var areas = $blocks.querySelectorAll('.block-textarea');
+      var last = areas[areas.length - 1];
+      if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
     }
-    var insertText = pre + snippet;
-    el.value = before + insertText + value.slice(end);
-
-    var caret = before.length + insertText.length;
-    el.focus();
-    el.setSelectionRange(caret, caret);
-
-    onEditorChanged();
   }
 
   /* ============================================================
@@ -696,7 +795,7 @@
       pill.setAttribute('role', 'listitem');
       pill.title = '插入到光标处';
       pill.innerHTML = '<span class="ip-plus">+</span><span>' + escapeHtml(mod.label[state.lang]) + '</span>';
-      pill.addEventListener('click', function () { insertAtCursor(mod.text[state.lang]); });
+      pill.addEventListener('click', function () { insertSnippet(mod.text[state.lang]); });
       $insertGrid.appendChild(pill);
     });
   }
@@ -781,7 +880,7 @@
       pill.appendChild(t);
       pill.addEventListener('click', function (e) {
         if (e.target.classList.contains('remove-x')) return;
-        insertAtCursor(snip[lang] || snip.zh || snip.en);
+        insertSnippet(snip[lang] || snip.zh || snip.en);
       });
       if (!snip.builtin) {
         var x = document.createElement('span');
@@ -842,13 +941,224 @@
    * 8. 渲染：右栏编辑器 / 预览 / 状态
    * ============================================================ */
   function renderEditor() {
-    // 把当前语言正文灌入 textarea（仅在非聚焦时刷新，避免打断输入）
-    if (document.activeElement !== $textarea) {
-      $textarea.value = state.content[state.lang] || '';
-    }
+    if (view !== 'preview') renderBlocks();
     $etLabel.textContent = state.lang === 'zh' ? '中文正文' : 'English 正文';
     refreshStat();
     if (view === 'preview') renderPreview();
+  }
+
+  /* ---------- 块化编辑器渲染 ---------- */
+  function autosize(area) {
+    area.style.height = 'auto';
+    area.style.height = (area.scrollHeight) + 'px';
+  }
+
+  function renderBlocks() {
+    var blocks = parseBlocks(state.content[state.lang] || '');
+    $blocks.innerHTML = '';
+
+    if (blocks.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'blocks-empty';
+      empty.innerHTML = '还没有内容。点左侧「插入模块」快速开始，或直接在下方新建一个块。<br>用 <code>## 标题</code> 组织段落，<code>{{变量}}</code> 占位。';
+      $blocks.appendChild(empty);
+      appendAddBlockButton();
+      return;
+    }
+
+    blocks.forEach(function (blockText, idx) {
+      $blocks.appendChild(buildBlockCard(blockText, idx));
+    });
+    appendAddBlockButton();
+  }
+
+  function appendAddBlockButton() {
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'block-add';
+    add.innerHTML = '<span style="font-family:var(--font-mono);color:var(--amber)">+</span> 新建块';
+    add.addEventListener('click', function () {
+      var text = collectText();
+      state.content[state.lang] = text ? (text + '\n\n## ') : '## ';
+      renderBlocks();
+      refreshStat();
+      scheduleSave();
+      var areas = $blocks.querySelectorAll('.block-textarea');
+      var last = areas[areas.length - 1];
+      if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
+    });
+    $blocks.appendChild(add);
+  }
+
+  function buildBlockCard(blockText, idx) {
+    var card = document.createElement('div');
+    card.className = 'block';
+    card.dataset.idx = idx;
+
+    // gutter：拖拽手柄 + 删除
+    var gutter = document.createElement('div');
+    gutter.className = 'block-gutter';
+
+    var handle = document.createElement('div');
+    handle.className = 'block-handle';
+    handle.setAttribute('role', 'button');
+    handle.setAttribute('aria-label', '拖动排序');
+    handle.title = '拖动排序（或 Alt+↑/↓）';
+    handle.textContent = '⠿';
+    attachDrag(handle, card);
+    gutter.appendChild(handle);
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'block-del';
+    del.setAttribute('aria-label', '删除此块');
+    del.title = '删除此块';
+    del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    del.addEventListener('click', function () { deleteBlock(card); });
+    gutter.appendChild(del);
+
+    card.appendChild(gutter);
+
+    // body：块内 textarea
+    var body = document.createElement('div');
+    body.className = 'block-body';
+    var area = document.createElement('textarea');
+    area.className = 'block-textarea';
+    area.spellcheck = false;
+    area.value = blockText;
+    area.rows = 1;
+    area.setAttribute('aria-label', '块内容');
+    area.addEventListener('input', function () {
+      autosize(area);
+      onBlocksChanged();
+    });
+    area.addEventListener('keydown', function (e) {
+      // Alt+↑/↓ 移动块
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        moveBlock(card, e.key === 'ArrowUp' ? -1 : 1);
+      }
+    });
+    body.appendChild(area);
+    card.appendChild(body);
+
+    // 初次布局后自适应高度
+    requestAnimationFrame(function () { autosize(area); });
+
+    return card;
+  }
+
+  // 块内容变化：收集回写 + 同步变量（不重建 DOM，避免打断输入）
+  function onBlocksChanged() {
+    collectText();
+    syncValues();
+    renderVarList();
+    refreshStat();
+    scheduleSave();
+  }
+
+  function deleteBlock(card) {
+    var area = card.querySelector('.block-textarea');
+    // 有内容时二次确认，空块直接删
+    if (area && area.value.trim() && !window.confirm('删除这个块？')) return;
+    card.remove();
+    collectText();
+    syncValues();
+    renderVarList();
+    refreshStat();
+    scheduleSave();
+    // 若删空了，重渲染以显示空态
+    if ($blocks.querySelectorAll('.block').length === 0) renderBlocks();
+  }
+
+  function moveBlock(card, delta) {
+    var cards = Array.prototype.slice.call($blocks.querySelectorAll('.block'));
+    var i = cards.indexOf(card);
+    var j = i + delta;
+    if (j < 0 || j >= cards.length) return;
+    var focused = document.activeElement === card.querySelector('.block-textarea');
+    if (delta < 0) $blocks.insertBefore(card, cards[j]);
+    else $blocks.insertBefore(cards[j], card);
+    collectText();
+    scheduleSave();
+    if (focused) { var a = card.querySelector('.block-textarea'); if (a) a.focus(); }
+  }
+
+  /* ---------- 块拖拽（按手柄） ---------- */
+  var dragBlock = null;
+
+  function attachDrag(handle, card) {
+    handle.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      startBlockDrag(card, e);
+    });
+  }
+
+  function startBlockDrag(card, ev) {
+    dragBlock = card;
+    card.classList.add('dragging');
+    document.body.style.userSelect = 'none';
+
+    function clearMarks() {
+      $blocks.querySelectorAll('.block').forEach(function (c) {
+        c.classList.remove('drop-before', 'drop-after');
+      });
+    }
+
+    function onMove(e) {
+      if (!dragBlock) return;
+      var cards = Array.prototype.slice.call($blocks.querySelectorAll('.block'));
+      clearMarks();
+      var placed = false;
+      for (var i = 0; i < cards.length; i++) {
+        if (cards[i] === dragBlock) continue;
+        var r = cards[i].getBoundingClientRect();
+        var mid = r.top + r.height / 2;
+        if (e.clientY < mid) {
+          cards[i].classList.add('drop-before');
+          dragBlock._dropRef = cards[i];
+          dragBlock._dropPos = 'before';
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // 落到最后一个非拖拽卡之后
+        var last = null;
+        for (var k = 0; k < cards.length; k++) if (cards[k] !== dragBlock) last = cards[k];
+        if (last) { last.classList.add('drop-after'); dragBlock._dropRef = last; dragBlock._dropPos = 'after'; }
+        else { dragBlock._dropRef = null; }
+      }
+    }
+
+    function onUp() {
+      if (!dragBlock) return cleanup();
+      var ref = dragBlock._dropRef, pos = dragBlock._dropPos;
+      if (ref && ref !== dragBlock) {
+        if (pos === 'before') $blocks.insertBefore(dragBlock, ref);
+        else $blocks.insertBefore(dragBlock, ref.nextSibling);
+        collectText();
+        scheduleSave();
+      }
+      cleanup();
+    }
+
+    function cleanup() {
+      clearMarks();
+      if (dragBlock) {
+        dragBlock.classList.remove('dragging');
+        delete dragBlock._dropRef;
+        delete dragBlock._dropPos;
+      }
+      document.body.style.userSelect = '';
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      dragBlock = null;
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   }
 
   function refreshStat() {
@@ -933,24 +1243,13 @@
     }
   }
 
-  /* 编辑器内容变化的统一入口 */
-  function onEditorChanged() {
-    state.content[state.lang] = $textarea.value;
-    syncValues();
-    renderVarList();
-    refreshStat();
-    scheduleSave();
-  }
-
-  $textarea.addEventListener('input', onEditorChanged);
-
   /* ============================================================
    * 9. 语言 / 视图切换
    * ============================================================ */
   function setLang(lang) {
     if (state.lang === lang) return;
-    // 切换前把当前编辑内容存回
-    state.content[state.lang] = $textarea.value;
+    // 切换前把当前编辑内容存回（仅编辑模式下 DOM 才是最新）
+    if (view !== 'preview') collectText();
     state.lang = lang;
     renderAll();
     scheduleSave();
@@ -969,18 +1268,17 @@
 
   function setView(v) {
     if (view === v) return;
-    if (v === 'preview') state.content[state.lang] = $textarea.value; // 存回
+    if (v === 'preview') collectText(); // 进预览前把块内容存回
     view = v;
     renderViewSeg();
     if (view === 'preview') {
-      $textarea.hidden = true;
+      $blocks.hidden = true;
       $preview.hidden = false;
       renderPreview();
     } else {
       $preview.hidden = true;
-      $textarea.hidden = false;
-      $textarea.value = state.content[state.lang] || '';
-      $textarea.focus();
+      $blocks.hidden = false;
+      renderBlocks();
     }
   }
   function toggleView() { setView(view === 'write' ? 'preview' : 'write'); }
@@ -999,7 +1297,7 @@
    * 10. 输出：复制 / 下载 / 示例 / 清空
    * ============================================================ */
   function doCopy() {
-    state.content[state.lang] = $textarea.hidden ? state.content[state.lang] : $textarea.value;
+    if (view !== 'preview') collectText();
     var text = compile(state.lang);
     var langName = state.lang === 'zh' ? '中文' : 'English';
     if (clipboardApi && clipboardApi.writeText) {
@@ -1015,7 +1313,7 @@
   }
 
   function doDownload() {
-    state.content[state.lang] = $textarea.hidden ? state.content[state.lang] : $textarea.value;
+    if (view !== 'preview') collectText();
     var text = compile(state.lang);
     var defaultName = state.lang === 'zh' ? 'prompt-zh.md' : 'prompt-en.md';
     var langName = state.lang === 'zh' ? '中文' : 'English';
