@@ -275,13 +275,25 @@
   .block {
     display:flex; align-items:stretch; gap:2px;
     border:1px solid transparent; border-radius:var(--radius-sm);
-    transition:border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, opacity 0.15s ease, transform 0.1s ease;
+    transition:border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, opacity 0.15s ease;
   }
   .block:hover { background:rgba(255,255,255,0.012); }
   .block:focus-within { border-color:var(--line-hi); background:rgba(255,255,255,0.02); }
-  .block.dragging { opacity:0.92; box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px var(--amber-deep); background:var(--surface); border-color:var(--amber-deep); }
-  .block.drop-before { box-shadow:0 -2px 0 0 var(--amber); }
-  .block.drop-after  { box-shadow:0 2px 0 0 var(--amber); }
+  /* FLIP：让位块从旧位置平滑滑到新位置（transform 由 JS 设置，这里给过渡曲线） */
+  .block.flip { transition:transform 0.22s cubic-bezier(0.2, 0, 0, 1), border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease; }
+  /* 被拖块：跟随指针，浮起，脱离命中检测 */
+  .block.dragging {
+    position:relative; z-index:20;
+    opacity:0.97; pointer-events:none;
+    box-shadow:0 12px 34px rgba(0,0,0,0.5), 0 0 0 1px var(--amber-deep);
+    background:var(--surface); border-color:var(--amber-deep);
+    cursor:grabbing;
+  }
+  /* 被拖块原位留下的“凹槽”占位（虚线轮廓） */
+  .block.drag-placeholder {
+    border:1px dashed var(--line-hi); background:var(--surface-inset);
+    border-radius:var(--radius-sm);
+  }
 
   .block-gutter {
     flex:none; width:26px;
@@ -1095,66 +1107,138 @@
     });
   }
 
+  // 其它块的“让位”通过 FLIP 实现：记录旧位置 → 改变 DOM 顺序 →
+  // 测新位置 → 反向 transform 归位 → 下一帧动画到 0，形成平滑滑动。
+  function flipReorder(mutate) {
+    var cards = Array.prototype.slice.call($blocks.querySelectorAll('.block'));
+    var first = {};
+    cards.forEach(function (c) { first[c.dataset.flipId] = c.getBoundingClientRect().top; });
+
+    mutate(); // 改变 DOM 顺序
+
+    cards.forEach(function (c) {
+      if (c.classList.contains('dragging')) return; // 被拖块自行跟指针
+      var oldTop = first[c.dataset.flipId];
+      if (oldTop == null) return;
+      var newTop = c.getBoundingClientRect().top;
+      var dy = oldTop - newTop;
+      if (!dy) return;
+      c.classList.remove('flip');
+      c.style.transform = 'translateY(' + dy + 'px)';
+      // 强制回流后下一帧动画到 0
+      requestAnimationFrame(function () {
+        c.classList.add('flip');
+        c.style.transform = '';
+      });
+    });
+  }
+
   function startBlockDrag(card, ev) {
     dragBlock = card;
-    card.classList.add('dragging');
     document.body.style.userSelect = 'none';
 
-    function clearMarks() {
-      $blocks.querySelectorAll('.block').forEach(function (c) {
-        c.classList.remove('drop-before', 'drop-after');
-      });
+    // 给每个块打一个稳定 id 供 FLIP 匹配
+    Array.prototype.slice.call($blocks.querySelectorAll('.block')).forEach(function (c, i) {
+      c.dataset.flipId = c.dataset.flipId || ('f' + i + '_' + Math.random().toString(36).slice(2, 6));
+    });
+
+    var rect = card.getBoundingClientRect();
+    var startX = ev.clientX, startY = ev.clientY;
+    var offsetY = ev.clientY - rect.top;
+
+    // 占位块：等高，标记被拖块原位
+    var placeholder = document.createElement('div');
+    placeholder.className = 'block drag-placeholder';
+    placeholder.dataset.flipId = 'placeholder';
+    placeholder.style.height = rect.height + 'px';
+    $blocks.insertBefore(placeholder, card.nextSibling);
+
+    // 被拖块浮起：固定宽度，跟随指针
+    var width = rect.width;
+    card.classList.add('dragging');
+    card.style.width = width + 'px';
+    card.style.position = 'fixed';
+    card.style.left = rect.left + 'px';
+    card.style.top = rect.top + 'px';
+    card.style.margin = '0';
+
+    function moveFollow(e) {
+      card.style.top = (e.clientY - offsetY) + 'px';
+      card.style.left = rect.left + 'px';
     }
+    moveFollow(ev);
 
     function onMove(e) {
       if (!dragBlock) return;
-      var cards = Array.prototype.slice.call($blocks.querySelectorAll('.block'));
-      clearMarks();
-      var placed = false;
+      moveFollow(e);
+
+      // 静止块（排除被拖块与占位块本身），按 DOM 顺序
+      var cards = Array.prototype.slice.call($blocks.querySelectorAll('.block'))
+        .filter(function (c) { return c !== card && c !== placeholder; });
+
+      // 指针 Y 与各静止块中点比较，决定占位块插到哪个块之前（null=末尾）
+      var refNode = null;
       for (var i = 0; i < cards.length; i++) {
-        if (cards[i] === dragBlock) continue;
         var r = cards[i].getBoundingClientRect();
-        var mid = r.top + r.height / 2;
-        if (e.clientY < mid) {
-          cards[i].classList.add('drop-before');
-          dragBlock._dropRef = cards[i];
-          dragBlock._dropPos = 'before';
-          placed = true;
-          break;
-        }
+        if (e.clientY < r.top + r.height / 2) { refNode = cards[i]; break; }
       }
-      if (!placed) {
-        // 落到最后一个非拖拽卡之后
-        var last = null;
-        for (var k = 0; k < cards.length; k++) if (cards[k] !== dragBlock) last = cards[k];
-        if (last) { last.classList.add('drop-after'); dragBlock._dropRef = last; dragBlock._dropPos = 'after'; }
-        else { dragBlock._dropRef = null; }
+
+      // 占位块“在静止块序列中的当前落点”：它下一个静止兄弟（跳过 card）
+      var curRef = placeholder.nextElementSibling;
+      while (curRef && (curRef === card || !curRef.classList.contains('block'))) {
+        curRef = curRef.nextElementSibling;
+      }
+      // 已在目标位置则不动，避免抖动；否则 FLIP 平滑让位
+      if (refNode !== curRef) {
+        flipReorder(function () {
+          $blocks.insertBefore(placeholder, refNode);
+        });
       }
     }
 
     function onUp() {
-      if (!dragBlock) return cleanup();
-      var ref = dragBlock._dropRef, pos = dragBlock._dropPos;
-      if (ref && ref !== dragBlock) {
-        if (pos === 'before') $blocks.insertBefore(dragBlock, ref);
-        else $blocks.insertBefore(dragBlock, ref.nextSibling);
-        collectText();
-        scheduleSave();
+      if (!dragBlock) return cleanupListeners();
+      // 松手瞬间被拖块的视觉位置（fixed 定位的 top）
+      var fromTop = card.getBoundingClientRect().top;
+
+      // 恢复流内定位，放回占位块处，测最终位置
+      card.classList.remove('dragging', 'flip');
+      card.style.position = '';
+      card.style.top = card.style.left = card.style.width = card.style.margin = '';
+      $blocks.insertBefore(card, placeholder);
+      placeholder.remove();
+      var toTop = card.getBoundingClientRect().top;
+
+      // 一次 FLIP：从松手视觉位置平滑落到最终位置
+      var dy = fromTop - toTop;
+      if (dy) {
+        card.style.transform = 'translateY(' + dy + 'px)';
+        requestAnimationFrame(function () {
+          card.classList.add('flip');
+          card.style.transform = '';
+        });
       }
-      cleanup();
+
+      collectText();
+      scheduleSave();
+      cleanupListeners();
+      dragBlock = null;
     }
 
     function cleanup() {
-      clearMarks();
+      if (placeholder && placeholder.parentNode) placeholder.remove();
       if (dragBlock) {
         dragBlock.classList.remove('dragging');
-        delete dragBlock._dropRef;
-        delete dragBlock._dropPos;
+        dragBlock.style.position = '';
+        dragBlock.style.top = dragBlock.style.left = dragBlock.style.width = dragBlock.style.margin = '';
       }
+      cleanupListeners();
+      dragBlock = null;
+    }
+    function cleanupListeners() {
       document.body.style.userSelect = '';
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
-      dragBlock = null;
     }
 
     window.addEventListener('pointermove', onMove);
