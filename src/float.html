@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Composer 浮窗</title>
+<style>
+  /* ============================================================
+   * 浮窗：无边框 + 透明窗口，根容器自己画圆角卡片背景。
+   * 主题变量沿用主窗口深色配色的一个精简子集。
+   * ============================================================ */
+  :root {
+    --bg-card:#202020;
+    --surface:#2b2b2b;
+    --surface-hi:#333333;
+    --surface-inset:#262626;
+    --line:#3c3c3c;
+    --line-hi:#4a4a4a;
+    --text:#e6e6e5;
+    --text-soft:#b3b3b1;
+    --muted:#8a8987;
+    --faint:#6a6a68;
+    --amber:#e08d70;
+    --amber-hi:#eaa78e;
+    --amber-deep:#c25f3f;
+    --amber-soft:rgba(224,141,112,0.14);
+    --radius:12px;
+    --radius-sm:7px;
+    --font-sans:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing:border-box; }
+  html, body {
+    margin:0; padding:0;
+    width:100%; height:100%;
+    background:transparent; /* 关键：保留窗口透明，圆角卡片由 .fw-card 自己画 */
+    overflow:hidden;
+  }
+  body {
+    font-family:var(--font-sans);
+    font-size:13px;
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+  }
+  button, textarea { font-family:inherit; font-size:inherit; color:inherit; }
+  :focus-visible { outline:2px solid var(--amber); outline-offset:1px; border-radius:5px; }
+
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--line-hi); border-radius:5px; }
+
+  .fw-card {
+    width:100%; height:100%;
+    display:flex; flex-direction:column;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:0 10px 34px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.3);
+    overflow:hidden;
+  }
+
+  /* 顶部拖动条：data-tauri-drag-region 让无边框窗口可拖动 */
+  .fw-drag {
+    flex:none;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 8px 0 14px; height:34px;
+    background:var(--surface);
+    border-bottom:1px solid var(--line);
+    -webkit-user-select:none; user-select:none;
+  }
+  .fw-title {
+    font-size:11.5px; font-weight:600; letter-spacing:0.04em;
+    color:var(--muted);
+    pointer-events:none; /* 让标题不挡拖动 */
+  }
+  .fw-close {
+    flex:none; width:24px; height:24px; border-radius:6px;
+    border:none; background:transparent; color:var(--muted);
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition:background 0.14s ease, color 0.14s ease;
+  }
+  .fw-close:hover { background:rgba(224,62,62,0.16); color:#eb5757; }
+  .fw-close svg { width:14px; height:14px; }
+
+  .fw-body {
+    flex:1; min-height:0; display:flex; flex-direction:column;
+    padding:10px 10px 8px;
+    gap:8px;
+  }
+
+  /* 编辑区 */
+  .fw-editor-wrap {
+    flex:1 1 auto; min-height:80px;
+    display:flex; flex-direction:column;
+    border:1px solid var(--line); border-radius:var(--radius-sm);
+    background:var(--surface-inset);
+    overflow:hidden;
+  }
+  .fw-editor-toolbar {
+    flex:none; display:flex; align-items:center; justify-content:space-between;
+    padding:5px 8px; border-bottom:1px solid var(--line);
+    background:var(--surface);
+  }
+  .fw-editor-label {
+    font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--faint);
+  }
+  .fw-copy-btn {
+    flex:none; display:inline-flex; align-items:center; gap:5px;
+    border:1px solid var(--line-hi); background:var(--surface-hi); color:var(--text-soft);
+    border-radius:6px; padding:3px 9px; font-size:11px; cursor:pointer;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+  }
+  .fw-copy-btn:hover { border-color:var(--amber-deep); color:var(--amber-hi); }
+  .fw-copy-btn svg { width:12px; height:12px; }
+
+  .fw-textarea {
+    flex:1; width:100%; min-height:0; resize:none;
+    border:none; outline:none; background:transparent; color:var(--text);
+    padding:8px 10px;
+    font-family:var(--font-sans); font-size:13px; line-height:1.6;
+  }
+  .fw-textarea::placeholder { color:var(--faint); }
+
+  /* 下方：常用句 / 插入模块 列表 */
+  .fw-lists { flex:none; display:flex; flex-direction:column; gap:6px; max-height:44%; overflow-y:auto; }
+  .fw-section-title {
+    font-size:10.5px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--muted); margin:2px 0 2px;
+  }
+  .fw-pill-wrap { display:flex; flex-wrap:wrap; gap:5px; }
+  .fw-pill {
+    display:inline-flex; align-items:center; gap:4px;
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:999px; padding:4px 9px; font-size:11px; color:var(--text-soft);
+    cursor:pointer; transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    max-width:100%;
+  }
+  .fw-pill:hover { background:var(--amber-soft); border-color:var(--amber-deep); color:var(--amber-hi); }
+  .fw-pill .fw-pill-plus { color:var(--amber); font-family:var(--font-mono); font-weight:600; }
+  .fw-pill span.fw-pill-label {
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;
+  }
+  .fw-empty-hint { color:var(--faint); font-size:11px; padding:2px 0; }
+
+  /* 轻提示 toast */
+  .fw-toast {
+    position:absolute; left:50%; bottom:10px; transform:translateX(-50%) translateY(6px);
+    background:var(--surface-hi); border:1px solid var(--line-hi); color:var(--text);
+    padding:6px 14px; border-radius:999px; font-size:11.5px;
+    display:flex; align-items:center; gap:6px;
+    opacity:0; pointer-events:none; transition:opacity 0.18s ease, transform 0.18s ease;
+    z-index:50; box-shadow:0 6px 18px rgba(0,0,0,0.35);
+    white-space:nowrap;
+  }
+  .fw-toast::before { content:''; width:6px; height:6px; border-radius:50%; background:#4dab9a; flex:none; }
+  .fw-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+  <div class="fw-card" id="fwCard" style="position:relative;">
+    <div class="fw-drag" data-tauri-drag-region>
+      <span class="fw-title" data-tauri-drag-region>COMPOSER 浮窗</span>
+      <button class="fw-close" id="fwCloseBtn" type="button" title="隐藏浮窗" aria-label="隐藏浮窗">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="fw-body">
+      <div class="fw-editor-wrap">
+        <div class="fw-editor-toolbar">
+          <span class="fw-editor-label" id="fwEditorLabel">正文</span>
+          <button class="fw-copy-btn" id="fwCopyBtn" type="button" title="复制编辑器内容">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            复制
+          </button>
+        </div>
+        <textarea class="fw-textarea" id="fwTextarea" placeholder="正文内容…" spellcheck="false"></textarea>
+      </div>
+
+      <div class="fw-lists">
+        <div>
+          <div class="fw-section-title">插入模块</div>
+          <div class="fw-pill-wrap" id="fwModuleWrap"></div>
+        </div>
+        <div>
+          <div class="fw-section-title">常用句</div>
+          <div class="fw-pill-wrap" id="fwSnippetWrap"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fw-toast" id="fwToast" role="status" aria-live="polite"></div>
+  </div>
+
+<script src="core.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var Composer = window.Composer || {};
+  var MODULE_BY_ID = Composer.MODULE_BY_ID;
+  var BUILTIN_BY_ID = Composer.BUILTIN_BY_ID;
+  var defaultState = Composer.defaultState;
+  var normalizeState = Composer.normalizeState;
+  var escapeHtml = Composer.escapeHtml;
+
+  /* ============================================================
+   * Tauri API 安全获取（浏览器预览时降级，不报错）
+   * ============================================================ */
+  var TAURI = window.__TAURI__ || null;
+  var fsApi = TAURI && TAURI.fs;
+  var clipboardApi = TAURI && TAURI.clipboardManager;
+  var eventApi = TAURI && TAURI.event;
+  var webviewWindowApi = TAURI && TAURI.webviewWindow;
+  var BaseDirectory = fsApi && fsApi.BaseDirectory;
+  var STATE_FILE = 'composer-state.json';
+  function tauriAvailable() { return !!(TAURI && fsApi && BaseDirectory); }
+
+  var currentWin = null;
+  if (webviewWindowApi && webviewWindowApi.getCurrentWebviewWindow) {
+    try { currentWin = webviewWindowApi.getCurrentWebviewWindow(); } catch (e) { currentWin = null; }
+  }
+
+  /* ============================================================
+   * 状态：与主窗口共享同一份 composer-state.json，
+   * 通过 'composer-state-changed' 事件广播实现实时双向同步。
+   * ============================================================ */
+  var state = defaultState();
+  var suppressBroadcast = false; // 收到远端事件触发的本地更新，不再二次广播（防回声循环）
+  var saveTimer = null;
+
+  var $textarea = document.getElementById('fwTextarea');
+  var $editorLabel = document.getElementById('fwEditorLabel');
+  var $moduleWrap = document.getElementById('fwModuleWrap');
+  var $snippetWrap = document.getElementById('fwSnippetWrap');
+  var $copyBtn = document.getElementById('fwCopyBtn');
+  var $closeBtn = document.getElementById('fwCloseBtn');
+  var $toast = document.getElementById('fwToast');
+
+  var toastTimer = null;
+  function showToast(msg) {
+    $toast.textContent = msg;
+    $toast.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { $toast.classList.remove('show'); }, 1500);
+  }
+
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(persistAndBroadcast, 300);
+  }
+
+  var appDataEnsured = false;
+  function ensureAppDataDir() {
+    if (appDataEnsured || !fsApi.mkdir) return Promise.resolve();
+    return fsApi.mkdir('.', { baseDir: BaseDirectory.AppData, recursive: true })
+      .then(function () { appDataEnsured = true; })
+      .catch(function () { appDataEnsured = true; });
+  }
+
+  function persistAndBroadcast() {
+    if (!tauriAvailable()) return;
+    var payload = JSON.stringify(state, null, 2);
+    ensureAppDataDir().then(function () {
+      return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
+    }).then(function () {
+      if (eventApi && eventApi.emit && !suppressBroadcast) {
+        eventApi.emit('composer-state-changed', state).catch(function () {});
+      }
+    }).catch(function (err) { console.warn('浮窗持久化失败:', err); });
+  }
+
+  function restoreState() {
+    if (!tauriAvailable()) { renderAll(); return; }
+    fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
+      .then(function (exists) {
+        if (!exists) throw new Error('no-state-file');
+        return fsApi.readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
+      })
+      .then(function (text) {
+        var parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') state = normalizeState(parsed);
+      })
+      .catch(function () { state = defaultState(); })
+      .then(function () { renderAll(); });
+  }
+
+  /* ---------- 实时双向同步：监听主窗口（或另一端）广播的 state ----------
+   * 与主窗口对称的保护：若浮窗此刻正在编辑（焦点在输入框/文本域），不立即
+   * 整体替换 state（否则会冲掉浮窗尚未防抖保存的输入、并打断光标），而是把
+   * 最新 payload 暂存，待失焦后再应用。只同步“没在编辑的那一端”。
+   * ============================================================ */
+  var pendingRemoteState = null;
+
+  function isEditingLocally() {
+    var el = document.activeElement;
+    if (!el) return false;
+    var tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+  }
+
+  function applyRemoteState(payload) {
+    suppressBroadcast = true; // 远端来的更新，不要再广播回去，避免回声循环
+    state = normalizeState(payload);
+    renderAll();
+    suppressBroadcast = false;
+  }
+
+  function flushPendingRemoteState() {
+    if (pendingRemoteState && !isEditingLocally()) {
+      var payload = pendingRemoteState;
+      pendingRemoteState = null;
+      applyRemoteState(payload);
+    }
+  }
+
+  if (eventApi && eventApi.listen) {
+    eventApi.listen('composer-state-changed', function (evt) {
+      var payload = evt && evt.payload;
+      if (!payload || typeof payload !== 'object') return;
+      if (isEditingLocally()) { pendingRemoteState = payload; return; }
+      applyRemoteState(payload);
+    }).catch(function () {});
+    document.addEventListener('focusout', function () {
+      setTimeout(flushPendingRemoteState, 0);
+    });
+  }
+
+  /* ============================================================
+   * 渲染：编辑器
+   * ============================================================ */
+  function renderEditor() {
+    $editorLabel.textContent = state.lang === 'zh' ? '中文正文' : 'English 正文';
+    if (document.activeElement !== $textarea) {
+      $textarea.value = state.content[state.lang] || '';
+    }
+  }
+
+  $textarea.addEventListener('input', function () {
+    state.content[state.lang] = $textarea.value;
+    scheduleSave();
+  });
+
+  /* ============================================================
+   * 渲染：插入模块 / 常用句 列表（只读展示 + 点击复制）
+   * ============================================================ */
+  function resolveModule(id) {
+    var b = MODULE_BY_ID[id];
+    if (b) {
+      var p = state.modulePatches[id] || {};
+      return {
+        id: id,
+        label: {
+          zh: typeof p.labelZh === 'string' ? p.labelZh : b.label.zh,
+          en: typeof p.labelEn === 'string' ? p.labelEn : b.label.en
+        },
+        text: {
+          zh: typeof p.textZh === 'string' ? p.textZh : b.text.zh,
+          en: typeof p.textEn === 'string' ? p.textEn : b.text.en
+        },
+        hidden: p.hidden === true
+      };
+    }
+    var c = null;
+    for (var i = 0; i < state.customModules.length; i++) {
+      if (state.customModules[i].id === id) { c = state.customModules[i]; break; }
+    }
+    if (!c) return null;
+    return { id: id, label: { zh: c.label.zh, en: c.label.en }, text: { zh: c.text.zh, en: c.text.en }, hidden: c.hidden === true };
+  }
+
+  function resolveSnippet(id) {
+    var b = BUILTIN_BY_ID[id];
+    if (b) {
+      var p = state.builtinPatches[id] || {};
+      return {
+        id: id,
+        tag: typeof p.tag === 'string' ? p.tag : b.tag,
+        zh: typeof p.zh === 'string' ? p.zh : b.zh,
+        en: typeof p.en === 'string' ? p.en : b.en,
+        hidden: p.hidden === true
+      };
+    }
+    var c = null;
+    for (var i = 0; i < state.customSnippets.length; i++) {
+      if (state.customSnippets[i].id === id) { c = state.customSnippets[i]; break; }
+    }
+    if (!c) return null;
+    return { id: id, tag: c.tag, zh: c.zh, en: c.en, hidden: c.hidden === true };
+  }
+
+  function copyToClipboard(text, doneMsg) {
+    if (clipboardApi && clipboardApi.writeText) {
+      clipboardApi.writeText(text).then(function () { showToast(doneMsg); }).catch(function () { fallbackCopy(text, doneMsg); });
+    } else {
+      fallbackCopy(text, doneMsg);
+    }
+  }
+  function fallbackCopy(text, doneMsg) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { showToast(doneMsg); }).catch(function () { showToast('复制失败'); });
+    } else { showToast('复制失败：当前环境不支持'); }
+  }
+
+  function renderModuleGrid() {
+    var lang = state.lang;
+    $moduleWrap.innerHTML = '';
+    var mods = state.moduleOrder.map(resolveModule).filter(Boolean).filter(function (m) { return !m.hidden; });
+    if (mods.length === 0) {
+      $moduleWrap.innerHTML = '<span class="fw-empty-hint">暂无可用模块</span>';
+      return;
+    }
+    mods.forEach(function (mod) {
+      var pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'fw-pill';
+      pill.title = '点击复制到剪贴板';
+      var label = mod.label[lang] || mod.label.zh || mod.label.en || '';
+      pill.innerHTML = '<span class="fw-pill-plus">+</span><span class="fw-pill-label">' + escapeHtml(label) + '</span>';
+      pill.addEventListener('click', function () {
+        var text = mod.text[lang] || mod.text.zh || mod.text.en || '';
+        copyToClipboard(text, '已复制「' + label + '」');
+      });
+      $moduleWrap.appendChild(pill);
+    });
+  }
+
+  function renderSnippetGrid() {
+    var lang = state.lang;
+    $snippetWrap.innerHTML = '';
+    var snips = state.snippetOrder.map(resolveSnippet).filter(Boolean).filter(function (s) { return !s.hidden; });
+    if (snips.length === 0) {
+      $snippetWrap.innerHTML = '<span class="fw-empty-hint">暂无可用常用句</span>';
+      return;
+    }
+    snips.forEach(function (snip) {
+      var pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'fw-pill';
+      pill.title = snip[lang] || snip.zh || snip.en || '';
+      pill.innerHTML = '<span class="fw-pill-label">' + escapeHtml(snip.tag) + '</span>';
+      pill.addEventListener('click', function () {
+        var text = snip[lang] || snip.zh || snip.en || '';
+        copyToClipboard(text, '已复制「' + snip.tag + '」');
+      });
+      $snippetWrap.appendChild(pill);
+    });
+  }
+
+  function renderAll() {
+    renderEditor();
+    renderModuleGrid();
+    renderSnippetGrid();
+  }
+
+  /* ============================================================
+   * 顶部操作
+   * ============================================================ */
+  $copyBtn.addEventListener('click', function () {
+    var text = $textarea.value || '';
+    copyToClipboard(text, '已复制编辑器内容');
+  });
+
+  $closeBtn.addEventListener('click', function () {
+    if (currentWin && currentWin.hide) {
+      currentWin.hide().catch(function () {});
+    }
+  });
+
+  restoreState();
+})();
+</script>
+</body>
+</html>

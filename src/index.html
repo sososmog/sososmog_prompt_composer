@@ -653,6 +653,9 @@
         <button type="button" data-lang="zh" aria-pressed="true">中文</button>
         <button type="button" data-lang="en" aria-pressed="false">English</button>
       </div>
+      <button class="editor-settings-btn" id="btnFloatWindow" type="button" title="浮窗" aria-label="显示/隐藏浮窗">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="8" height="7" rx="1.5"/></svg>
+      </button>
       <button class="editor-settings-btn" id="btnEditorSettings" type="button" title="设置" aria-label="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
@@ -713,6 +716,8 @@
   var clipboardApi = TAURI && TAURI.clipboardManager;
   var updaterApi = TAURI && TAURI.updater;
   var processApi = TAURI && TAURI.process;
+  var eventApi = TAURI && TAURI.event;
+  var webviewWindowApi = TAURI && TAURI.webviewWindow;
 
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
   var STATE_FILE = 'composer-state.json';
@@ -738,6 +743,7 @@
   var state = defaultState();
   var view = 'write'; // 'write' | 'preview'
   var saveTimer = null;
+  var suppressBroadcast = false; // 收到浮窗广播触发的本地更新，不再二次广播（防回声循环）
 
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
@@ -757,7 +763,65 @@
     var payload = JSON.stringify(state, null, 2);
     ensureAppDataDir().then(function () {
       return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
+    }).then(function () {
+      if (eventApi && eventApi.emit && !suppressBroadcast) {
+        eventApi.emit('composer-state-changed', state).catch(function () {});
+      }
     }).catch(function (err) { console.warn('持久化失败:', err); });
+  }
+
+  /* ---------- 实时双向同步：监听浮窗（或另一端）广播的 state ----------
+   * 协议：任一窗口在 state 变更并防抖保存落盘后，emit 'composer-state-changed'
+   * 事件，payload 为完整的最新 state。另一端 listen 到后以事件携带的 state
+   * 为准整体替换本地内存 state 并重渲染——不去反过来读盘，避免与对端写盘竞态。
+   *
+   * 关键保护：若本窗口此刻正在编辑（焦点在某个输入框/文本域），立即整体替换 +
+   * 重渲染会打断输入、丢失光标，且会用远端 state 冲掉本地尚未防抖保存的输入。
+   * 因此正在编辑时不立即应用，而是把最新 payload 暂存到 pendingRemoteState，
+   * 等本窗口失去输入焦点后再 flush 应用。这样只同步“没在编辑的那一端”。
+   *
+   * suppressBroadcast 确保远端更新触发的本地渲染不会再次广播，避免 A→B→A 回声。
+   * ============================================================ */
+  var pendingRemoteState = null;
+
+  function isEditingLocally() {
+    var el = document.activeElement;
+    if (!el) return false;
+    var tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+  }
+
+  function applyRemoteState(payload) {
+    suppressBroadcast = true;
+    state = normalizeState(payload);
+    renderAll();
+    suppressBroadcast = false;
+  }
+
+  function flushPendingRemoteState() {
+    if (pendingRemoteState && !isEditingLocally()) {
+      var payload = pendingRemoteState;
+      pendingRemoteState = null;
+      applyRemoteState(payload);
+    }
+  }
+
+  if (eventApi && eventApi.listen) {
+    eventApi.listen('composer-state-changed', function (evt) {
+      var payload = evt && evt.payload;
+      if (!payload || typeof payload !== 'object') return;
+      if (isEditingLocally()) {
+        // 正在编辑：暂存最新一份，待失焦后应用（后到的覆盖先到的，只保留最新）
+        pendingRemoteState = payload;
+        return;
+      }
+      applyRemoteState(payload);
+    }).catch(function () {});
+    // 失焦后把暂存的远端 state flush 掉；用捕获阶段确保 activeElement 已更新
+    document.addEventListener('focusout', function () {
+      // focusout 触发时 activeElement 可能尚未切换，延到下一微/宏任务再判断
+      setTimeout(flushPendingRemoteState, 0);
+    });
   }
 
   function restoreState() {
@@ -1810,6 +1874,31 @@
 
   var $btnCheckUpdate = document.getElementById('btnCheckUpdate');
   if ($btnCheckUpdate) $btnCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
+
+  /* ============================================================
+   * 12.1 浮窗开关：显示/隐藏 label 为 'float' 的窗口
+   * ============================================================ */
+  var $btnFloatWindow = document.getElementById('btnFloatWindow');
+  if ($btnFloatWindow) {
+    if (webviewWindowApi && webviewWindowApi.WebviewWindow) {
+      $btnFloatWindow.addEventListener('click', function () {
+        var floatWin = webviewWindowApi.WebviewWindow.getByLabel
+          ? webviewWindowApi.WebviewWindow.getByLabel('float')
+          : null;
+        var resolved = floatWin && typeof floatWin.then === 'function' ? floatWin : Promise.resolve(floatWin);
+        resolved.then(function (win) {
+          if (!win) { showToast('未找到浮窗，请重启应用', true); return; }
+          win.isVisible().then(function (visible) {
+            if (visible) win.hide(); else win.show().then(function () { win.setFocus(); });
+          }).catch(function () { win.show(); });
+        }).catch(function () { showToast('浮窗不可用', true); });
+      });
+    } else {
+      // 非 Tauri 环境（浏览器预览）：无浮窗窗口可控制，禁用按钮
+      $btnFloatWindow.disabled = true;
+      $btnFloatWindow.title = '浮窗（仅桌面应用可用）';
+    }
+  }
 
   var $themeToggle = document.getElementById('themeToggle');
   $themeToggle.addEventListener('click', function () {
