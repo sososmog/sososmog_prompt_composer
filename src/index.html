@@ -931,7 +931,10 @@
     $snippetWrap.insertBefore(input, addBtn);
     input.focus();
 
+    var committed = false;
     function commit() {
+      if (committed) return;
+      committed = true;
       var text = input.value.trim();
       if (text) {
         var tag = text.length > 8 ? (text.slice(0, 8) + '…') : text;
