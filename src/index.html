@@ -6,723 +6,413 @@
 <title>Composer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet" />
 <style>
+  /* ============================================================
+   * 主题：暖色工程终端 —— 烟墨底 · 琥珀赤陶 accent
+   * 布局：左侧辅助栏 + 右侧大写作编辑器（文本为唯一真相源）
+   * ============================================================ */
   :root {
-    --ink:#1b2431; --ink-soft:#2a3646; --rail:#182029;
-    --page:#e9ebee; --card:#ffffff; --line:#dfe2e7; --line-soft:#eceef1;
-    --text:#1b2431; --muted:#6b7684; --faint:#9aa2ad;
-    --accent:#524bd6; --accent-soft:#ecebfb; --accent-ink:#332e9c;
-    --warn:#c8452f; --warn-soft:#fbeae6;
-    --save:#0f6e56; --save-soft:#e1f5ee;
-    --radius:9px;
-    --font-display:'Space Grotesk', system-ui, sans-serif;
-    --font-mono:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    --font-sans:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --bg-deep:#17130f;
+    --bg-rail:#120f0c;
+    --bg-editor:#1b1611;
+    --surface:#241e17;
+    --surface-hi:#2c261d;
+    --surface-inset:#181410;
+
+    --line:#332b21;
+    --line-soft:#28221a;
+    --line-hi:#453a2c;
+
+    --text:#efe6d6;
+    --text-soft:#c8bda9;
+    --muted:#948872;
+    --faint:#6b6152;
+
+    --amber:#e0964a;
+    --amber-hi:#f2ab5e;
+    --amber-deep:#c47b34;
+    --amber-glow:rgba(224,150,74,0.16);
+    --amber-soft:rgba(224,150,74,0.10);
+
+    --warn:#e0674a;
+    --warn-soft:rgba(224,103,74,0.14);
+    --ok:#8ab06a;
+    --ok-soft:rgba(138,176,106,0.14);
+
+    --radius:10px;
+    --radius-sm:7px;
+    --font-display:'Fraunces', Georgia, 'Songti SC', serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-sans:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+    --shadow-card:0 1px 0 rgba(255,255,255,0.02), 0 4px 16px rgba(0,0,0,0.28);
   }
 
   * { box-sizing:border-box; }
   html, body { margin:0; padding:0; }
+
   body {
     font-family:var(--font-sans);
     font-size:14px;
+    font-weight:450;
     color:var(--text);
-    background:var(--page);
+    background:var(--bg-deep);
+    background-image:
+      radial-gradient(1100px 500px at 82% -8%, rgba(224,150,74,0.07), transparent 60%);
     height:100vh;
     overflow:hidden;
     display:grid;
-    grid-template-columns:264px 1fr 388px;
+    grid-template-columns:296px 1fr;
+    -webkit-font-smoothing:antialiased;
   }
 
-  ::selection { background:var(--accent-soft); color:var(--accent-ink); }
-
+  ::selection { background:var(--amber-glow); color:var(--amber-hi); }
   button, input, textarea { font-family:inherit; font-size:inherit; color:inherit; }
-
-  :focus-visible {
-    outline:2px solid var(--accent);
-    outline-offset:2px;
-    border-radius:4px;
-  }
+  :focus-visible { outline:2px solid var(--amber); outline-offset:2px; border-radius:5px; }
 
   @media (prefers-reduced-motion: reduce) {
-    * { animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important; }
+    * { animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
   }
 
-  /* ---------- 左栏：模块库 ---------- */
+  /* ============================================================
+   * 左栏：辅助栏
+   * ============================================================ */
   .rail {
-    background:var(--rail);
-    color:#c7cdd6;
+    background:var(--bg-rail);
+    border-right:1px solid var(--line);
     display:flex;
     flex-direction:column;
-    padding:20px 18px;
-    overflow-y:auto;
     min-width:0;
-  }
-  .brand { display:flex; align-items:center; gap:8px; }
-  .brand-name { font-family:var(--font-display); font-weight:700; font-size:22px; color:#fff; letter-spacing:-0.01em; }
-  .brand-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none; }
-  .rail-tagline {
-    margin-top:6px;
-    font-size:11px;
-    letter-spacing:0.08em;
-    color:#79828e;
-    text-transform:none;
-  }
-  .rail-section-title {
-    margin-top:28px;
-    margin-bottom:12px;
-    font-size:12px;
-    font-weight:600;
-    color:#8d95a1;
-  }
-  .module-lib {
-    display:flex;
-    flex-wrap:wrap;
-    gap:8px;
-  }
-  .lib-pill {
-    display:inline-flex;
-    align-items:center;
-    gap:5px;
-    padding:6px 12px;
-    border-radius:999px;
-    background:#222c38;
-    border:1px solid #2f3b49;
-    color:#c7cdd6;
-    cursor:pointer;
-    font-size:12.5px;
-    transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-    white-space:nowrap;
-  }
-  .lib-pill:hover {
-    background:#2a3644;
-    border-color:var(--accent);
-    color:#fff;
-  }
-  .lib-pill .plus { font-family:var(--font-display); font-weight:700; color:var(--accent); }
-  .lib-pill:hover .plus { color:#a9a3ff; }
-
-  .rail-bottom {
-    margin-top:auto;
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-    padding-top:24px;
-  }
-  .btn-ghost-rail {
-    background:transparent;
-    border:1px solid #333f4d;
-    color:#c7cdd6;
-    border-radius:var(--radius);
-    padding:9px 12px;
-    cursor:pointer;
-    font-size:13px;
-    text-align:center;
-    transition:border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
-  }
-  .btn-ghost-rail:hover { border-color:var(--accent); color:#fff; background:#202b37; }
-
-  /* ---------- 中栏：装配区 ---------- */
-  .assembly {
-    overflow-y:auto;
-    padding:24px 28px 40px;
-    min-width:0;
-  }
-  .assembly-head {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:16px;
-  }
-  .assembly-title {
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:19px;
-    color:var(--ink);
-  }
-  .segmented {
-    display:inline-flex;
-    background:#dcdfe4;
-    border-radius:999px;
-    padding:3px;
-    gap:2px;
-  }
-  .segmented button {
-    border:none;
-    background:transparent;
-    padding:6px 16px;
-    border-radius:999px;
-    cursor:pointer;
-    color:var(--muted);
-    font-size:13px;
-    font-weight:500;
-    transition:background 0.12s ease, color 0.12s ease;
-  }
-  .segmented button[aria-pressed="true"] {
-    background:#fff;
-    color:var(--ink);
-    box-shadow:0 1px 2px rgba(0,0,0,0.08);
-  }
-
-  .assembly-hint {
-    margin-top:8px;
-    font-size:12.5px;
-    color:var(--muted);
-    line-height:1.6;
-  }
-  .var-chip-inline {
-    display:inline-block;
-    background:var(--accent-soft);
-    color:var(--accent-ink);
-    border-radius:999px;
-    padding:1px 8px;
-    font-family:var(--font-mono);
-    font-size:11.5px;
-  }
-
-  .module-list {
-    margin-top:20px;
-    display:flex;
-    flex-direction:column;
-    gap:14px;
-  }
-
-  .empty-state {
-    margin-top:20px;
-    border:1.5px dashed var(--line);
-    border-radius:var(--radius);
-    padding:48px 24px;
-    text-align:center;
-    color:var(--faint);
-  }
-  .empty-state .line1 { font-size:14.5px; color:var(--muted); margin-bottom:4px; }
-  .empty-state .line2 { font-size:13px; }
-
-  /* ---------- 模块卡片 ---------- */
-  .module-card {
-    background:var(--card);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    padding:14px 16px 16px;
-    transition:opacity 0.15s ease;
-  }
-  .module-card.disabled { opacity:0.5; }
-
-  .card-head {
-    display:flex;
-    align-items:center;
-    gap:10px;
-  }
-  .drag-handle {
-    color:var(--faint);
-    font-size:15px;
-    cursor:grab;
-    user-select:none;
-    flex:none;
-  }
-  .card-title-input {
-    flex:1;
-    min-width:0;
-    border:none;
-    background:transparent;
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:15px;
-    color:var(--ink);
-    padding:4px 6px;
-    border-radius:6px;
-  }
-  .card-title-input:hover { background:var(--line-soft); }
-  .card-actions {
-    display:flex;
-    align-items:center;
-    gap:4px;
-    flex:none;
-  }
-  .icon-btn {
-    width:26px;
-    height:26px;
-    border:none;
-    background:transparent;
-    border-radius:6px;
-    cursor:pointer;
-    color:var(--muted);
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    font-size:13px;
-    transition:background 0.12s ease, color 0.12s ease;
-  }
-  .icon-btn:hover:not(:disabled) { background:var(--accent-soft); color:var(--accent-ink); }
-  .icon-btn:disabled { opacity:0.3; cursor:not-allowed; }
-  .icon-btn.danger:hover:not(:disabled) { background:var(--warn-soft); color:var(--warn); }
-
-  .switch {
-    width:36px;
-    height:20px;
-    border-radius:999px;
-    background:var(--line);
-    border:none;
-    cursor:pointer;
+    overflow:hidden;
     position:relative;
-    flex:none;
-    transition:background 0.15s ease;
-    margin-left:4px;
   }
-  .switch::after {
+  .rail::before {
     content:'';
-    position:absolute;
-    top:2px;
-    left:2px;
-    width:16px;
-    height:16px;
-    border-radius:50%;
-    background:#fff;
-    transition:transform 0.15s ease;
+    position:absolute; top:0; left:0; bottom:0; width:2px;
+    background:linear-gradient(180deg, var(--amber), transparent 70%);
+    opacity:0.5;
   }
-  .switch[aria-pressed="true"] { background:var(--accent); }
-  .switch[aria-pressed="true"]::after { transform:translateX(16px); }
 
-  .card-body { margin-top:10px; }
-  .content-label {
-    font-size:11px;
-    color:var(--faint);
-    margin-bottom:6px;
+  .rail-head { padding:20px 18px 14px; border-bottom:1px solid var(--line-soft); }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .brand-mark {
+    width:30px; height:30px; border-radius:8px;
+    background:linear-gradient(150deg, var(--amber-hi), var(--amber-deep));
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-display); font-weight:700; font-size:18px; color:#241a10;
+    flex:none;
+    box-shadow:0 2px 8px rgba(224,150,74,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
   }
-  .card-textarea {
-    width:100%;
-    min-height:76px;
-    resize:vertical;
-    border:1px solid var(--line);
-    border-radius:7px;
-    padding:9px 10px;
-    font-family:var(--font-mono);
-    font-size:12.5px;
-    line-height:1.6;
-    color:var(--text);
-    background:#fbfbfc;
-  }
-  .card-textarea:focus { border-color:var(--accent); background:#fff; }
+  .brand-text { display:flex; flex-direction:column; line-height:1.1; }
+  .brand-name { font-family:var(--font-display); font-weight:600; font-size:21px; color:var(--text); letter-spacing:-0.01em; }
+  .brand-tagline { font-size:10.5px; letter-spacing:0.14em; color:var(--faint); text-transform:uppercase; margin-top:1px; }
 
-  .snippet-row {
-    margin-top:10px;
-    display:flex;
-    flex-wrap:wrap;
-    align-items:center;
-    gap:6px;
+  .rail-scroll { flex:1; overflow-y:auto; padding:16px 18px 18px; min-height:0; }
+
+  .rail-section { margin-bottom:22px; }
+  .rail-section-title {
+    margin-bottom:10px;
+    font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--muted);
+    display:flex; align-items:center; gap:8px;
   }
-  .snippet-label {
-    font-size:11px;
-    color:var(--faint);
-    margin-right:2px;
+  .rail-section-title::after { content:''; flex:1; height:1px; background:var(--line); }
+  .rail-section-title .rst-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); letter-spacing:0; text-transform:none; }
+  .rail-section-title .rst-bad { color:var(--warn); }
+
+  /* 插入模块：小药丸网格 */
+  .insert-grid { display:flex; flex-wrap:wrap; gap:6px; }
+  .insert-pill {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:6px 10px; border-radius:999px;
+    background:var(--surface); border:1px solid var(--line);
+    color:var(--text-soft); cursor:pointer; font-size:12px;
+    transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.07s ease;
   }
+  .insert-pill:hover { background:var(--surface-hi); border-color:var(--amber-deep); color:var(--text); }
+  .insert-pill:active { transform:translateY(1px); }
+  .insert-pill .ip-plus { color:var(--amber); font-family:var(--font-mono); font-weight:600; }
+
+  /* 变量列表 */
+  .var-list { display:flex; flex-direction:column; gap:7px; }
+  .var-row { display:flex; align-items:center; gap:7px; }
+  .var-name-chip {
+    font-family:var(--font-mono); font-size:11px;
+    background:var(--amber-soft); color:var(--amber); border:1px solid var(--amber-deep);
+    border-radius:6px; padding:6px 8px; flex:none;
+    max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .var-name-chip.empty { background:var(--warn-soft); color:var(--warn); border-color:var(--warn); }
+  .var-value-input {
+    flex:1; min-width:0;
+    border:1px solid var(--line-hi); background:var(--surface-inset);
+    border-radius:6px; padding:6px 9px; font-size:12px; color:var(--text);
+    transition:border-color 0.12s ease;
+  }
+  .var-value-input::placeholder { color:var(--faint); }
+  .var-value-input:focus { border-color:var(--amber); }
+  .var-empty-hint { font-size:12px; color:var(--faint); line-height:1.6; }
+  .var-empty-hint code { font-family:var(--font-mono); color:var(--amber); background:var(--amber-soft); padding:0 4px; border-radius:4px; }
+
+  /* 常用句 */
+  .snippet-wrap { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .snippet-pill {
-    display:inline-flex;
-    align-items:center;
-    gap:4px;
-    background:var(--line-soft);
-    border:1px solid var(--line);
-    border-radius:999px;
-    padding:4px 10px;
-    font-size:11.5px;
-    color:var(--ink-soft);
-    cursor:pointer;
-    transition:background 0.12s ease, border-color 0.12s ease;
+    display:inline-flex; align-items:center; gap:5px;
+    background:var(--surface-inset); border:1px solid var(--line);
+    border-radius:999px; padding:4px 10px; font-size:11.5px; color:var(--text-soft);
+    cursor:pointer; transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
-  .snippet-pill:hover { background:var(--accent-soft); border-color:var(--accent); color:var(--accent-ink); }
-  .snippet-pill .remove-x {
-    color:var(--faint);
-    font-size:12px;
-    margin-left:2px;
-    border-radius:50%;
-  }
+  .snippet-pill:hover { background:var(--amber-soft); border-color:var(--amber-deep); color:var(--amber); }
+  .snippet-pill .remove-x { color:var(--faint); font-size:13px; line-height:1; }
   .snippet-pill .remove-x:hover { color:var(--warn); }
   .snippet-add {
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    width:24px;
-    height:24px;
-    border-radius:999px;
-    border:1.5px dashed var(--faint);
-    background:transparent;
-    color:var(--muted);
-    cursor:pointer;
-    font-size:13px;
+    display:inline-flex; align-items:center; justify-content:center;
+    width:24px; height:24px; border-radius:999px;
+    border:1.5px dashed var(--line-hi); background:transparent; color:var(--muted);
+    cursor:pointer; font-size:13px; transition:border-color 0.12s ease, color 0.12s ease;
   }
-  .snippet-add:hover { border-color:var(--accent); color:var(--accent); }
+  .snippet-add:hover { border-color:var(--amber); color:var(--amber); }
   .snippet-add-input {
-    border:1px solid var(--accent);
-    border-radius:999px;
-    padding:4px 10px;
-    font-size:11.5px;
-    min-width:160px;
+    border:1px solid var(--amber); background:var(--surface-inset);
+    border-radius:999px; padding:5px 11px; font-size:11.5px; min-width:150px; color:var(--text);
   }
 
-  /* ---------- 右栏：检视面板 ---------- */
-  .inspector {
-    background:var(--card);
-    border-left:1px solid var(--line);
-    display:flex;
-    flex-direction:column;
-    min-width:0;
-    overflow:hidden;
+  .rail-foot { padding:12px 18px 16px; border-top:1px solid var(--line-soft); display:flex; flex-direction:column; gap:8px; }
+  .btn-ghost-rail {
+    display:flex; align-items:center; gap:8px;
+    background:transparent; border:1px solid var(--line); color:var(--text-soft);
+    border-radius:var(--radius-sm); padding:9px 12px; cursor:pointer; font-size:12.5px; text-align:left;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
   }
-  .var-panel {
-    max-height:32%;
-    display:flex;
-    flex-direction:column;
-    padding:20px 20px 14px;
-    border-bottom:1px solid var(--line);
-    min-height:0;
+  .btn-ghost-rail:hover { border-color:var(--amber-deep); color:var(--text); background:var(--surface); }
+  .btn-ghost-rail.danger:hover { border-color:var(--warn); color:var(--warn); }
+  .btn-ghost-rail .bg-ico { width:15px; text-align:center; opacity:0.7; }
+
+  /* ============================================================
+   * 右栏：主写作编辑器
+   * ============================================================ */
+  .editor {
+    display:flex; flex-direction:column;
+    min-width:0; overflow:hidden;
+    background:var(--bg-editor);
   }
-  .panel-title {
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:15px;
-    color:var(--ink);
-  }
-  .panel-subtext {
-    font-size:12px;
-    color:var(--muted);
-    margin-top:3px;
-    margin-bottom:10px;
-  }
-  .var-list {
-    overflow-y:auto;
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-    min-height:0;
-  }
-  .var-row {
-    display:flex;
-    align-items:center;
-    gap:8px;
-  }
-  .var-name-chip {
-    font-family:var(--font-mono);
-    font-size:11.5px;
-    background:var(--accent-soft);
-    color:var(--accent-ink);
-    border-radius:6px;
-    padding:5px 8px;
+
+  .editor-head {
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:18px 28px 14px;
     flex:none;
-    max-width:108px;
+  }
+  .editor-title-wrap { display:flex; align-items:baseline; gap:12px; min-width:0; }
+  .editor-title { font-family:var(--font-display); font-weight:600; font-size:22px; color:var(--text); letter-spacing:-0.01em; }
+  .editor-sub { font-size:12px; color:var(--muted); font-family:var(--font-mono); }
+
+  .segmented { display:inline-flex; background:var(--surface-inset); border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; flex:none; }
+  .segmented button {
+    border:none; background:transparent; padding:6px 18px; border-radius:999px; cursor:pointer;
+    color:var(--muted); font-size:13px; font-weight:500;
+    transition:background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  }
+  .segmented button[aria-pressed="true"] {
+    background:linear-gradient(160deg, var(--amber-hi), var(--amber-deep));
+    color:#241a10; font-weight:600; box-shadow:0 2px 8px rgba(224,150,74,0.3);
+  }
+
+  /* 编辑区主体：占满剩余高度 */
+  .editor-main { flex:1; display:flex; flex-direction:column; min-height:0; padding:0 28px 20px; }
+
+  .editor-surface {
+    flex:1; display:flex; flex-direction:column; min-height:0;
+    border:1px solid var(--line); border-radius:var(--radius);
+    background:var(--surface-inset);
+    box-shadow:var(--shadow-card);
     overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
+    transition:border-color 0.15s ease;
   }
-  .var-name-chip.empty { background:var(--warn-soft); color:var(--warn); }
-  .var-value-input {
-    flex:1;
-    min-width:0;
-    border:1px solid var(--line);
-    border-radius:6px;
-    padding:6px 9px;
-    font-size:12.5px;
-  }
-  .var-value-input:focus { border-color:var(--accent); }
-  .var-empty-hint { font-size:12px; color:var(--faint); padding:6px 2px; }
+  .editor-surface:focus-within { border-color:var(--amber-deep); }
 
-  .output-panel {
-    flex:1;
-    display:flex;
-    flex-direction:column;
-    padding:18px 20px 20px;
-    min-height:0;
-    overflow-y:auto;
+  .editor-toolbar {
+    display:flex; align-items:center; gap:10px;
+    padding:9px 14px; border-bottom:1px solid var(--line-soft);
+    flex:none;
+    background:var(--surface);
   }
-  .lang-cards {
-    display:flex;
-    gap:10px;
-    margin-top:12px;
+  .editor-toolbar .et-label { font-family:var(--font-mono); font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--faint); }
+  .editor-toolbar .et-spacer { flex:1; }
+  .editor-toolbar .et-stat { font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .editor-toolbar .et-stat b { color:var(--text-soft); font-weight:600; }
+  .editor-toolbar .et-stat .et-bad { color:var(--warn); }
+  .seg-mini { display:inline-flex; background:var(--surface-inset); border:1px solid var(--line); border-radius:7px; padding:2px; gap:2px; }
+  .seg-mini button {
+    border:none; background:transparent; padding:3px 11px; border-radius:5px; cursor:pointer;
+    color:var(--muted); font-size:11.5px; font-weight:500; transition:background 0.14s, color 0.14s;
   }
-  .lang-card {
-    flex:1;
-    border:1.5px solid var(--line);
-    border-radius:var(--radius);
-    padding:12px 14px;
-    cursor:pointer;
-    background:#fff;
-    text-align:left;
-    position:relative;
-    transition:border-color 0.12s ease, background 0.12s ease;
-  }
-  .lang-card:hover { border-color:var(--accent); }
-  .lang-card.active {
-    border-color:var(--accent);
-    background:var(--accent-soft);
-  }
-  .lang-card .lc-name {
-    font-size:12.5px;
-    color:var(--muted);
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-  }
-  .lang-card.active .lc-name { color:var(--accent-ink); }
-  .lang-card .lc-tokens {
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:22px;
-    color:var(--ink);
-    margin-top:4px;
-  }
-  .lang-card .lc-current {
-    font-size:10.5px;
-    color:var(--accent-ink);
-    font-weight:600;
-  }
-  .save-badge {
-    display:inline-block;
-    margin-top:6px;
-    background:var(--save-soft);
-    color:var(--save);
-    font-size:10.5px;
-    font-weight:600;
-    padding:2px 7px;
-    border-radius:999px;
-  }
+  .seg-mini button[aria-pressed="true"] { background:var(--surface-hi); color:var(--amber); }
 
-  .preview-head {
-    display:flex;
-    align-items:baseline;
-    justify-content:space-between;
-    gap:10px;
-    margin-top:22px;
-    flex-wrap:wrap;
-  }
-  .preview-title {
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:14.5px;
-    color:var(--ink);
-  }
-  .preview-edit-hint {
-    font-size:11px;
-    color:var(--faint);
-  }
-
-  .preview-box {
-    margin-top:10px;
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    background:#fbfbfc;
-    padding:14px 16px;
+  /* 大文本编辑框：核心 */
+  .editor-textarea {
+    flex:1; width:100%; min-height:0; resize:none;
+    border:none; outline:none; background:transparent;
+    padding:22px 26px;
     font-family:var(--font-mono);
-    font-size:12.5px;
-    line-height:1.85;
-    color:var(--text);
-    white-space:pre-wrap;
-    word-break:break-word;
-    flex:1;
-    overflow-y:auto;
-    min-height:120px;
+    font-size:14px; line-height:1.85; color:var(--text);
+    tab-size:2;
   }
-  .preview-box .p-heading {
-    font-weight:700;
-    cursor:text;
-    border-radius:4px;
-    padding:1px 3px;
-    margin-left:-3px;
-  }
-  .preview-box .p-heading:hover { background:var(--accent-soft); }
-  .preview-box .p-body {
-    cursor:text;
-    border-radius:4px;
-    display:block;
-    padding:1px 3px;
-    margin-left:-3px;
-  }
-  .preview-box .p-body:hover { background:var(--line-soft); }
-  .preview-box .p-var {
-    display:inline-block;
-    background:var(--accent-soft);
-    color:var(--accent-ink);
-    border-radius:5px;
-    padding:0 5px;
-    cursor:pointer;
-  }
-  .preview-box .p-var:hover { background:#ddd9fb; }
-  .preview-box .p-var.unfilled {
-    background:var(--warn-soft);
-    color:var(--warn);
-  }
-  .preview-box .p-var.unfilled:hover { background:#f6d9d1; }
-  .preview-box .p-block { margin-bottom:14px; }
-  .preview-box .p-block:last-child { margin-bottom:0; }
-  .preview-inline-input {
-    font-family:var(--font-mono);
-    font-size:12.5px;
-    border:1px solid var(--accent);
-    border-radius:5px;
-    padding:0 5px;
-    min-width:60px;
-  }
-  .preview-inline-textarea {
-    width:100%;
-    font-family:var(--font-mono);
-    font-size:12.5px;
-    line-height:1.8;
-    border:1px solid var(--accent);
-    border-radius:6px;
-    padding:8px 10px;
-    resize:vertical;
-    min-height:70px;
-  }
-  .preview-inline-title-input {
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:12.5px;
-    border:1px solid var(--accent);
-    border-radius:5px;
-    padding:1px 4px;
-  }
+  .editor-textarea::placeholder { color:var(--faint); }
 
-  .preview-stats {
-    margin-top:10px;
-    font-size:12px;
-    color:var(--muted);
+  /* 预览层（替换变量后，只读渲染）— 与编辑框互斥显示 */
+  .editor-preview {
+    flex:1; width:100%; min-height:0; overflow-y:auto;
+    padding:22px 26px;
+    font-family:var(--font-mono); font-size:14px; line-height:1.85; color:var(--text-soft);
+    white-space:pre-wrap; word-break:break-word;
   }
-  .preview-stats .stat-bad { color:var(--warn); font-weight:600; }
+  .editor-preview .pv-h { color:var(--amber); font-weight:600; }
+  .editor-preview .pv-var {
+    display:inline-block; background:var(--amber-soft); color:var(--amber);
+    border:1px solid var(--amber-deep); border-radius:5px; padding:0 5px; cursor:pointer;
+    transition:background 0.1s ease;
+  }
+  .editor-preview .pv-var:hover { background:var(--amber-glow); }
+  .editor-preview .pv-var.unfilled { background:var(--warn-soft); color:var(--warn); border-color:var(--warn); }
+  .editor-preview-empty { color:var(--faint); }
 
-  .output-actions {
-    display:flex;
-    gap:10px;
-    margin-top:14px;
+  /* 底部：只有输出动作 */
+  .editor-foot { display:flex; align-items:center; gap:12px; padding:16px 28px 20px; flex:none; }
+  .foot-hint { font-size:11.5px; color:var(--faint); margin-right:auto; }
+  .foot-hint kbd {
+    font-family:var(--font-mono); font-size:10.5px;
+    background:var(--surface-hi); border:1px solid var(--line-hi); border-bottom-width:2px;
+    border-radius:5px; padding:1px 6px; color:var(--text-soft);
   }
   .btn {
-    flex:1;
-    border-radius:var(--radius);
-    padding:10px 14px;
-    font-size:13px;
-    font-weight:600;
-    cursor:pointer;
-    border:1px solid transparent;
-    transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    display:inline-flex; align-items:center; justify-content:center; gap:7px;
+    border-radius:var(--radius-sm); padding:11px 20px; font-size:13px; font-weight:600;
+    cursor:pointer; border:1px solid transparent;
+    transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.08s ease;
+    flex:none;
   }
-  .btn-primary { background:var(--accent); color:#fff; }
-  .btn-primary:hover { background:var(--accent-ink); }
-  .btn-outline { background:#fff; border-color:var(--line); color:var(--ink); }
-  .btn-outline:hover { border-color:var(--accent); color:var(--accent-ink); }
+  .btn svg { width:15px; height:15px; }
+  .btn:active { transform:translateY(1px); }
+  .btn-primary { background:linear-gradient(160deg, var(--amber-hi), var(--amber-deep)); color:#241a10; box-shadow:0 2px 10px rgba(224,150,74,0.28); }
+  .btn-primary:hover { background:linear-gradient(160deg, var(--amber-hi), var(--amber)); }
+  .btn-outline { background:var(--surface); border-color:var(--line-hi); color:var(--text-soft); }
+  .btn-outline:hover { border-color:var(--amber-deep); color:var(--text); }
 
-  /* ---------- Toast ---------- */
+  /* Toast */
   .toast {
-    position:fixed;
-    bottom:24px;
-    left:50%;
-    transform:translateX(-50%) translateY(8px);
-    background:var(--ink);
-    color:#fff;
-    padding:10px 18px;
-    border-radius:999px;
-    font-size:13px;
-    opacity:0;
-    pointer-events:none;
-    transition:opacity 0.18s ease, transform 0.18s ease;
-    z-index:999;
+    position:fixed; bottom:26px; left:calc(296px + (100vw - 296px) / 2);
+    transform:translateX(-50%) translateY(10px);
+    background:var(--surface-hi); border:1px solid var(--line-hi); color:var(--text);
+    padding:11px 20px; border-radius:999px; font-size:13px;
+    display:flex; align-items:center; gap:8px;
+    opacity:0; pointer-events:none; transition:opacity 0.2s ease, transform 0.2s ease;
+    z-index:999; box-shadow:0 8px 30px rgba(0,0,0,0.5);
   }
-  .toast.show {
-    opacity:1;
-    transform:translateX(-50%) translateY(0);
+  .toast::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ok); flex:none; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.err::before { background:var(--warn); }
+
+  @media (max-width: 860px) {
+    body { grid-template-columns:1fr; grid-auto-rows:auto; height:auto; min-height:100vh; overflow:auto; }
+    .rail, .editor { overflow:visible; }
+    .rail-scroll { overflow:visible; }
+    .editor-main { min-height:60vh; }
+    .toast { left:50%; }
   }
 
-  /* ---------- 响应式 ---------- */
-  @media (max-width: 899px) {
-    body {
-      grid-template-columns:1fr;
-      grid-auto-rows:auto;
-      height:auto;
-      min-height:100vh;
-      overflow:auto;
-    }
-    .rail, .assembly, .inspector { overflow:visible; }
-    .var-panel { max-height:none; }
-    .inspector { border-left:none; border-top:1px solid var(--line); }
-  }
-
-  /* ---------- 滚动条细节 ---------- */
-  .rail::-webkit-scrollbar, .assembly::-webkit-scrollbar, .var-list::-webkit-scrollbar,
-  .output-panel::-webkit-scrollbar, .preview-box::-webkit-scrollbar { width:8px; }
-  .rail::-webkit-scrollbar-thumb { background:#2a3644; border-radius:4px; }
-  .assembly::-webkit-scrollbar-thumb, .var-list::-webkit-scrollbar-thumb,
-  .output-panel::-webkit-scrollbar-thumb, .preview-box::-webkit-scrollbar-thumb { background:#d3d6db; border-radius:4px; }
+  ::-webkit-scrollbar { width:9px; height:9px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--line-hi); border-radius:5px; border:2px solid transparent; background-clip:padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--muted); background-clip:padding-box; }
 </style>
 </head>
 <body>
 
-  <!-- ========== 左栏：模块库 ========== -->
+  <!-- ========== 左栏：辅助栏 ========== -->
   <aside class="rail">
-    <div class="brand">
-      <span class="brand-name">Composer</span>
-      <span class="brand-dot" aria-hidden="true"></span>
+    <div class="rail-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span class="brand-text">
+          <span class="brand-name">Composer</span>
+          <span class="brand-tagline">Prompt Editor</span>
+        </span>
+      </div>
     </div>
-    <div class="rail-tagline">模块化提示词构建工具</div>
 
-    <div class="rail-section-title">添加模块</div>
-    <div class="module-lib" id="moduleLib" role="list"></div>
+    <div class="rail-scroll">
+      <div class="rail-section">
+        <div class="rail-section-title">插入模块</div>
+        <div class="insert-grid" id="insertGrid" role="list"></div>
+      </div>
 
-    <div class="rail-bottom">
-      <button class="btn-ghost-rail" id="btnLoadDemo" type="button">载入示例</button>
-      <button class="btn-ghost-rail" id="btnClearAll" type="button">全部清空</button>
+      <div class="rail-section">
+        <div class="rail-section-title">
+          变量
+          <span class="rst-count" id="varCount"></span>
+        </div>
+        <div class="var-list" id="varList"></div>
+      </div>
+
+      <div class="rail-section">
+        <div class="rail-section-title">常用句</div>
+        <div class="snippet-wrap" id="snippetWrap"></div>
+      </div>
+    </div>
+
+    <div class="rail-foot">
+      <button class="btn-ghost-rail" id="btnLoadDemo" type="button"><span class="bg-ico">◇</span>载入示例</button>
+      <button class="btn-ghost-rail danger" id="btnClearAll" type="button"><span class="bg-ico">⌫</span>清空正文</button>
     </div>
   </aside>
 
-  <!-- ========== 中栏：装配区 ========== -->
-  <main class="assembly">
-    <div class="assembly-head">
-      <div class="assembly-title">装配区</div>
+  <!-- ========== 右栏：主写作编辑器 ========== -->
+  <main class="editor">
+    <div class="editor-head">
+      <div class="editor-title-wrap">
+        <span class="editor-title">Composer</span>
+        <span class="editor-sub" id="editorSub"></span>
+      </div>
       <div class="segmented" id="langSegmented" role="group" aria-label="切换语言">
         <button type="button" data-lang="zh" aria-pressed="true">中文</button>
         <button type="button" data-lang="en" aria-pressed="false">English</button>
       </div>
     </div>
-    <div class="assembly-hint">
-      切换语言可分别编辑中英两版内容。变量名共用，值按语言分别填写。在任意位置输入 <span class="var-chip-inline">{{名称}}</span> 即可创建变量。
+
+    <div class="editor-main">
+      <div class="editor-surface">
+        <div class="editor-toolbar">
+          <span class="et-label" id="etLabel">中文正文</span>
+          <div class="seg-mini" id="viewSeg" role="group" aria-label="编辑或预览">
+            <button type="button" data-view="write" aria-pressed="true">编辑</button>
+            <button type="button" data-view="preview" aria-pressed="false">预览</button>
+          </div>
+          <span class="et-spacer"></span>
+          <span class="et-stat" id="editorStat"></span>
+        </div>
+
+        <textarea class="editor-textarea" id="editorTextarea" spellcheck="false"
+          placeholder="在此直接书写你的提示词全文…&#10;&#10;用 ## 标题 组织段落，用 {{变量}} 占位——变量会自动出现在左侧供你填值。&#10;不知从何下手？点左下角「载入示例」。"></textarea>
+
+        <div class="editor-preview" id="editorPreview" hidden></div>
+      </div>
     </div>
 
-    <div class="module-list" id="moduleList"></div>
-    <div class="empty-state" id="emptyState" hidden>
-      <div class="line1">还没有装配任何内容</div>
-      <div class="line2">从左侧添加一个模块开始构建</div>
+    <div class="editor-foot">
+      <span class="foot-hint">
+        <kbd>Ctrl</kbd> <kbd>C</kbd> 复制 · <kbd>Ctrl</kbd> <kbd>S</kbd> 下载 · <kbd>Ctrl</kbd> <kbd>L</kbd> 切换语言 · <kbd>Ctrl</kbd> <kbd>P</kbd> 预览
+      </span>
+      <button class="btn btn-outline" id="btnCopy" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        复制
+      </button>
+      <button class="btn btn-primary" id="btnDownload" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载 .md
+      </button>
     </div>
   </main>
-
-  <!-- ========== 右栏：检视面板 ========== -->
-  <aside class="inspector">
-    <section class="var-panel">
-      <div class="panel-title">变量</div>
-      <div class="panel-subtext" id="varSubtext">当前编辑：中文的变量值</div>
-      <div class="var-list" id="varList"></div>
-    </section>
-
-    <section class="output-panel">
-      <div class="panel-title">输出语言与 Token 估算</div>
-      <div class="lang-cards" id="langCards">
-        <button type="button" class="lang-card" data-lang="zh" id="cardZh">
-          <div class="lc-name"><span>中文</span></div>
-          <div class="lc-tokens" id="tokensZh">~0 tokens</div>
-        </button>
-        <button type="button" class="lang-card" data-lang="en" id="cardEn">
-          <div class="lc-name"><span>English</span></div>
-          <div class="lc-tokens" id="tokensEn">~0 tokens</div>
-        </button>
-      </div>
-
-      <div class="preview-head">
-        <div class="preview-title" id="previewTitle">编译后的提示词 · 中文</div>
-        <div class="preview-edit-hint">点击标题、正文或变量即可直接编辑</div>
-      </div>
-      <div class="preview-box" id="previewBox"></div>
-      <div class="preview-stats" id="previewStats"></div>
-
-      <div class="output-actions">
-        <button class="btn btn-outline" id="btnCopy" type="button">复制</button>
-        <button class="btn btn-primary" id="btnDownload" type="button">下载 .md</button>
-      </div>
-    </section>
-  </aside>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -731,109 +421,41 @@
   'use strict';
 
   /* ============================================================
-   * 0. Tauri API 安全获取（浏览器中预览时降级为空实现）
+   * 0. Tauri API 安全获取（浏览器中预览时降级）
    * ============================================================ */
   var TAURI = window.__TAURI__ || null;
   var fsApi = TAURI && TAURI.fs;
   var dialogApi = TAURI && TAURI.dialog;
   var clipboardApi = TAURI && TAURI.clipboardManager;
-  var pathApi = TAURI && TAURI.path;
 
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
   var STATE_FILE = 'composer-state.json';
-
   function tauriAvailable() { return !!(TAURI && fsApi && BaseDirectory); }
 
   /* ============================================================
-   * 1. 模块预设 / 常用句预设 / 演示数据
+   * 1. 预设：可插入的模块片段 / 常用句 / 示例正文
    * ============================================================ */
-
-  var MODULE_PRESETS = [
-    {
-      key: 'role',
-      label: { zh: '角色', en: 'Role' },
-      content: {
-        zh: '你是{{角色}}，擅长{{领域}}。',
-        en: 'You are {{角色}}, skilled in {{领域}}.'
-      }
-    },
-    {
-      key: 'scenario',
-      label: { zh: '场景', en: 'Scenario' },
-      content: {
-        zh: '使用场景：{{场景}}。目标用户是{{用户}}。',
-        en: 'Scenario: {{场景}}. Target users are {{用户}}.'
-      }
-    },
-    {
-      key: 'problem',
-      label: { zh: '问题', en: 'Problem' },
-      content: {
-        zh: '当前遇到的问题：{{问题}}。',
-        en: 'The current problem: {{问题}}.'
-      }
-    },
-    {
-      key: 'outcome',
-      label: { zh: '需求效果', en: 'Desired outcome' },
-      content: {
-        zh: '期望达成的效果：{{需求效果}}。',
-        en: 'Desired outcome: {{需求效果}}.'
-      }
-    },
-    {
-      key: 'solution',
-      label: { zh: '解决方案', en: 'Solution' },
-      content: {
-        zh: '建议的解决方案：{{解决方案}}。',
-        en: 'Proposed solution: {{解决方案}}.'
-      }
-    },
-    {
-      key: 'rules',
-      label: { zh: '规则', en: 'Rules' },
-      content: {
-        zh: '- 始终{{必须做}}\n- 绝不{{禁止做}}',
-        en: '- Always {{必须做}}\n- Never {{禁止做}}'
-      }
-    },
-    {
-      key: 'workflow',
-      label: { zh: '工作流程', en: 'Workflow' },
-      content: {
-        zh: '1. {{步骤一}}\n2. {{步骤二}}\n3. {{步骤三}}',
-        en: '1. {{步骤一}}\n2. {{步骤二}}\n3. {{步骤三}}'
-      }
-    },
-    {
-      key: 'format',
-      label: { zh: '输出格式', en: 'Output format' },
-      content: {
-        zh: '以{{格式}}形式输出。',
-        en: 'Output in {{格式}}.'
-      }
-    },
-    {
-      key: 'examples',
-      label: { zh: '示例', en: 'Examples' },
-      content: {
-        zh: '输入：{{示例输入}}\n输出：{{示例输出}}',
-        en: 'Input: {{示例输入}}\nOutput: {{示例输出}}'
-      }
-    },
-    {
-      key: 'constraints',
-      label: { zh: '约束', en: 'Constraints' },
-      content: {
-        zh: '不要{{约束}}。',
-        en: 'Do not {{约束}}.'
-      }
-    },
-    {
-      key: 'custom',
-      label: { zh: '自定义块', en: 'Custom block' },
-      content: { zh: '', en: '' }
-    }
+  var INSERT_MODULES = [
+    { label: { zh: '角色', en: 'Role' },
+      text: { zh: '## 角色\n你是{{角色}}，擅长{{领域}}。', en: '## Role\nYou are {{角色}}, skilled in {{领域}}.' } },
+    { label: { zh: '场景', en: 'Scenario' },
+      text: { zh: '## 场景\n使用场景：{{场景}}。目标用户是{{用户}}。', en: '## Scenario\nScenario: {{场景}}. Target users are {{用户}}.' } },
+    { label: { zh: '问题', en: 'Problem' },
+      text: { zh: '## 问题\n当前遇到的问题：{{问题}}。', en: '## Problem\nThe current problem: {{问题}}.' } },
+    { label: { zh: '需求效果', en: 'Outcome' },
+      text: { zh: '## 需求效果\n期望达成的效果：{{需求效果}}。', en: '## Desired outcome\nDesired outcome: {{需求效果}}.' } },
+    { label: { zh: '解决方案', en: 'Solution' },
+      text: { zh: '## 解决方案\n建议的解决方案：{{解决方案}}。', en: '## Solution\nProposed solution: {{解决方案}}.' } },
+    { label: { zh: '规则', en: 'Rules' },
+      text: { zh: '## 规则\n- 始终{{必须做}}\n- 绝不{{禁止做}}', en: '## Rules\n- Always {{必须做}}\n- Never {{禁止做}}' } },
+    { label: { zh: '工作流程', en: 'Workflow' },
+      text: { zh: '## 工作流程\n1. {{步骤一}}\n2. {{步骤二}}\n3. {{步骤三}}', en: '## Workflow\n1. {{步骤一}}\n2. {{步骤二}}\n3. {{步骤三}}' } },
+    { label: { zh: '输出格式', en: 'Format' },
+      text: { zh: '## 输出格式\n以{{格式}}形式输出。', en: '## Output format\nOutput in {{格式}}.' } },
+    { label: { zh: '示例', en: 'Examples' },
+      text: { zh: '## 示例\n输入：{{示例输入}}\n输出：{{示例输出}}', en: '## Examples\nInput: {{示例输入}}\nOutput: {{示例输出}}' } },
+    { label: { zh: '约束', en: 'Constraints' },
+      text: { zh: '## 约束\n不要{{约束}}。', en: '## Constraints\nDo not {{约束}}.' } }
   ];
 
   var BUILTIN_SNIPPETS = [
@@ -849,73 +471,19 @@
     { tag: '限制字数', zh: '请将回答控制在 200 字以内。', en: 'Limit the response to about 200 words.', builtin: true }
   ];
 
-  function uid() {
-    return 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-  }
-
-  function makeModuleFromPreset(preset) {
+  function demoContent() {
     return {
-      id: uid(),
-      enabled: true,
-      label: { zh: preset.label.zh, en: preset.label.en },
-      content: { zh: preset.content.zh, en: preset.content.en }
+      zh: '## 角色\n你是{{角色}}，擅长{{领域}}。你服务的对象是{{用户}}。\n\n## 场景\n使用场景：{{场景}}。\n\n## 需求效果\n期望达成的效果：{{需求效果}}。\n\n## 解决方案\n请围绕以下方向给出方案：{{解决方案}}。\n\n## 输出格式\n以{{格式}}输出，并附上{{附加要求}}。',
+      en: '## Role\nYou are {{角色}}, skilled in {{领域}}. You serve {{用户}}.\n\n## Scenario\nScenario: {{场景}}.\n\n## Desired outcome\nDesired outcome: {{需求效果}}.\n\n## Solution\nPropose a solution along these lines: {{解决方案}}.\n\n## Output format\nOutput in {{格式}}, and include {{附加要求}}.'
     };
   }
 
-  function buildDemoModules() {
-    var defs = [
-      {
-        key: 'role',
-        content: {
-          zh: '你是{{角色}}，擅长{{领域}}。你服务的对象是{{用户}}。',
-          en: 'You are {{角色}}, skilled in {{领域}}. You serve {{用户}}.'
-        }
-      },
-      {
-        key: 'scenario',
-        content: { zh: '使用场景：{{场景}}。', en: 'Scenario: {{场景}}.' }
-      },
-      {
-        key: 'problem',
-        content: { zh: '当前遇到的问题：{{问题}}。', en: 'The current problem: {{问题}}.' }
-      },
-      {
-        key: 'outcome',
-        content: { zh: '期望达成的效果：{{需求效果}}。', en: 'Desired outcome: {{需求效果}}.' }
-      },
-      {
-        key: 'solution',
-        content: {
-          zh: '请围绕以下方向给出方案：{{解决方案}}。',
-          en: 'Propose a solution along these lines: {{解决方案}}.'
-        }
-      },
-      {
-        key: 'format',
-        content: {
-          zh: '以{{格式}}输出，并附上{{附加要求}}。',
-          en: 'Output in {{格式}}, and include {{附加要求}}.'
-        }
-      }
-    ];
-    return defs.map(function (d) {
-      var preset = MODULE_PRESETS.filter(function (p) { return p.key === d.key; })[0];
-      return {
-        id: uid(),
-        enabled: true,
-        label: { zh: preset.label.zh, en: preset.label.en },
-        content: { zh: d.content.zh, en: d.content.en }
-      };
-    });
-  }
-
-  function buildDemoValues() {
+  function demoValues() {
     return {
       '角色': { zh: '一名资深全栈工程师', en: 'a senior full-stack engineer' },
       '领域': { zh: 'Web 产品开发与代码审查', en: 'web product development and code review' },
       '用户': { zh: '产品团队的开发者', en: 'developers on the product team' },
       '场景': { zh: '在现有 SaaS 产品中新增一个功能模块', en: 'adding a new feature module to an existing SaaS product' },
-      '问题': { zh: '', en: '' },
       '需求效果': { zh: '', en: '' },
       '解决方案': { zh: '技术选型、接口设计、关键实现步骤', en: 'tech stack choice, API design, key implementation steps' },
       '格式': { zh: 'Markdown', en: 'Markdown' },
@@ -924,20 +492,15 @@
   }
 
   function defaultState() {
-    return {
-      lang: 'zh',
-      modules: buildDemoModules(),
-      values: buildDemoValues(),
-      customSnippets: []
-    };
+    return { lang: 'zh', content: demoContent(), values: demoValues(), customSnippets: [] };
   }
 
   /* ============================================================
-   * 2. 应用状态
+   * 2. 状态 + 持久化
    * ============================================================ */
   var state = defaultState();
+  var view = 'write'; // 'write' | 'preview'
   var saveTimer = null;
-  var restored = false;
 
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
@@ -946,7 +509,6 @@
 
   var appDataEnsured = false;
   function ensureAppDataDir() {
-    // 首次写入前确保 AppData 目录存在（目录已存在时 recursive 静默通过）。
     if (appDataEnsured || !fsApi.mkdir) return Promise.resolve();
     return fsApi.mkdir('.', { baseDir: BaseDirectory.AppData, recursive: true })
       .then(function () { appDataEnsured = true; })
@@ -962,11 +524,7 @@
   }
 
   function restoreState() {
-    if (!tauriAvailable()) {
-      restored = true;
-      renderAll();
-      return;
-    }
+    if (!tauriAvailable()) { renderAll(); return; }
     fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
       .then(function (exists) {
         if (!exists) throw new Error('no-state-file');
@@ -974,32 +532,38 @@
       })
       .then(function (text) {
         var parsed = JSON.parse(text);
-        if (parsed && typeof parsed === 'object') {
-          state = normalizeState(parsed);
-        }
+        if (parsed && typeof parsed === 'object') state = normalizeState(parsed);
       })
-      .catch(function () {
-        state = defaultState();
+      .catch(function () { state = defaultState(); })
+      .then(function () { renderAll(); });
+  }
+
+  // 兼容旧存档：旧版是 modules 数组，编译成一份大文本。
+  function modulesToText(modules, lang) {
+    if (!Array.isArray(modules)) return '';
+    return modules
+      .filter(function (m) { return m && m.enabled !== false; })
+      .map(function (m) {
+        var label = (m.label && (m.label[lang] || m.label.zh || m.label.en)) || '';
+        var body = (m.content && (m.content[lang] || '')) || '';
+        return '## ' + label + '\n' + body;
       })
-      .then(function () {
-        restored = true;
-        renderAll();
-      });
+      .join('\n\n');
   }
 
   function normalizeState(raw) {
     var s = defaultState();
     s.lang = (raw.lang === 'en') ? 'en' : 'zh';
-    if (Array.isArray(raw.modules)) {
-      s.modules = raw.modules.map(function (m) {
-        return {
-          id: m.id || uid(),
-          enabled: m.enabled !== false,
-          label: { zh: (m.label && m.label.zh) || '', en: (m.label && m.label.en) || '' },
-          content: { zh: (m.content && m.content.zh) || '', en: (m.content && m.content.en) || '' }
-        };
-      });
+
+    if (raw.content && typeof raw.content === 'object' &&
+        (typeof raw.content.zh === 'string' || typeof raw.content.en === 'string')) {
+      // 新格式
+      s.content = { zh: raw.content.zh || '', en: raw.content.en || '' };
+    } else if (Array.isArray(raw.modules)) {
+      // 旧格式迁移
+      s.content = { zh: modulesToText(raw.modules, 'zh'), en: modulesToText(raw.modules, 'en') };
     }
+
     if (raw.values && typeof raw.values === 'object') {
       s.values = {};
       Object.keys(raw.values).forEach(function (k) {
@@ -1008,406 +572,155 @@
       });
     }
     if (Array.isArray(raw.customSnippets)) {
-      s.customSnippets = raw.customSnippets.filter(function (sn) {
-        return sn && typeof sn.tag === 'string';
-      });
+      s.customSnippets = raw.customSnippets.filter(function (sn) { return sn && typeof sn.tag === 'string'; });
     }
     return s;
   }
 
   /* ============================================================
-   * 3. 变量提取 / 编译 / Token 估算
+   * 3. 变量 / 编译 / token
    * ============================================================ */
   var VAR_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
   function extractVarNames(text) {
-    var names = [];
-    var seen = {};
-    var m;
+    var names = [], seen = {}, m;
     VAR_RE.lastIndex = 0;
     while ((m = VAR_RE.exec(text || '')) !== null) {
-      var name = m[1];
-      if (!seen[name]) {
-        seen[name] = true;
-        names.push(name);
-      }
+      if (!seen[m[1]]) { seen[m[1]] = true; names.push(m[1]); }
     }
     return names;
   }
 
-  function collectAllVarNames() {
-    var names = [];
-    var seen = {};
-    state.modules.forEach(function (mod) {
-      ['zh', 'en'].forEach(function (lang) {
-        extractVarNames(mod.content[lang]).forEach(function (n) {
-          if (!seen[n]) { seen[n] = true; names.push(n); }
-        });
-      });
-    });
-    return names;
-  }
+  // 只收集“当前语言正文”里出现的变量（编辑器所见即所得）
+  function currentVarNames() { return extractVarNames(state.content[state.lang]); }
 
   function ensureValueEntry(name) {
-    if (!state.values[name]) {
-      state.values[name] = { zh: '', en: '' };
-    }
+    if (!state.values[name]) state.values[name] = { zh: '', en: '' };
     return state.values[name];
   }
+  function syncValues() { currentVarNames().forEach(ensureValueEntry); }
 
-  function syncValuesWithVars() {
-    var names = collectAllVarNames();
-    names.forEach(ensureValueEntry);
-  }
-
-  function compilePrompt(lang) {
-    var blocks = state.modules.filter(function (m) { return m.enabled; });
-    var parts = blocks.map(function (mod) {
-      var label = mod.label[lang] || mod.label.zh || mod.label.en || '';
-      var content = mod.content[lang] || '';
-      var substituted = content.replace(VAR_RE, function (full, name) {
-        var entry = state.values[name];
-        var val = entry ? entry[lang] : '';
-        return val ? val : full;
-      });
-      return '## ' + label + '\n' + substituted;
+  function compile(lang) {
+    var text = state.content[lang] || '';
+    return text.replace(VAR_RE, function (full, name) {
+      var entry = state.values[name];
+      var val = entry ? entry[lang] : '';
+      return val ? val : full;
     });
-    return parts.join('\n\n');
   }
 
   function estimateTokens(text) {
-    // 启发式估算：CJK 字符按 1.6 计，其余字符按每 4 字符 1 累计；仅供参考。
     if (!text) return 0;
-    var cjkCount = 0;
-    var otherCount = 0;
+    var cjk = 0, other = 0;
     for (var i = 0; i < text.length; i++) {
       var code = text.codePointAt(i);
-      var isCjk = (code >= 0x3000 && code <= 0x303f) ||
-                  (code >= 0x3400 && code <= 0x9fff) ||
-                  (code >= 0xff00 && code <= 0xffef);
-      if (isCjk) cjkCount++;
-      else otherCount++;
+      var isCjk = (code >= 0x3000 && code <= 0x303f) || (code >= 0x3400 && code <= 0x9fff) || (code >= 0xff00 && code <= 0xffef);
+      if (isCjk) cjk++; else other++;
     }
-    var tokens = cjkCount * 1.6 + otherCount / 4;
-    return Math.round(tokens);
+    return Math.round(cjk * 1.6 + other / 4);
   }
 
   /* ============================================================
-   * 4. DOM 引用
+   * 4. DOM
    * ============================================================ */
-  var $moduleLib = document.getElementById('moduleLib');
-  var $moduleList = document.getElementById('moduleList');
-  var $emptyState = document.getElementById('emptyState');
-  var $langSegmented = document.getElementById('langSegmented');
+  var $insertGrid = document.getElementById('insertGrid');
   var $varList = document.getElementById('varList');
-  var $varSubtext = document.getElementById('varSubtext');
-  var $tokensZh = document.getElementById('tokensZh');
-  var $tokensEn = document.getElementById('tokensEn');
-  var $cardZh = document.getElementById('cardZh');
-  var $cardEn = document.getElementById('cardEn');
-  var $previewTitle = document.getElementById('previewTitle');
-  var $previewBox = document.getElementById('previewBox');
-  var $previewStats = document.getElementById('previewStats');
+  var $varCount = document.getElementById('varCount');
+  var $snippetWrap = document.getElementById('snippetWrap');
+  var $langSegmented = document.getElementById('langSegmented');
+  var $viewSeg = document.getElementById('viewSeg');
+  var $etLabel = document.getElementById('etLabel');
+  var $editorSub = document.getElementById('editorSub');
+  var $editorStat = document.getElementById('editorStat');
+  var $textarea = document.getElementById('editorTextarea');
+  var $preview = document.getElementById('editorPreview');
   var $btnCopy = document.getElementById('btnCopy');
   var $btnDownload = document.getElementById('btnDownload');
   var $btnLoadDemo = document.getElementById('btnLoadDemo');
   var $btnClearAll = document.getElementById('btnClearAll');
   var $toast = document.getElementById('toast');
 
-  var LABEL_ZH = { zh: '中文', en: 'English' };
-
   /* ============================================================
    * 5. Toast
    * ============================================================ */
   var toastTimer = null;
-  function showToast(msg) {
+  function showToast(msg, isErr) {
     $toast.textContent = msg;
+    $toast.classList.toggle('err', !!isErr);
     $toast.classList.add('show');
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { $toast.classList.remove('show'); }, 1800);
   }
 
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   /* ============================================================
-   * 6. 渲染：模块库（左栏）
+   * 6. 在光标处插入文本（编辑器核心交互）
    * ============================================================ */
-  function renderModuleLib() {
-    $moduleLib.innerHTML = '';
-    MODULE_PRESETS.forEach(function (preset) {
+  function insertAtCursor(snippet) {
+    var el = $textarea;
+    var value = el.value;
+    var focused = document.activeElement === el;
+    var start = focused ? el.selectionStart : value.length;
+    var end = focused ? el.selectionEnd : value.length;
+
+    var before = value.slice(0, start);
+    // 段落型（含换行/以 ## 开头）前后补空行；短句只在需要时补一个换行
+    var isBlock = snippet.indexOf('\n') !== -1 || snippet.slice(0, 2) === '##';
+    var pre = '';
+    if (before.length > 0) {
+      if (isBlock) pre = before.endsWith('\n\n') ? '' : (before.endsWith('\n') ? '\n' : '\n\n');
+      else pre = before.endsWith('\n') ? '' : '\n';
+    }
+    var insertText = pre + snippet;
+    el.value = before + insertText + value.slice(end);
+
+    var caret = before.length + insertText.length;
+    el.focus();
+    el.setSelectionRange(caret, caret);
+
+    onEditorChanged();
+  }
+
+  /* ============================================================
+   * 7. 渲染：左栏
+   * ============================================================ */
+  function renderInsertGrid() {
+    $insertGrid.innerHTML = '';
+    INSERT_MODULES.forEach(function (mod) {
       var pill = document.createElement('button');
       pill.type = 'button';
-      pill.className = 'lib-pill';
+      pill.className = 'insert-pill';
       pill.setAttribute('role', 'listitem');
-      pill.innerHTML = '<span class="plus">＋</span><span>' + escapeHtml(preset.label.zh) + '</span>';
-      pill.addEventListener('click', function () {
-        state.modules.push(makeModuleFromPreset(preset));
-        syncValuesWithVars();
-        renderAll();
-        scheduleSave();
-      });
-      $moduleLib.appendChild(pill);
+      pill.title = '插入到光标处';
+      pill.innerHTML = '<span class="ip-plus">+</span><span>' + escapeHtml(mod.label[state.lang]) + '</span>';
+      pill.addEventListener('click', function () { insertAtCursor(mod.text[state.lang]); });
+      $insertGrid.appendChild(pill);
     });
   }
 
-  /* ============================================================
-   * 7. 渲染：模块卡片列表（中栏）
-   * ============================================================ */
-  function allSnippets() {
-    return BUILTIN_SNIPPETS.concat(state.customSnippets);
-  }
-
-  function renderModuleList() {
-    $moduleList.innerHTML = '';
-    if (state.modules.length === 0) {
-      $emptyState.hidden = false;
-      $moduleList.hidden = true;
-      return;
-    }
-    $emptyState.hidden = true;
-    $moduleList.hidden = false;
-
-    state.modules.forEach(function (mod, idx) {
-      $moduleList.appendChild(renderModuleCard(mod, idx));
-    });
-  }
-
-  function renderModuleCard(mod, idx) {
-    var lang = state.lang;
-    var card = document.createElement('div');
-    card.className = 'module-card' + (mod.enabled ? '' : ' disabled');
-    card.dataset.id = mod.id;
-
-    // ---- head ----
-    var head = document.createElement('div');
-    head.className = 'card-head';
-
-    var handle = document.createElement('span');
-    handle.className = 'drag-handle';
-    handle.setAttribute('aria-hidden', 'true');
-    handle.textContent = '⠿';
-    head.appendChild(handle);
-
-    var titleInput = document.createElement('input');
-    titleInput.type = 'text';
-    titleInput.className = 'card-title-input';
-    titleInput.value = mod.label[lang] || '';
-    titleInput.setAttribute('aria-label', '模块标题');
-    titleInput.addEventListener('input', function () {
-      mod.label[lang] = titleInput.value;
-      renderPreview();
-      scheduleSave();
-    });
-    head.appendChild(titleInput);
-
-    var actions = document.createElement('div');
-    actions.className = 'card-actions';
-
-    var upBtn = document.createElement('button');
-    upBtn.type = 'button';
-    upBtn.className = 'icon-btn';
-    upBtn.setAttribute('aria-label', '上移模块');
-    upBtn.textContent = '↑';
-    upBtn.disabled = idx === 0;
-    upBtn.addEventListener('click', function () {
-      moveModule(idx, -1);
-    });
-    actions.appendChild(upBtn);
-
-    var downBtn = document.createElement('button');
-    downBtn.type = 'button';
-    downBtn.className = 'icon-btn';
-    downBtn.setAttribute('aria-label', '下移模块');
-    downBtn.textContent = '↓';
-    downBtn.disabled = idx === state.modules.length - 1;
-    downBtn.addEventListener('click', function () {
-      moveModule(idx, 1);
-    });
-    actions.appendChild(downBtn);
-
-    var delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'icon-btn danger';
-    delBtn.setAttribute('aria-label', '删除模块');
-    delBtn.textContent = '✕';
-    delBtn.addEventListener('click', function () {
-      state.modules.splice(idx, 1);
-      renderAll();
-      scheduleSave();
-    });
-    actions.appendChild(delBtn);
-
-    var switchBtn = document.createElement('button');
-    switchBtn.type = 'button';
-    switchBtn.className = 'switch';
-    switchBtn.setAttribute('role', 'switch');
-    switchBtn.setAttribute('aria-pressed', mod.enabled ? 'true' : 'false');
-    switchBtn.setAttribute('aria-label', '启用模块');
-    switchBtn.addEventListener('click', function () {
-      mod.enabled = !mod.enabled;
-      renderAll();
-      scheduleSave();
-    });
-    actions.appendChild(switchBtn);
-
-    head.appendChild(actions);
-    card.appendChild(head);
-
-    // ---- body ----
-    var body = document.createElement('div');
-    body.className = 'card-body';
-
-    var contentLabel = document.createElement('div');
-    contentLabel.className = 'content-label';
-    contentLabel.textContent = (lang === 'zh' ? '中文内容' : 'English内容');
-    body.appendChild(contentLabel);
-
-    var textarea = document.createElement('textarea');
-    textarea.className = 'card-textarea';
-    textarea.placeholder = '可使用 {{变量}}';
-    textarea.value = mod.content[lang] || '';
-    textarea.addEventListener('input', function () {
-      mod.content[lang] = textarea.value;
-      syncValuesWithVars();
-      renderVarList();
-      renderPreview();
-      scheduleSave();
-    });
-    body.appendChild(textarea);
-
-    // ---- snippet row ----
-    var snippetRow = document.createElement('div');
-    snippetRow.className = 'snippet-row';
-
-    var snippetLabel = document.createElement('span');
-    snippetLabel.className = 'snippet-label';
-    snippetLabel.textContent = '常用句';
-    snippetRow.appendChild(snippetLabel);
-
-    allSnippets().forEach(function (snip) {
-      var pill = document.createElement('span');
-      pill.className = 'snippet-pill';
-      pill.title = snip[lang] || snip.zh || snip.en;
-      var tagSpan = document.createElement('span');
-      tagSpan.textContent = snip.tag;
-      pill.appendChild(tagSpan);
-      pill.addEventListener('click', function (e) {
-        if (e.target.classList.contains('remove-x')) return;
-        insertSnippet(textarea, snip[lang] || snip.zh || snip.en);
-        mod.content[lang] = textarea.value;
-        syncValuesWithVars();
-        renderVarList();
-        renderPreview();
-        scheduleSave();
-      });
-      if (!snip.builtin) {
-        var removeX = document.createElement('span');
-        removeX.className = 'remove-x';
-        removeX.textContent = '×';
-        removeX.setAttribute('role', 'button');
-        removeX.setAttribute('aria-label', '删除自定义常用句 ' + snip.tag);
-        removeX.addEventListener('click', function (e) {
-          e.stopPropagation();
-          var i = state.customSnippets.indexOf(snip);
-          if (i >= 0) state.customSnippets.splice(i, 1);
-          renderModuleList();
-          scheduleSave();
-        });
-        pill.appendChild(removeX);
-      }
-      snippetRow.appendChild(pill);
-    });
-
-    var addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'snippet-add';
-    addBtn.setAttribute('aria-label', '添加自定义常用句');
-    addBtn.textContent = '＋';
-    addBtn.addEventListener('click', function () {
-      openSnippetAddInput(snippetRow, addBtn);
-    });
-    snippetRow.appendChild(addBtn);
-
-    body.appendChild(snippetRow);
-    card.appendChild(body);
-
-    return card;
-  }
-
-  function insertSnippet(textarea, sentence) {
-    var hasFocus = document.activeElement === textarea;
-    var value = textarea.value;
-    if (hasFocus) {
-      var start = textarea.selectionStart;
-      var end = textarea.selectionEnd;
-      var before = value.slice(0, start);
-      var needsNewline = before.length > 0 && !before.endsWith('\n');
-      var insertText = (needsNewline ? '\n' : '') + sentence;
-      var newValue = before + insertText + value.slice(end);
-      textarea.value = newValue;
-      var caret = before.length + insertText.length;
-      textarea.focus();
-      textarea.setSelectionRange(caret, caret);
-    } else {
-      var needsNl = value.length > 0 && !value.endsWith('\n');
-      textarea.value = value + (needsNl ? '\n' : '') + sentence;
-    }
-  }
-
-  function openSnippetAddInput(row, addBtn) {
-    if (row.querySelector('.snippet-add-input')) return;
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'snippet-add-input';
-    input.placeholder = '输入常用句，回车保存';
-    row.insertBefore(input, addBtn);
-    input.focus();
-
-    function commit() {
-      var text = input.value.trim();
-      if (text) {
-        var tag = text.length > 8 ? (text.slice(0, 8) + '…') : text;
-        state.customSnippets.push({ tag: tag, zh: text, en: text, builtin: false });
-        renderModuleList();
-        scheduleSave();
-      } else {
-        input.remove();
-      }
-    }
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        input.remove();
-      }
-    });
-    input.addEventListener('blur', function () {
-      setTimeout(commit, 0);
-    });
-  }
-
-  function moveModule(idx, delta) {
-    var newIdx = idx + delta;
-    if (newIdx < 0 || newIdx >= state.modules.length) return;
-    var arr = state.modules;
-    var tmp = arr[idx];
-    arr[idx] = arr[newIdx];
-    arr[newIdx] = tmp;
-    renderAll();
-    scheduleSave();
-  }
-
-  /* ============================================================
-   * 8. 渲染：变量面板（右栏上）
-   * ============================================================ */
   function renderVarList() {
     var lang = state.lang;
-    $varSubtext.textContent = '当前编辑：' + (lang === 'zh' ? '中文' : 'English') + '的变量值';
-    var names = collectAllVarNames();
+    var names = currentVarNames();
+
+    var filled = 0;
+    names.forEach(function (n) { var e = state.values[n]; if (e && e[lang]) filled++; });
+    if (names.length === 0) {
+      $varCount.textContent = '';
+    } else {
+      var unfilled = names.length - filled;
+      $varCount.innerHTML = unfilled > 0
+        ? '<span class="rst-bad">' + filled + '/' + names.length + '</span>'
+        : (filled + '/' + names.length);
+    }
+
     $varList.innerHTML = '';
     if (names.length === 0) {
       var hint = document.createElement('div');
       hint.className = 'var-empty-hint';
-      hint.textContent = '暂无变量，在模块内容中输入 {{名称}} 即可创建。';
+      hint.innerHTML = '在正文中输入 <code>{{名称}}</code> 即可创建变量，填值在此按语言分别录入。';
       $varList.appendChild(hint);
       return;
     }
@@ -1432,355 +745,349 @@
       input.addEventListener('input', function () {
         entry[lang] = input.value;
         chip.classList.toggle('empty', !input.value);
-        renderPreview();
+        if (view === 'preview') renderPreview();
+        refreshVarCount();
+        refreshStat();
         scheduleSave();
       });
       row.appendChild(input);
-
       $varList.appendChild(row);
     });
   }
 
-  /* ============================================================
-   * 9. Token 对比卡
-   * ============================================================ */
-  function renderTokenCards() {
-    var zhText = compilePrompt('zh');
-    var enText = compilePrompt('en');
-    var zhTokens = estimateTokens(zhText);
-    var enTokens = estimateTokens(enText);
+  function refreshVarCount() {
+    var lang = state.lang;
+    var names = currentVarNames();
+    if (names.length === 0) { $varCount.textContent = ''; return; }
+    var filled = 0;
+    names.forEach(function (n) { var e = state.values[n]; if (e && e[lang]) filled++; });
+    var unfilled = names.length - filled;
+    $varCount.innerHTML = unfilled > 0
+      ? '<span class="rst-bad">' + filled + '/' + names.length + '</span>'
+      : (filled + '/' + names.length);
+  }
 
-    $tokensZh.textContent = '~' + zhTokens + ' tokens';
-    $tokensEn.textContent = '~' + enTokens + ' tokens';
+  function allSnippets() { return BUILTIN_SNIPPETS.concat(state.customSnippets); }
 
-    [$cardZh, $cardEn].forEach(function (card) {
-      var existingCurrent = card.querySelector('.lc-current');
-      if (existingCurrent) existingCurrent.remove();
-      var existingBadge = card.querySelector('.save-badge');
-      if (existingBadge) existingBadge.remove();
-      card.classList.remove('active');
+  function renderSnippets() {
+    var lang = state.lang;
+    $snippetWrap.innerHTML = '';
+    allSnippets().forEach(function (snip) {
+      var pill = document.createElement('span');
+      pill.className = 'snippet-pill';
+      pill.title = snip[lang] || snip.zh || snip.en;
+      var t = document.createElement('span');
+      t.textContent = snip.tag;
+      pill.appendChild(t);
+      pill.addEventListener('click', function (e) {
+        if (e.target.classList.contains('remove-x')) return;
+        insertAtCursor(snip[lang] || snip.zh || snip.en);
+      });
+      if (!snip.builtin) {
+        var x = document.createElement('span');
+        x.className = 'remove-x';
+        x.textContent = '×';
+        x.setAttribute('role', 'button');
+        x.setAttribute('aria-label', '删除自定义常用句 ' + snip.tag);
+        x.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var i = state.customSnippets.indexOf(snip);
+          if (i >= 0) state.customSnippets.splice(i, 1);
+          renderSnippets();
+          scheduleSave();
+        });
+        pill.appendChild(x);
+      }
+      $snippetWrap.appendChild(pill);
     });
 
-    var activeCard = state.lang === 'zh' ? $cardZh : $cardEn;
-    activeCard.classList.add('active');
-    var nameRow = activeCard.querySelector('.lc-name');
-    var currentTag = document.createElement('span');
-    currentTag.className = 'lc-current';
-    currentTag.textContent = '· 当前输出';
-    nameRow.appendChild(currentTag);
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'snippet-add';
+    add.setAttribute('aria-label', '添加自定义常用句');
+    add.title = '添加自定义常用句';
+    add.textContent = '+';
+    add.addEventListener('click', function () { openSnippetAdd(add); });
+    $snippetWrap.appendChild(add);
+  }
 
-    var maxTokens = Math.max(zhTokens, enTokens);
-    var minTokens = Math.min(zhTokens, enTokens);
-    if (maxTokens > 0 && zhTokens !== enTokens) {
-      var cheaperLang = zhTokens < enTokens ? 'zh' : 'en';
-      if (cheaperLang !== state.lang) {
-        var cheaperCard = cheaperLang === 'zh' ? $cardZh : $cardEn;
-        var pct = Math.round((1 - minTokens / maxTokens) * 100);
-        var badge = document.createElement('div');
-        badge.className = 'save-badge';
-        badge.textContent = '省约 ' + pct + '%';
-        cheaperCard.appendChild(badge);
+  function openSnippetAdd(addBtn) {
+    if ($snippetWrap.querySelector('.snippet-add-input')) return;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'snippet-add-input';
+    input.placeholder = '输入常用句，回车保存';
+    $snippetWrap.insertBefore(input, addBtn);
+    input.focus();
+
+    function commit() {
+      var text = input.value.trim();
+      if (text) {
+        var tag = text.length > 8 ? (text.slice(0, 8) + '…') : text;
+        state.customSnippets.push({ tag: tag, zh: text, en: text, builtin: false });
+        renderSnippets();
+        scheduleSave();
+      } else {
+        input.remove();
       }
     }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { input.remove(); }
+    });
+    input.addEventListener('blur', function () { setTimeout(commit, 0); });
   }
 
   /* ============================================================
-   * 10. 编译预览 + 内联编辑
+   * 8. 渲染：右栏编辑器 / 预览 / 状态
    * ============================================================ */
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  function renderEditor() {
+    // 把当前语言正文灌入 textarea（仅在非聚焦时刷新，避免打断输入）
+    if (document.activeElement !== $textarea) {
+      $textarea.value = state.content[state.lang] || '';
+    }
+    $etLabel.textContent = state.lang === 'zh' ? '中文正文' : 'English 正文';
+    refreshStat();
+    if (view === 'preview') renderPreview();
+  }
+
+  function refreshStat() {
+    var lang = state.lang;
+    var compiled = compile(lang);
+    var tokens = estimateTokens(compiled);
+    var names = currentVarNames();
+    var unfilled = names.filter(function (n) { var e = state.values[n]; return !e || !e[lang]; }).length;
+
+    var parts = '<b>~' + tokens + '</b> tokens';
+    if (names.length > 0) {
+      if (unfilled > 0) parts += ' · <span class="et-bad">' + unfilled + ' 变量未填</span>';
+      else parts += ' · 变量已填齐';
+    }
+    $editorStat.innerHTML = parts;
+    $editorSub.textContent = state.lang === 'zh' ? '中文' : 'English';
   }
 
   function renderPreview() {
     var lang = state.lang;
-    $previewTitle.textContent = '编译后的提示词 · ' + (lang === 'zh' ? '中文' : 'English');
+    var raw = state.content[lang] || '';
+    $preview.innerHTML = '';
 
-    var enabledModules = state.modules.filter(function (m) { return m.enabled; });
-    $previewBox.innerHTML = '';
-
-    if (enabledModules.length === 0) {
-      var emptyP = document.createElement('div');
-      emptyP.style.color = 'var(--faint)';
-      emptyP.textContent = '暂无内容，从左侧添加模块开始构建。';
-      $previewBox.appendChild(emptyP);
-    } else {
-      enabledModules.forEach(function (mod) {
-        var modIndex = state.modules.indexOf(mod);
-        var block = document.createElement('div');
-        block.className = 'p-block';
-
-        var heading = document.createElement('div');
-        heading.className = 'p-heading';
-        heading.textContent = '## ' + (mod.label[lang] || '');
-        heading.tabIndex = 0;
-        heading.setAttribute('role', 'button');
-        heading.setAttribute('aria-label', '编辑模块标题');
-        heading.addEventListener('click', function () {
-          editHeading(heading, mod, lang, modIndex);
-        });
-        block.appendChild(heading);
-
-        var bodyEl = document.createElement('div');
-        bodyEl.className = 'p-body';
-        renderBodyContent(bodyEl, mod, lang, modIndex);
-        block.appendChild(bodyEl);
-
-        $previewBox.appendChild(block);
-      });
+    if (!raw.trim()) {
+      var empty = document.createElement('div');
+      empty.className = 'editor-preview-empty';
+      empty.textContent = '正文为空，先在「编辑」里写点内容。';
+      $preview.appendChild(empty);
+      return;
     }
 
-    renderPreviewStats();
-    renderTokenCards();
-  }
-
-  function editHeading(headingEl, mod, lang, modIndex) {
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'preview-inline-title-input';
-    input.value = mod.label[lang] || '';
-    headingEl.replaceWith(input);
-    input.focus();
-    input.select();
-
-    function commit() {
-      mod.label[lang] = input.value;
-      renderModuleList();
-      renderPreview();
-      scheduleSave();
-    }
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      else if (e.key === 'Escape') { input.value = mod.label[lang] || ''; input.blur(); }
-    });
-    input.addEventListener('blur', commit);
-  }
-
-  function renderBodyContent(bodyEl, mod, lang, modIndex) {
-    bodyEl.innerHTML = '';
-    bodyEl.tabIndex = 0;
-    var raw = mod.content[lang] || '';
-    var names = extractVarNames(raw);
-
-    if (names.length === 0) {
-      bodyEl.appendChild(document.createTextNode(raw));
-    } else {
-      var lastIndex = 0;
-      VAR_RE.lastIndex = 0;
-      var m;
-      while ((m = VAR_RE.exec(raw)) !== null) {
-        if (m.index > lastIndex) {
-          bodyEl.appendChild(document.createTextNode(raw.slice(lastIndex, m.index)));
-        }
-        var varName = m[1];
-        var entry = state.values[varName] || { zh: '', en: '' };
-        var val = entry[lang];
-        var chip = document.createElement('span');
-        chip.className = 'p-var' + (val ? '' : ' unfilled');
-        chip.textContent = val ? val : m[0];
-        chip.setAttribute('role', 'button');
-        chip.setAttribute('aria-label', '编辑变量 ' + varName);
-        chip.tabIndex = 0;
-        (function (varNameClosure) {
-          chip.addEventListener('click', function (e) {
-            e.stopPropagation();
-            editVarChip(chip, varNameClosure, lang);
-          });
-        })(varName);
-        bodyEl.appendChild(chip);
-        lastIndex = m.index + m[0].length;
+    // 按行渲染：## 开头的行做标题色；变量替换为值（未填高亮）
+    var lines = raw.split('\n');
+    lines.forEach(function (line, i) {
+      if (/^##\s?/.test(line)) {
+        var h = document.createElement('span');
+        h.className = 'pv-h';
+        h.textContent = line;
+        $preview.appendChild(h);
+      } else {
+        appendLineWithVars($preview, line, lang);
       }
-      if (lastIndex < raw.length) {
-        bodyEl.appendChild(document.createTextNode(raw.slice(lastIndex)));
+      if (i < lines.length - 1) $preview.appendChild(document.createTextNode('\n'));
+    });
+  }
+
+  function appendLineWithVars(container, line, lang) {
+    var lastIndex = 0, m;
+    VAR_RE.lastIndex = 0;
+    var found = false;
+    while ((m = VAR_RE.exec(line)) !== null) {
+      found = true;
+      if (m.index > lastIndex) container.appendChild(document.createTextNode(line.slice(lastIndex, m.index)));
+      var name = m[1];
+      var entry = state.values[name] || { zh: '', en: '' };
+      var val = entry[lang];
+      var chip = document.createElement('span');
+      chip.className = 'pv-var' + (val ? '' : ' unfilled');
+      chip.textContent = val ? val : m[0];
+      chip.title = val ? name : (name + '（未填）');
+      chip.setAttribute('role', 'button');
+      (function (nm) {
+        chip.addEventListener('click', function () { focusVarInput(nm); });
+      })(name);
+      container.appendChild(chip);
+      lastIndex = m.index + m[0].length;
+    }
+    if (!found) { container.appendChild(document.createTextNode(line)); return; }
+    if (lastIndex < line.length) container.appendChild(document.createTextNode(line.slice(lastIndex)));
+  }
+
+  // 点预览里的变量 -> 聚焦左栏对应输入框
+  function focusVarInput(name) {
+    var rows = $varList.querySelectorAll('.var-row');
+    for (var i = 0; i < rows.length; i++) {
+      var chip = rows[i].querySelector('.var-name-chip');
+      if (chip && chip.textContent === name) {
+        var input = rows[i].querySelector('.var-value-input');
+        if (input) { input.focus(); input.select(); }
+        return;
       }
     }
-
-    bodyEl.addEventListener('click', function bodyClickHandler(e) {
-      if (e.target !== bodyEl) return;
-      switchBodyToTextarea(bodyEl, mod, lang, modIndex);
-    });
   }
 
-  function editVarChip(chipEl, varName, lang) {
-    var entry = ensureValueEntry(varName);
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'preview-inline-input';
-    input.value = entry[lang] || '';
-    input.placeholder = varName;
-    chipEl.replaceWith(input);
-    input.focus();
-    input.select();
-
-    function commit() {
-      entry[lang] = input.value;
-      renderVarList();
-      renderPreview();
-      scheduleSave();
-    }
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      else if (e.key === 'Escape') { renderPreview(); }
-    });
-    input.addEventListener('blur', commit);
+  /* 编辑器内容变化的统一入口 */
+  function onEditorChanged() {
+    state.content[state.lang] = $textarea.value;
+    syncValues();
+    renderVarList();
+    refreshStat();
+    scheduleSave();
   }
 
-  function switchBodyToTextarea(bodyEl, mod, lang, modIndex) {
-    var textarea = document.createElement('textarea');
-    textarea.className = 'preview-inline-textarea';
-    textarea.value = mod.content[lang] || '';
-    bodyEl.replaceWith(textarea);
-    textarea.focus();
-
-    function commit() {
-      mod.content[lang] = textarea.value;
-      syncValuesWithVars();
-      renderModuleList();
-      renderVarList();
-      renderPreview();
-      scheduleSave();
-    }
-    textarea.addEventListener('blur', commit);
-  }
-
-  function renderPreviewStats() {
-    var lang = state.lang;
-    var enabledCount = state.modules.filter(function (m) { return m.enabled; }).length;
-    var names = collectAllVarNames();
-    var unfilled = names.filter(function (n) {
-      var entry = state.values[n];
-      return !entry || !entry[lang];
-    }).length;
-
-    $previewStats.innerHTML = '';
-    var langLabel = lang === 'zh' ? '中文' : 'English';
-    var text1 = document.createTextNode('模块 ' + enabledCount + ' · ' + langLabel + '未填 ');
-    $previewStats.appendChild(text1);
-    var span = document.createElement('span');
-    span.textContent = String(unfilled);
-    if (unfilled > 0) span.className = 'stat-bad';
-    $previewStats.appendChild(span);
-  }
+  $textarea.addEventListener('input', onEditorChanged);
 
   /* ============================================================
-   * 11. 语言切换
+   * 9. 语言 / 视图切换
    * ============================================================ */
   function setLang(lang) {
     if (state.lang === lang) return;
+    // 切换前把当前编辑内容存回
+    state.content[state.lang] = $textarea.value;
     state.lang = lang;
     renderAll();
     scheduleSave();
   }
+  function toggleLang() { setLang(state.lang === 'zh' ? 'en' : 'zh'); }
 
-  function renderLangSegmented() {
-    var buttons = $langSegmented.querySelectorAll('button');
-    buttons.forEach(function (btn) {
-      btn.setAttribute('aria-pressed', btn.dataset.lang === state.lang ? 'true' : 'false');
+  function renderLangSeg() {
+    $langSegmented.querySelectorAll('button').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.dataset.lang === state.lang ? 'true' : 'false');
     });
   }
-
   $langSegmented.addEventListener('click', function (e) {
-    var btn = e.target.closest('button[data-lang]');
-    if (!btn) return;
-    setLang(btn.dataset.lang);
+    var b = e.target.closest('button[data-lang]');
+    if (b) setLang(b.dataset.lang);
   });
 
-  [$cardZh, $cardEn].forEach(function (card) {
-    card.addEventListener('click', function () {
-      setLang(card.dataset.lang);
+  function setView(v) {
+    if (view === v) return;
+    if (v === 'preview') state.content[state.lang] = $textarea.value; // 存回
+    view = v;
+    renderViewSeg();
+    if (view === 'preview') {
+      $textarea.hidden = true;
+      $preview.hidden = false;
+      renderPreview();
+    } else {
+      $preview.hidden = true;
+      $textarea.hidden = false;
+      $textarea.value = state.content[state.lang] || '';
+      $textarea.focus();
+    }
+  }
+  function toggleView() { setView(view === 'write' ? 'preview' : 'write'); }
+
+  function renderViewSeg() {
+    $viewSeg.querySelectorAll('button').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.dataset.view === view ? 'true' : 'false');
     });
+  }
+  $viewSeg.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-view]');
+    if (b) setView(b.dataset.view);
   });
 
   /* ============================================================
-   * 12. 顶部动作：复制 / 下载 / 清空 / 示例
+   * 10. 输出：复制 / 下载 / 示例 / 清空
    * ============================================================ */
-  $btnCopy.addEventListener('click', function () {
-    var text = compilePrompt(state.lang);
+  function doCopy() {
+    state.content[state.lang] = $textarea.hidden ? state.content[state.lang] : $textarea.value;
+    var text = compile(state.lang);
     var langName = state.lang === 'zh' ? '中文' : 'English';
     if (clipboardApi && clipboardApi.writeText) {
-      clipboardApi.writeText(text)
-        .then(function () { showToast('已复制' + langName + '提示词'); })
-        .catch(function () { fallbackCopy(text, langName); });
+      clipboardApi.writeText(text).then(function () { showToast('已复制' + langName + '提示词'); }).catch(function () { fallbackCopy(text, langName); });
     } else {
       fallbackCopy(text, langName);
     }
-  });
-
+  }
   function fallbackCopy(text, langName) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text)
-        .then(function () { showToast('已复制' + langName + '提示词'); })
-        .catch(function () { showToast('复制失败'); });
-    } else {
-      showToast('复制失败：当前环境不支持');
-    }
+      navigator.clipboard.writeText(text).then(function () { showToast('已复制' + langName + '提示词'); }).catch(function () { showToast('复制失败', true); });
+    } else { showToast('复制失败：当前环境不支持', true); }
   }
 
-  $btnDownload.addEventListener('click', function () {
-    var text = compilePrompt(state.lang);
+  function doDownload() {
+    state.content[state.lang] = $textarea.hidden ? state.content[state.lang] : $textarea.value;
+    var text = compile(state.lang);
     var defaultName = state.lang === 'zh' ? 'prompt-zh.md' : 'prompt-en.md';
     var langName = state.lang === 'zh' ? '中文' : 'English';
-
     if (dialogApi && dialogApi.save && fsApi && fsApi.writeTextFile) {
       dialogApi.save({ defaultPath: defaultName, filters: [{ name: 'Markdown', extensions: ['md'] }] })
         .then(function (filePath) {
           if (!filePath) return;
-          return fsApi.writeTextFile(filePath, text).then(function () {
-            showToast('已下载' + langName + '提示词');
-          });
+          return fsApi.writeTextFile(filePath, text).then(function () { showToast('已下载' + langName + '提示词'); });
         })
-        .catch(function (err) {
-          console.warn('下载失败:', err);
-          showToast('下载失败');
-        });
+        .catch(function () { showToast('下载失败', true); });
     } else {
-      // 浏览器降级：触发本地下载
       var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
-      a.href = url;
-      a.download = defaultName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = defaultName;
+      document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
       showToast('已下载' + langName + '提示词');
     }
+  }
+
+  $btnCopy.addEventListener('click', doCopy);
+  $btnDownload.addEventListener('click', doDownload);
+
+  $btnLoadDemo.addEventListener('click', function () {
+    state.content = demoContent();
+    state.values = demoValues();
+    if (view === 'preview') setView('write');
+    renderAll();
+    scheduleSave();
+    showToast('已载入示例');
   });
 
   $btnClearAll.addEventListener('click', function () {
-    state.modules = [];
-    state.values = {};
+    if (!(state.content[state.lang] || '').trim()) { showToast('当前语言正文已经是空的'); return; }
+    state.content[state.lang] = '';
+    if (view === 'preview') setView('write');
     renderAll();
     scheduleSave();
-  });
-
-  $btnLoadDemo.addEventListener('click', function () {
-    state.modules = buildDemoModules();
-    state.values = buildDemoValues();
-    renderAll();
-    scheduleSave();
+    showToast('已清空' + (state.lang === 'zh' ? '中文' : 'English') + '正文');
   });
 
   /* ============================================================
-   * 13. 汇总渲染
+   * 11. 快捷键
+   * ============================================================ */
+  document.addEventListener('keydown', function (e) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    var key = e.key.toLowerCase();
+    if (key === 'l') { e.preventDefault(); toggleLang(); }
+    else if (key === 's') { e.preventDefault(); doDownload(); }
+    else if (key === 'p') { e.preventDefault(); toggleView(); }
+    else if (key === 'c') {
+      var sel = window.getSelection && window.getSelection().toString();
+      var tag = document.activeElement && document.activeElement.tagName;
+      var inField = tag === 'INPUT' || tag === 'TEXTAREA';
+      if (!sel && !inField) { e.preventDefault(); doCopy(); }
+    }
+  });
+
+  /* ============================================================
+   * 12. 汇总渲染
    * ============================================================ */
   function renderAll() {
-    syncValuesWithVars();
-    renderModuleLib();
-    renderLangSegmented();
-    renderModuleList();
+    syncValues();
+    renderLangSeg();
+    renderViewSeg();
+    renderInsertGrid();
     renderVarList();
-    renderPreview();
+    renderSnippets();
+    renderEditor();
   }
 
-  /* ============================================================
-   * 14. 启动
-   * ============================================================ */
   restoreState();
 })();
 </script>
