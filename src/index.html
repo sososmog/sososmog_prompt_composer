@@ -178,16 +178,27 @@
     border-radius:999px; padding:5px 11px; font-size:11.5px; min-width:150px; color:var(--text);
   }
 
-  .rail-foot { padding:12px 18px 16px; border-top:1px solid var(--line-soft); display:flex; flex-direction:column; gap:8px; }
   .btn-ghost-rail {
-    display:flex; align-items:center; gap:8px;
+    display:inline-flex; align-items:center; gap:6px;
     background:transparent; border:1px solid var(--line); color:var(--text-soft);
-    border-radius:var(--radius-sm); padding:9px 12px; cursor:pointer; font-size:12.5px; text-align:left;
+    border-radius:var(--radius-sm); padding:0 14px; height:40px; cursor:pointer; font-size:12.5px; white-space:nowrap; flex:none;
     transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
   }
   .btn-ghost-rail:hover { border-color:var(--amber-deep); color:var(--text); background:var(--surface); }
   .btn-ghost-rail.danger:hover { border-color:var(--warn); color:var(--warn); }
   .btn-ghost-rail .bg-ico { width:15px; text-align:center; opacity:0.7; }
+
+  .rail-foot { padding:12px 18px 16px; border-top:1px solid var(--line-soft); flex:none; }
+  .btn-load-tpl {
+    display:flex; align-items:center; justify-content:center; gap:8px; width:100%;
+    background:var(--surface); border:1px solid var(--amber-deep); color:var(--amber-hi);
+    border-radius:var(--radius-sm); padding:0 14px; height:42px; cursor:pointer;
+    font-size:13px; font-weight:600; white-space:nowrap;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease, transform 0.08s ease;
+  }
+  .btn-load-tpl:hover { background:var(--surface-hi); border-color:var(--amber-hi); }
+  .btn-load-tpl:active { transform:translateY(1px); }
+  .btn-load-tpl .bg-ico { text-align:center; opacity:0.85; }
 
   /* ============================================================
    * 右栏：主写作编辑器
@@ -425,8 +436,7 @@
     </div>
 
     <div class="rail-foot">
-      <button class="btn-ghost-rail" id="btnLoadDemo" type="button"><span class="bg-ico">◇</span>载入示例</button>
-      <button class="btn-ghost-rail danger" id="btnClearAll" type="button"><span class="bg-ico">⌫</span>清空正文</button>
+      <button class="btn-load-tpl" id="btnLoadDemo" type="button"><span class="bg-ico">◇</span>一键载入模板</button>
     </div>
   </aside>
 
@@ -465,6 +475,7 @@
       <span class="foot-hint">
         <kbd>Alt</kbd> <kbd>↑↓</kbd> 移动块 · <kbd>Ctrl</kbd> <kbd>C</kbd> 复制 · <kbd>Ctrl</kbd> <kbd>S</kbd> 下载 · <kbd>Ctrl</kbd> <kbd>L</kbd> 切换语言 · <kbd>Ctrl</kbd> <kbd>P</kbd> 预览
       </span>
+      <button class="btn-ghost-rail danger" id="btnClearAll" type="button"><span class="bg-ico">⌫</span>清空正文</button>
       <button class="btn btn-outline" id="btnCopy" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         复制
@@ -1431,7 +1442,7 @@
     if (view === 'preview') setView('write');
     renderAll();
     scheduleSave();
-    showToast('已载入示例');
+    showToast('已载入模板');
   });
 
   $btnClearAll.addEventListener('click', function () {
