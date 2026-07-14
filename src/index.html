@@ -214,13 +214,6 @@
     cursor:pointer; transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
   .snippet-pill:hover { background:var(--amber-soft); border-color:var(--amber-deep); color:var(--amber); }
-  .snippet-add {
-    display:inline-flex; align-items:center; justify-content:center;
-    width:24px; height:24px; border-radius:999px;
-    border:1.5px dashed var(--line-hi); background:transparent; color:var(--muted);
-    cursor:pointer; font-size:13px; transition:border-color 0.12s ease, color 0.12s ease;
-  }
-  .snippet-add:hover { border-color:var(--amber); color:var(--amber); }
 
   /* 管理常用句浮窗 */
   .sm-overlay {
@@ -555,7 +548,13 @@
 
     <div class="rail-scroll">
       <div class="rail-section">
-        <div class="rail-section-title">插入模块</div>
+        <div class="rail-section-title has-action">
+          <span class="rst-label">插入模块</span>
+          <span class="rst-line"></span>
+          <button type="button" class="rst-gear" id="btnManageModules" title="管理插入模块" aria-label="管理插入模块">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </button>
+        </div>
         <div class="insert-grid" id="insertGrid" role="list"></div>
       </div>
 
@@ -645,27 +644,29 @@
    * 1. 预设：可插入的模块片段 / 常用句 / 示例正文
    * ============================================================ */
   var INSERT_MODULES = [
-    { label: { zh: '角色', en: 'Role' },
+    { id: 'm_role', label: { zh: '角色', en: 'Role' },
       text: { zh: '## 角色\n你是……，擅长……。', en: '## Role\nYou are …, skilled in ….' } },
-    { label: { zh: '场景', en: 'Scenario' },
+    { id: 'm_scenario', label: { zh: '场景', en: 'Scenario' },
       text: { zh: '## 场景\n使用场景：……。目标用户是……。', en: '## Scenario\nScenario: …. Target users are ….' } },
-    { label: { zh: '问题', en: 'Problem' },
+    { id: 'm_problem', label: { zh: '问题', en: 'Problem' },
       text: { zh: '## 问题\n当前遇到的问题：……。', en: '## Problem\nThe current problem: ….' } },
-    { label: { zh: '需求效果', en: 'Outcome' },
+    { id: 'm_outcome', label: { zh: '需求效果', en: 'Outcome' },
       text: { zh: '## 需求效果\n期望达成的效果：……。', en: '## Desired outcome\nDesired outcome: ….' } },
-    { label: { zh: '解决方案', en: 'Solution' },
+    { id: 'm_solution', label: { zh: '解决方案', en: 'Solution' },
       text: { zh: '## 解决方案\n建议的解决方案：……。', en: '## Solution\nProposed solution: ….' } },
-    { label: { zh: '规则', en: 'Rules' },
+    { id: 'm_rules', label: { zh: '规则', en: 'Rules' },
       text: { zh: '## 规则\n- 始终……\n- 绝不……', en: '## Rules\n- Always …\n- Never …' } },
-    { label: { zh: '工作流程', en: 'Workflow' },
+    { id: 'm_workflow', label: { zh: '工作流程', en: 'Workflow' },
       text: { zh: '## 工作流程\n1. ……\n2. ……\n3. ……', en: '## Workflow\n1. …\n2. …\n3. …' } },
-    { label: { zh: '输出格式', en: 'Format' },
+    { id: 'm_format', label: { zh: '输出格式', en: 'Format' },
       text: { zh: '## 输出格式\n以……形式输出。', en: '## Output format\nOutput in ….' } },
-    { label: { zh: '示例', en: 'Examples' },
+    { id: 'm_examples', label: { zh: '示例', en: 'Examples' },
       text: { zh: '## 示例\n输入：……\n输出：……', en: '## Examples\nInput: …\nOutput: …' } },
-    { label: { zh: '约束', en: 'Constraints' },
+    { id: 'm_constraints', label: { zh: '约束', en: 'Constraints' },
       text: { zh: '## 约束\n不要……。', en: '## Constraints\nDo not ….' } }
   ];
+  var MODULE_BY_ID = {};
+  INSERT_MODULES.forEach(function (m) { MODULE_BY_ID[m.id] = m; });
 
   var BUILTIN_SNIPPETS = [
     { id: 'b_step',     tag: '分步思考', zh: '请先一步步思考，再给出最终答案。', en: 'Think step by step, then give the final answer.', builtin: true },
@@ -695,7 +696,10 @@
       content: demoContent(),
       customSnippets: [],
       builtinPatches: {},                              // { builtinId: {tag?, zh?, en?, hidden?} }
-      snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; })
+      snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; }),
+      customModules: [],
+      modulePatches: {},                               // { moduleId: {labelZh?, labelEn?, textZh?, textEn?, hidden?} }
+      moduleOrder: INSERT_MODULES.map(function (m) { return m.id; })
     };
   }
 
@@ -703,6 +707,11 @@
   function newSnippetId() {
     snippetSeq++;
     return 'c_' + Date.now().toString(36) + '_' + snippetSeq.toString(36);
+  }
+  var moduleSeq = 0;
+  function newModuleId() {
+    moduleSeq++;
+    return 'mc_' + Date.now().toString(36) + '_' + moduleSeq.toString(36);
   }
 
   /* ============================================================
@@ -783,7 +792,8 @@
             tag: sn.tag,
             zh: typeof sn.zh === 'string' ? sn.zh : (sn.text || ''),
             en: typeof sn.en === 'string' ? sn.en : (sn.text || ''),
-            builtin: false
+            builtin: false,
+            hidden: sn.hidden === true
           };
         });
     }
@@ -819,6 +829,54 @@
     BUILTIN_SNIPPETS.forEach(function (b) { if (!seen[b.id]) { order.push(b.id); seen[b.id] = true; } });
     s.customSnippets.forEach(function (c) { if (!seen[c.id]) { order.push(c.id); seen[c.id] = true; } });
     s.snippetOrder = order;
+
+    // 自定义插入模块
+    if (Array.isArray(raw.customModules)) {
+      s.customModules = raw.customModules
+        .filter(function (m) { return m && m.label && typeof m.label === 'object'; })
+        .map(function (m) {
+          var t = (m.text && typeof m.text === 'object') ? m.text : {};
+          return {
+            id: (typeof m.id === 'string' && m.id) ? m.id : newModuleId(),
+            label: { zh: m.label.zh || '', en: m.label.en || '' },
+            text: { zh: typeof t.zh === 'string' ? t.zh : '', en: typeof t.en === 'string' ? t.en : '' },
+            builtin: false,
+            hidden: m.hidden === true
+          };
+        });
+    }
+
+    // 内置模块覆盖
+    s.modulePatches = {};
+    if (raw.modulePatches && typeof raw.modulePatches === 'object') {
+      Object.keys(raw.modulePatches).forEach(function (id) {
+        if (!MODULE_BY_ID[id]) return;
+        var p = raw.modulePatches[id];
+        if (!p || typeof p !== 'object') return;
+        var clean = {};
+        if (typeof p.labelZh === 'string') clean.labelZh = p.labelZh;
+        if (typeof p.labelEn === 'string') clean.labelEn = p.labelEn;
+        if (typeof p.textZh === 'string') clean.textZh = p.textZh;
+        if (typeof p.textEn === 'string') clean.textEn = p.textEn;
+        if (p.hidden === true) clean.hidden = true;
+        s.modulePatches[id] = clean;
+      });
+    }
+
+    // 模块顺序
+    var mValid = {};
+    INSERT_MODULES.forEach(function (m) { mValid[m.id] = true; });
+    s.customModules.forEach(function (m) { mValid[m.id] = true; });
+    var mOrder = [];
+    var mSeen = {};
+    if (Array.isArray(raw.moduleOrder)) {
+      raw.moduleOrder.forEach(function (id) {
+        if (typeof id === 'string' && mValid[id] && !mSeen[id]) { mOrder.push(id); mSeen[id] = true; }
+      });
+    }
+    INSERT_MODULES.forEach(function (m) { if (!mSeen[m.id]) { mOrder.push(m.id); mSeen[m.id] = true; } });
+    s.customModules.forEach(function (m) { if (!mSeen[m.id]) { mOrder.push(m.id); mSeen[m.id] = true; } });
+    s.moduleOrder = mOrder;
 
     return s;
   }
@@ -949,16 +1007,52 @@
   /* ============================================================
    * 7. 渲染：左栏
    * ============================================================ */
+  // 把一个 id 解析成可用的模块对象（内置合并覆盖；返回含 hidden 标记）
+  function resolveModule(id) {
+    var b = MODULE_BY_ID[id];
+    if (b) {
+      var p = state.modulePatches[id] || {};
+      return {
+        id: id,
+        builtin: true,
+        label: {
+          zh: typeof p.labelZh === 'string' ? p.labelZh : b.label.zh,
+          en: typeof p.labelEn === 'string' ? p.labelEn : b.label.en
+        },
+        text: {
+          zh: typeof p.textZh === 'string' ? p.textZh : b.text.zh,
+          en: typeof p.textEn === 'string' ? p.textEn : b.text.en
+        },
+        hidden: p.hidden === true
+      };
+    }
+    var c = null;
+    for (var i = 0; i < state.customModules.length; i++) {
+      if (state.customModules[i].id === id) { c = state.customModules[i]; break; }
+    }
+    if (!c) return null;
+    return { id: id, builtin: false, label: { zh: c.label.zh, en: c.label.en }, text: { zh: c.text.zh, en: c.text.en }, hidden: c.hidden === true };
+  }
+
+  function orderedModules() {
+    return state.moduleOrder.map(resolveModule).filter(Boolean);
+  }
+
+  function visibleModules() {
+    return orderedModules().filter(function (m) { return !m.hidden; });
+  }
+
   function renderInsertGrid() {
+    var lang = state.lang;
     $insertGrid.innerHTML = '';
-    INSERT_MODULES.forEach(function (mod) {
+    visibleModules().forEach(function (mod) {
       var pill = document.createElement('button');
       pill.type = 'button';
       pill.className = 'insert-pill';
       pill.setAttribute('role', 'listitem');
       pill.title = '插入到光标处';
-      pill.innerHTML = '<span class="ip-plus">+</span><span>' + escapeHtml(mod.label[state.lang]) + '</span>';
-      pill.addEventListener('click', function () { insertSnippet(mod.text[state.lang]); });
+      pill.innerHTML = '<span class="ip-plus">+</span><span>' + escapeHtml(mod.label[lang] || mod.label.zh || mod.label.en) + '</span>';
+      pill.addEventListener('click', function () { insertSnippet(mod.text[lang] || mod.text.zh || mod.text.en); });
       $insertGrid.appendChild(pill);
     });
   }
@@ -982,7 +1076,7 @@
       if (state.customSnippets[i].id === id) { c = state.customSnippets[i]; break; }
     }
     if (!c) return null;
-    return { id: id, builtin: false, tag: c.tag, zh: c.zh, en: c.en, hidden: false };
+    return { id: id, builtin: false, tag: c.tag, zh: c.zh, en: c.en, hidden: c.hidden === true };
   }
 
   // 按顺序返回全部句子（含隐藏，供管理浮窗使用）
@@ -1010,31 +1104,11 @@
       });
       $snippetWrap.appendChild(pill);
     });
-
-    var add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'snippet-add';
-    add.setAttribute('aria-label', '添加自定义常用句');
-    add.title = '添加自定义常用句';
-    add.textContent = '+';
-    add.addEventListener('click', openSnippetAdd);
-    $snippetWrap.appendChild(add);
   }
 
-  // 左栏快速添加：新建一条空白自定义句并直接打开管理浮窗聚焦到它
-  function openSnippetAdd() {
-    var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false };
-    state.customSnippets.push(c);
-    state.snippetOrder.push(c.id);
-    scheduleSave();
-    renderSnippets();
-    openSnippetManager();
-    var row = $smList && $smList.querySelector('.sm-row:last-child .sm-tag');
-    if (row) { row.focus(); row.select(); }
-  }
-
-  /* ---------- 管理常用句浮窗 ---------- */
-  var $smOverlay = null, $smList = null, smKeyHandler = null;
+  /* ---------- 通用管理浮窗（常用句 / 插入模块共用） ---------- */
+  var $smOverlay = null, $smList = null, $smTitle = null, $smHint = null, $smAddBtn = null;
+  var smKeyHandler = null, SM = null;
 
   function ensureSnippetManager() {
     if ($smOverlay) return;
@@ -1042,43 +1116,205 @@
     $smOverlay.className = 'sm-overlay';
     $smOverlay.setAttribute('role', 'dialog');
     $smOverlay.setAttribute('aria-modal', 'true');
-    $smOverlay.setAttribute('aria-label', '管理常用句');
+    $smOverlay.setAttribute('aria-label', '管理');
     $smOverlay.innerHTML =
       '<div class="sm-panel">' +
         '<div class="sm-head">' +
-          '<span class="sm-title">管理常用句</span>' +
+          '<span class="sm-title" id="smTitle"></span>' +
           '<button type="button" class="sm-close" aria-label="关闭">×</button>' +
         '</div>' +
-        '<div class="sm-hint">勾选决定是否在左栏显示 · 点标签或内容可直接编辑 · 用 ↑↓ 调整顺序</div>' +
+        '<div class="sm-hint" id="smHint"></div>' +
         '<div class="sm-list" id="smList"></div>' +
         '<div class="sm-foot">' +
-          '<button type="button" class="sm-add" id="smAdd"><span>+</span> 新增自定义常用句</button>' +
+          '<button type="button" class="sm-add" id="smAdd"><span>+</span> <span class="sm-add-label"></span></button>' +
         '</div>' +
       '</div>';
     document.body.appendChild($smOverlay);
     $smList = $smOverlay.querySelector('#smList');
+    $smTitle = $smOverlay.querySelector('#smTitle');
+    $smHint = $smOverlay.querySelector('#smHint');
+    $smAddBtn = $smOverlay.querySelector('#smAdd');
 
     $smOverlay.addEventListener('mousedown', function (e) {
       if (e.target === $smOverlay) closeSnippetManager();
     });
     $smOverlay.querySelector('.sm-close').addEventListener('click', closeSnippetManager);
-    $smOverlay.querySelector('#smAdd').addEventListener('click', function () {
-      var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false };
-      state.customSnippets.push(c);
-      state.snippetOrder.push(c.id);
-      scheduleSave();
-      renderSnippetManager();
-      renderSnippets();
-      // 聚焦到新条目的标签输入
-      var last = $smList.querySelector('.sm-row:last-child .sm-tag');
-      if (last) { last.focus(); last.select(); }
+    $smAddBtn.addEventListener('click', function () {
+      if (SM) SM.addCustom();
     });
   }
 
-  function openSnippetManager() {
+  // ===== 常用句适配器 =====
+  function snippetAdapter() {
+    return {
+      title: '管理常用句',
+      hint: '勾选决定是否在左栏显示 · 点标签或内容可直接编辑 · 用 ↑↓ 调整顺序',
+      addLabel: '新增自定义常用句',
+      tagMax: 20,
+      tagPlaceholder: '标签',
+      textPlaceholder: function (lang) { return lang === 'zh' ? '中文内容' : 'English content'; },
+      order: function () { return state.snippetOrder; },
+      ordered: function () {
+        var lang = state.lang;
+        return orderedSnippets().map(function (s) {
+          return { id: s.id, builtin: s.builtin, hidden: s.hidden, tagValue: s.tag, textValue: s[lang] || '' };
+        });
+      },
+      setHidden: function (id, hidden) {
+        if (BUILTIN_BY_ID[id]) patchBuiltinSnippet(id, 'hidden', hidden);
+        else updateCustomSnippetField(id, 'hidden', hidden);
+      },
+      setTag: function (id, v) {
+        if (BUILTIN_BY_ID[id]) patchBuiltinSnippet(id, 'tag', v);
+        else updateCustomSnippetField(id, 'tag', v);
+      },
+      setText: function (id, v) {
+        var lang = state.lang;
+        if (BUILTIN_BY_ID[id]) patchBuiltinSnippet(id, lang, v);
+        else updateCustomSnippetField(id, lang, v);
+      },
+      isModified: function (id) {
+        var p = state.builtinPatches[id];
+        return !!(p && (p.tag !== undefined || p.zh !== undefined || p.en !== undefined || p.hidden));
+      },
+      reset: function (id) { delete state.builtinPatches[id]; },
+      deleteCustom: function (id) {
+        for (var i = 0; i < state.customSnippets.length; i++) {
+          if (state.customSnippets[i].id === id) { state.customSnippets.splice(i, 1); break; }
+        }
+        var oi = state.snippetOrder.indexOf(id);
+        if (oi >= 0) state.snippetOrder.splice(oi, 1);
+      },
+      addCustom: function () {
+        var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false, hidden: false };
+        state.customSnippets.push(c);
+        state.snippetOrder.push(c.id);
+        scheduleSave();
+        renderSnippetManager();
+        renderLeft();
+        focusLastRow();
+      },
+      renderLeft: renderSnippets
+    };
+  }
+
+  // ===== 插入模块适配器 =====
+  function moduleAdapter() {
+    return {
+      title: '管理插入模块',
+      hint: '勾选决定是否在左栏显示 · 点标签或正文可直接编辑 · 用 ↑↓ 调整顺序',
+      addLabel: '新增自定义模块',
+      tagMax: 20,
+      tagPlaceholder: '标签',
+      textPlaceholder: function (lang) { return lang === 'zh' ? '插入的中文正文' : 'Inserted English text'; },
+      order: function () { return state.moduleOrder; },
+      ordered: function () {
+        var lang = state.lang;
+        return orderedModules().map(function (m) {
+          return { id: m.id, builtin: m.builtin, hidden: m.hidden, tagValue: m.label[lang] || '', textValue: m.text[lang] || '' };
+        });
+      },
+      setHidden: function (id, hidden) {
+        if (MODULE_BY_ID[id]) patchBuiltinModule(id, 'hidden', hidden);
+        else updateCustomModuleHidden(id, hidden);
+      },
+      setTag: function (id, v) {
+        var lang = state.lang;
+        if (MODULE_BY_ID[id]) patchBuiltinModule(id, lang === 'zh' ? 'labelZh' : 'labelEn', v);
+        else updateCustomModuleField(id, 'label', lang, v);
+      },
+      setText: function (id, v) {
+        var lang = state.lang;
+        if (MODULE_BY_ID[id]) patchBuiltinModule(id, lang === 'zh' ? 'textZh' : 'textEn', v);
+        else updateCustomModuleField(id, 'text', lang, v);
+      },
+      isModified: function (id) {
+        var p = state.modulePatches[id];
+        return !!(p && (p.labelZh !== undefined || p.labelEn !== undefined ||
+                        p.textZh !== undefined || p.textEn !== undefined || p.hidden));
+      },
+      reset: function (id) { delete state.modulePatches[id]; },
+      deleteCustom: function (id) {
+        for (var i = 0; i < state.customModules.length; i++) {
+          if (state.customModules[i].id === id) { state.customModules.splice(i, 1); break; }
+        }
+        var oi = state.moduleOrder.indexOf(id);
+        if (oi >= 0) state.moduleOrder.splice(oi, 1);
+      },
+      addCustom: function () {
+        var m = { id: newModuleId(), label: { zh: '新模块', en: 'New module' }, text: { zh: '', en: '' }, builtin: false, hidden: false };
+        state.customModules.push(m);
+        state.moduleOrder.push(m.id);
+        scheduleSave();
+        renderSnippetManager();
+        renderLeft();
+        focusLastRow();
+      },
+      renderLeft: renderInsertGrid
+    };
+  }
+
+  function focusLastRow() {
+    var last = $smList && $smList.querySelector('.sm-row:last-child .sm-tag');
+    if (last) { last.focus(); last.select(); }
+  }
+  function renderLeft() { if (SM) SM.renderLeft(); }
+
+  // 内置句 patch（与默认相同则清除，避免冗余）
+  function patchBuiltinSnippet(id, field, value) {
+    var b = BUILTIN_BY_ID[id];
+    if (!b) return;
+    var p = state.builtinPatches[id] || {};
+    if (field === 'hidden') { if (value) p.hidden = true; else delete p.hidden; }
+    else { if (value === b[field]) delete p[field]; else p[field] = value; }
+    if (p.tag === undefined && p.zh === undefined && p.en === undefined && !p.hidden) delete state.builtinPatches[id];
+    else state.builtinPatches[id] = p;
+  }
+  function updateCustomSnippetField(id, field, value) {
+    for (var i = 0; i < state.customSnippets.length; i++) {
+      if (state.customSnippets[i].id === id) { state.customSnippets[i][field] = value; return; }
+    }
+  }
+
+  // 内置模块 patch（与默认相同则清除）
+  function patchBuiltinModule(id, field, value) {
+    var b = MODULE_BY_ID[id];
+    if (!b) return;
+    var defVal;
+    if (field === 'labelZh') defVal = b.label.zh;
+    else if (field === 'labelEn') defVal = b.label.en;
+    else if (field === 'textZh') defVal = b.text.zh;
+    else if (field === 'textEn') defVal = b.text.en;
+    var p = state.modulePatches[id] || {};
+    if (field === 'hidden') { if (value) p.hidden = true; else delete p.hidden; }
+    else { if (value === defVal) delete p[field]; else p[field] = value; }
+    if (p.labelZh === undefined && p.labelEn === undefined &&
+        p.textZh === undefined && p.textEn === undefined && !p.hidden) delete state.modulePatches[id];
+    else state.modulePatches[id] = p;
+  }
+  function updateCustomModuleField(id, kind, lang, value) {
+    for (var i = 0; i < state.customModules.length; i++) {
+      if (state.customModules[i].id === id) { state.customModules[i][kind][lang] = value; return; }
+    }
+  }
+  function updateCustomModuleHidden(id, hidden) {
+    for (var i = 0; i < state.customModules.length; i++) {
+      if (state.customModules[i].id === id) { state.customModules[i].hidden = hidden; return; }
+    }
+  }
+
+  function openSnippetManager() { openManager(snippetAdapter()); }
+  function openModuleManager() { openManager(moduleAdapter()); }
+
+  function openManager(adapter) {
     ensureSnippetManager();
-    renderSnippetManager();
+    SM = adapter;
+    $smTitle.textContent = adapter.title;
+    $smOverlay.setAttribute('aria-label', adapter.title);
+    $smHint.textContent = adapter.hint;
+    $smAddBtn.querySelector('.sm-add-label').textContent = adapter.addLabel;
     $smOverlay.classList.add('show');
+    renderSnippetManager();
     smKeyHandler = function (e) { if (e.key === 'Escape') closeSnippetManager(); };
     document.addEventListener('keydown', smKeyHandler);
     var first = $smOverlay.querySelector('.sm-close');
@@ -1091,25 +1327,8 @@
     if (smKeyHandler) { document.removeEventListener('keydown', smKeyHandler); smKeyHandler = null; }
   }
 
-  // 修改内置句的某字段：与默认相同则清除 patch，避免存冗余
-  function patchBuiltin(id, field, value) {
-    var b = BUILTIN_BY_ID[id];
-    if (!b) return;
-    var p = state.builtinPatches[id] || {};
-    if (field === 'hidden') {
-      if (value) p.hidden = true; else delete p.hidden;
-    } else {
-      if (value === b[field]) delete p[field]; else p[field] = value;
-    }
-    if (p.tag === undefined && p.zh === undefined && p.en === undefined && !p.hidden) {
-      delete state.builtinPatches[id];
-    } else {
-      state.builtinPatches[id] = p;
-    }
-  }
-
-  function moveSnippet(id, dir) {
-    var order = state.snippetOrder;
+  function moveManagerItem(id, dir) {
+    var order = SM.order();
     var i = order.indexOf(id);
     if (i < 0) return;
     var j = i + dir;
@@ -1117,58 +1336,34 @@
     var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
     scheduleSave();
     renderSnippetManager();
-    renderSnippets();
-  }
-
-  function deleteCustomSnippet(id) {
-    for (var i = 0; i < state.customSnippets.length; i++) {
-      if (state.customSnippets[i].id === id) { state.customSnippets.splice(i, 1); break; }
-    }
-    var oi = state.snippetOrder.indexOf(id);
-    if (oi >= 0) state.snippetOrder.splice(oi, 1);
-    scheduleSave();
-    renderSnippetManager();
-    renderSnippets();
-  }
-
-  function isBuiltinModified(id) {
-    var p = state.builtinPatches[id];
-    return !!(p && (p.tag !== undefined || p.zh !== undefined || p.en !== undefined || p.hidden));
-  }
-
-  function resetBuiltin(id) {
-    delete state.builtinPatches[id];
-    scheduleSave();
-    renderSnippetManager();
-    renderSnippets();
+    renderLeft();
   }
 
   function renderSnippetManager() {
-    if (!$smList) return;
+    if (!$smList || !SM) return;
     var lang = state.lang;
-    var order = state.snippetOrder;
+    var order = SM.order();
     $smList.innerHTML = '';
 
-    orderedSnippets().forEach(function (snip, idx) {
+    SM.ordered().forEach(function (item, idx) {
       var row = document.createElement('div');
-      row.className = 'sm-row' + (snip.hidden ? ' hidden' : '');
+      row.className = 'sm-row' + (item.hidden ? ' hidden' : '');
       var resetBtn = null;
-      function syncReset() { if (resetBtn) resetBtn.disabled = !isBuiltinModified(snip.id); }
+      function syncReset() { if (resetBtn) resetBtn.disabled = !SM.isModified(item.id); }
 
       // 显示/隐藏开关
       var chk = document.createElement('input');
       chk.type = 'checkbox';
       chk.className = 'sm-chk';
-      chk.checked = !snip.hidden;
-      chk.title = snip.hidden ? '已隐藏，勾选以显示' : '已显示，取消勾选以隐藏';
-      chk.setAttribute('aria-label', '显示 ' + snip.tag);
+      chk.checked = !item.hidden;
+      chk.title = item.hidden ? '已隐藏，勾选以显示' : '已显示，取消勾选以隐藏';
+      chk.setAttribute('aria-label', '显示 ' + item.tagValue);
       chk.addEventListener('change', function () {
-        patchBuiltin(snip.id, 'hidden', !chk.checked);
+        SM.setHidden(item.id, !chk.checked);
         scheduleSave();
         renderSnippetManager();
-        renderSnippets();
+        renderLeft();
       });
-      if (!snip.builtin) { chk.checked = true; chk.disabled = true; chk.title = '自定义常用句始终显示'; }
       row.appendChild(chk);
 
       // 主体：标签 + 内容
@@ -1178,34 +1373,30 @@
       var tag = document.createElement('input');
       tag.type = 'text';
       tag.className = 'sm-tag';
-      tag.value = snip.tag;
-      tag.maxLength = 20;
-      tag.placeholder = '标签';
+      tag.value = item.tagValue;
+      tag.maxLength = SM.tagMax;
+      tag.placeholder = SM.tagPlaceholder;
       tag.setAttribute('aria-label', '标签');
       tag.addEventListener('input', function () {
-        var v = tag.value;
-        if (snip.builtin) patchBuiltin(snip.id, 'tag', v);
-        else updateCustomField(snip.id, 'tag', v);
+        SM.setTag(item.id, tag.value);
         syncReset();
         scheduleSave();
-        renderSnippets();
+        renderLeft();
       });
       body.appendChild(tag);
 
       var text = document.createElement('textarea');
       text.className = 'sm-text';
       text.rows = 1;
-      text.value = snip[lang] || '';
-      text.placeholder = lang === 'zh' ? '中文内容' : 'English content';
+      text.value = item.textValue;
+      text.placeholder = SM.textPlaceholder(lang);
       text.setAttribute('aria-label', '内容');
       text.addEventListener('input', function () {
-        var v = text.value;
-        if (snip.builtin) patchBuiltin(snip.id, lang, v);
-        else updateCustomField(snip.id, lang, v);
+        SM.setText(item.id, text.value);
         autosizeSm(text);
         syncReset();
         scheduleSave();
-        renderSnippets();
+        renderLeft();
       });
       body.appendChild(text);
       row.appendChild(body);
@@ -1215,39 +1406,43 @@
       ops.className = 'sm-ops';
 
       var up = mkOpBtn('↑', '上移', idx === 0);
-      up.addEventListener('click', function () { moveSnippet(snip.id, -1); });
+      up.addEventListener('click', function () { moveManagerItem(item.id, -1); });
       var down = mkOpBtn('↓', '下移', idx === order.length - 1);
-      down.addEventListener('click', function () { moveSnippet(snip.id, 1); });
+      down.addEventListener('click', function () { moveManagerItem(item.id, 1); });
       ops.appendChild(up);
       ops.appendChild(down);
 
-      if (snip.builtin) {
-        resetBtn = mkOpBtn('↺', '恢复默认', !isBuiltinModified(snip.id));
-        resetBtn.addEventListener('click', function () { resetBuiltin(snip.id); });
+      if (item.builtin) {
+        resetBtn = mkOpBtn('↺', '恢复默认', !SM.isModified(item.id));
+        resetBtn.addEventListener('click', function () {
+          SM.reset(item.id);
+          scheduleSave();
+          renderSnippetManager();
+          renderLeft();
+        });
         ops.appendChild(resetBtn);
       } else {
         var del = mkOpBtn('×', '删除', false);
         del.classList.add('danger');
-        del.addEventListener('click', function () { deleteCustomSnippet(snip.id); });
+        del.addEventListener('click', function () {
+          SM.deleteCustom(item.id);
+          scheduleSave();
+          renderSnippetManager();
+          renderLeft();
+        });
         ops.appendChild(del);
       }
       row.appendChild(ops);
 
       // 类型标记
       var badge = document.createElement('span');
-      badge.className = 'sm-badge' + (snip.builtin ? ' builtin' : ' custom');
-      badge.textContent = snip.builtin ? '内置' : '自定义';
+      badge.className = 'sm-badge' + (item.builtin ? ' builtin' : ' custom');
+      badge.textContent = item.builtin ? '内置' : '自定义';
       row.appendChild(badge);
 
       $smList.appendChild(row);
       autosizeSm(text);
     });
-  }
-
-  function updateCustomField(id, field, value) {
-    for (var i = 0; i < state.customSnippets.length; i++) {
-      if (state.customSnippets[i].id === id) { state.customSnippets[i][field] = value; return; }
-    }
   }
 
   function mkOpBtn(label, title, disabled) {
@@ -1689,6 +1884,8 @@
 
   var $btnManageSnippets = document.getElementById('btnManageSnippets');
   if ($btnManageSnippets) $btnManageSnippets.addEventListener('click', openSnippetManager);
+  var $btnManageModules = document.getElementById('btnManageModules');
+  if ($btnManageModules) $btnManageModules.addEventListener('click', openModuleManager);
 
   var $themeToggle = document.getElementById('themeToggle');
   $themeToggle.addEventListener('click', function () {
