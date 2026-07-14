@@ -1,0 +1,20 @@
+# --- Node / 前端依赖 ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Rust / Tauri 编译产物 ---
+src-tauri/target/
+
+# --- Tauri 生成物（图标、移动端脚手架等，由 CLI 生成）---
+src-tauri/gen/
+
+# --- 系统 / 编辑器 ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
