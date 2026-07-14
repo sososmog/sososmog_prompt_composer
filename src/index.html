@@ -187,8 +187,16 @@
     color:var(--muted);
     display:flex; align-items:center; gap:8px;
   }
-  .rail-section-title::after { content:''; flex:1; height:1px; background:var(--line); }
+  .rail-section-title .rst-line { flex:1; }
+  .rail-section-title .rst-gear { margin-left:auto; }
   .rail-section-title .rst-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); letter-spacing:0; text-transform:none; }
+  .rst-gear {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:28px; height:28px; border-radius:6px; flex:none;
+    border:1px solid transparent; background:transparent; color:var(--muted);
+    cursor:pointer; transition:background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .rst-gear:hover { background:var(--surface); color:var(--amber); border-color:var(--line); }
 
   /* 插入模块：小药丸网格 */
   .insert-grid { display:flex; flex-wrap:wrap; gap:6px; }
@@ -212,8 +220,6 @@
     cursor:pointer; transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
   .snippet-pill:hover { background:var(--amber-soft); border-color:var(--amber-deep); color:var(--amber); }
-  .snippet-pill .remove-x { color:var(--faint); font-size:13px; line-height:1; }
-  .snippet-pill .remove-x:hover { color:var(--warn); }
   .snippet-add {
     display:inline-flex; align-items:center; justify-content:center;
     width:24px; height:24px; border-radius:999px;
@@ -221,10 +227,88 @@
     cursor:pointer; font-size:13px; transition:border-color 0.12s ease, color 0.12s ease;
   }
   .snippet-add:hover { border-color:var(--amber); color:var(--amber); }
-  .snippet-add-input {
-    border:1px solid var(--amber); background:var(--surface-inset);
-    border-radius:999px; padding:5px 11px; font-size:11.5px; min-width:150px; color:var(--text);
+
+  /* 管理常用句浮窗 */
+  .sm-overlay {
+    position:fixed; inset:0; z-index:1000;
+    display:none; align-items:center; justify-content:center;
+    background:rgba(15,15,15,0.42); backdrop-filter:blur(2px);
+    padding:24px;
   }
+  .sm-overlay.show { display:flex; }
+  .sm-panel {
+    width:min(640px, 100%); max-height:min(82vh, 720px);
+    display:flex; flex-direction:column;
+    background:var(--bg-editor); border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:var(--shadow-toast);
+    overflow:hidden;
+  }
+  .sm-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 20px 12px; border-bottom:1px solid var(--line-soft); flex:none;
+  }
+  .sm-title { font-size:15px; font-weight:600; color:var(--text); }
+  .sm-close {
+    width:28px; height:28px; border-radius:var(--radius-sm);
+    border:1px solid transparent; background:transparent; color:var(--muted);
+    font-size:18px; line-height:1; cursor:pointer;
+    transition:background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .sm-close:hover { background:var(--surface); color:var(--text); border-color:var(--line); }
+  .sm-hint { padding:10px 20px 4px; font-size:11.5px; color:var(--muted); flex:none; }
+  .sm-list { padding:8px 20px; overflow-y:auto; flex:1 1 auto; }
+  .sm-row {
+    display:grid;
+    grid-template-columns:auto 1fr auto auto;
+    align-items:start; gap:10px;
+    padding:10px 0; border-bottom:1px solid var(--line-soft);
+  }
+  .sm-row:last-child { border-bottom:none; }
+  .sm-row.hidden .sm-body { opacity:0.5; }
+  .sm-chk { margin-top:8px; width:15px; height:15px; cursor:pointer; accent-color:var(--amber); flex:none; }
+  .sm-chk:disabled { cursor:not-allowed; opacity:0.55; }
+  .sm-body { display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .sm-tag {
+    font-size:12px; font-weight:600; color:var(--text);
+    border:1px solid transparent; background:transparent; border-radius:5px;
+    padding:3px 6px; width:100%;
+    transition:border-color 0.12s ease, background 0.12s ease;
+  }
+  .sm-tag:hover { background:var(--surface); }
+  .sm-tag:focus { border-color:var(--amber-deep); background:var(--surface-inset); outline:none; }
+  .sm-text {
+    font-family:var(--font-read); font-size:12px; color:var(--text-soft);
+    border:1px solid var(--line); background:var(--surface-inset); border-radius:5px;
+    padding:5px 7px; width:100%; resize:none; overflow:hidden; line-height:1.5;
+    min-height:30px; box-sizing:border-box;
+    transition:border-color 0.12s ease;
+  }
+  .sm-text:focus { border-color:var(--amber-deep); outline:none; }
+  .sm-ops { display:flex; gap:3px; flex:none; margin-top:2px; }
+  .sm-op {
+    width:24px; height:24px; border-radius:5px;
+    border:1px solid var(--line); background:var(--surface); color:var(--text-soft);
+    font-size:13px; line-height:1; cursor:pointer;
+    transition:border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  }
+  .sm-op:hover:not(:disabled) { border-color:var(--amber-deep); color:var(--amber); }
+  .sm-op.danger:hover:not(:disabled) { border-color:var(--warn); color:var(--warn); }
+  .sm-op:disabled { opacity:0.32; cursor:default; }
+  .sm-badge {
+    font-size:10px; padding:2px 7px; border-radius:999px; flex:none; margin-top:3px;
+    white-space:nowrap; align-self:start;
+  }
+  .sm-badge.builtin { background:var(--surface-hi); color:var(--muted); }
+  .sm-badge.custom { background:var(--amber-soft); color:var(--amber); }
+  .sm-foot { padding:12px 20px 16px; border-top:1px solid var(--line-soft); flex:none; }
+  .sm-add {
+    display:inline-flex; align-items:center; gap:7px;
+    border:1px dashed var(--line-hi); background:transparent; color:var(--text-soft);
+    border-radius:var(--radius-sm); padding:8px 14px; font-size:12.5px; cursor:pointer;
+    transition:border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  }
+  .sm-add:hover { border-color:var(--amber); color:var(--amber); background:var(--amber-soft); }
+  .sm-add span { font-size:15px; line-height:1; }
 
   .btn-ghost-rail {
     display:inline-flex; align-items:center; gap:6px;
@@ -482,7 +566,13 @@
       </div>
 
       <div class="rail-section">
-        <div class="rail-section-title">常用句</div>
+        <div class="rail-section-title has-action">
+          <span class="rst-label">常用句</span>
+          <span class="rst-line"></span>
+          <button type="button" class="rst-gear" id="btnManageSnippets" title="管理常用句" aria-label="管理常用句">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </button>
+        </div>
         <div class="snippet-wrap" id="snippetWrap"></div>
       </div>
     </div>
@@ -584,17 +674,19 @@
   ];
 
   var BUILTIN_SNIPPETS = [
-    { tag: '分步思考', zh: '请先一步步思考，再给出最终答案。', en: 'Think step by step, then give the final answer.', builtin: true },
-    { tag: '先给结论', zh: '请先给出结论，再展开说明理由。', en: 'State the conclusion first, then explain the reasoning.', builtin: true },
-    { tag: '保持简洁', zh: '回答请保持简洁，避免冗余表述。', en: 'Keep the answer concise and avoid redundancy.', builtin: true },
-    { tag: '语气专业', zh: '请使用专业、客观的语气。', en: 'Use a professional and objective tone.', builtin: true },
-    { tag: '举例说明', zh: '请结合具体例子进行说明。', en: 'Illustrate with concrete examples.', builtin: true },
-    { tag: '分点列出', zh: '请使用分点列表清晰呈现。', en: 'Present the answer as a clear bulleted list.', builtin: true },
-    { tag: '面向新手', zh: '面向零基础用户解释。', en: 'Explain for a complete beginner.', builtin: true },
-    { tag: '不要编造', zh: '不确定时如实说明，不要编造。', en: 'If uncertain, say so — do not make things up.', builtin: true },
-    { tag: 'Markdown', zh: '请使用 Markdown 格式输出。', en: 'Format the output using Markdown.', builtin: true },
-    { tag: '限制字数', zh: '请将回答控制在 200 字以内。', en: 'Limit the response to about 200 words.', builtin: true }
+    { id: 'b_step',     tag: '分步思考', zh: '请先一步步思考，再给出最终答案。', en: 'Think step by step, then give the final answer.', builtin: true },
+    { id: 'b_concl',    tag: '先给结论', zh: '请先给出结论，再展开说明理由。', en: 'State the conclusion first, then explain the reasoning.', builtin: true },
+    { id: 'b_concise',  tag: '保持简洁', zh: '回答请保持简洁，避免冗余表述。', en: 'Keep the answer concise and avoid redundancy.', builtin: true },
+    { id: 'b_tone',     tag: '语气专业', zh: '请使用专业、客观的语气。', en: 'Use a professional and objective tone.', builtin: true },
+    { id: 'b_example',  tag: '举例说明', zh: '请结合具体例子进行说明。', en: 'Illustrate with concrete examples.', builtin: true },
+    { id: 'b_bullets',  tag: '分点列出', zh: '请使用分点列表清晰呈现。', en: 'Present the answer as a clear bulleted list.', builtin: true },
+    { id: 'b_beginner', tag: '面向新手', zh: '面向零基础用户解释。', en: 'Explain for a complete beginner.', builtin: true },
+    { id: 'b_nofab',    tag: '不要编造', zh: '不确定时如实说明，不要编造。', en: 'If uncertain, say so — do not make things up.', builtin: true },
+    { id: 'b_md',       tag: 'Markdown', zh: '请使用 Markdown 格式输出。', en: 'Format the output using Markdown.', builtin: true },
+    { id: 'b_limit',    tag: '限制字数', zh: '请将回答控制在 200 字以内。', en: 'Limit the response to about 200 words.', builtin: true }
   ];
+  var BUILTIN_BY_ID = {};
+  BUILTIN_SNIPPETS.forEach(function (b) { BUILTIN_BY_ID[b.id] = b; });
 
   function demoContent() {
     return {
@@ -604,7 +696,19 @@
   }
 
   function defaultState() {
-    return { lang: 'zh', content: demoContent(), customSnippets: [] };
+    return {
+      lang: 'zh',
+      content: demoContent(),
+      customSnippets: [],
+      builtinPatches: {},                              // { builtinId: {tag?, zh?, en?, hidden?} }
+      snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; })
+    };
+  }
+
+  var snippetSeq = 0;
+  function newSnippetId() {
+    snippetSeq++;
+    return 'c_' + Date.now().toString(36) + '_' + snippetSeq.toString(36);
   }
 
   /* ============================================================
@@ -677,8 +781,51 @@
     }
 
     if (Array.isArray(raw.customSnippets)) {
-      s.customSnippets = raw.customSnippets.filter(function (sn) { return sn && typeof sn.tag === 'string'; });
+      s.customSnippets = raw.customSnippets
+        .filter(function (sn) { return sn && typeof sn.tag === 'string'; })
+        .map(function (sn) {
+          return {
+            id: (typeof sn.id === 'string' && sn.id) ? sn.id : newSnippetId(),
+            tag: sn.tag,
+            zh: typeof sn.zh === 'string' ? sn.zh : (sn.text || ''),
+            en: typeof sn.en === 'string' ? sn.en : (sn.text || ''),
+            builtin: false
+          };
+        });
     }
+
+    // 内置句覆盖（隐藏 / 改标签 / 改内容）
+    s.builtinPatches = {};
+    if (raw.builtinPatches && typeof raw.builtinPatches === 'object') {
+      Object.keys(raw.builtinPatches).forEach(function (id) {
+        if (!BUILTIN_BY_ID[id]) return;
+        var p = raw.builtinPatches[id];
+        if (!p || typeof p !== 'object') return;
+        var clean = {};
+        if (typeof p.tag === 'string') clean.tag = p.tag;
+        if (typeof p.zh === 'string') clean.zh = p.zh;
+        if (typeof p.en === 'string') clean.en = p.en;
+        if (p.hidden === true) clean.hidden = true;
+        s.builtinPatches[id] = clean;
+      });
+    }
+
+    // 顺序：以存档顺序为准，去掉失效 id，再把新出现的补到末尾
+    var validIds = {};
+    BUILTIN_SNIPPETS.forEach(function (b) { validIds[b.id] = true; });
+    s.customSnippets.forEach(function (c) { validIds[c.id] = true; });
+    var order = [];
+    var seen = {};
+    if (Array.isArray(raw.snippetOrder)) {
+      raw.snippetOrder.forEach(function (id) {
+        if (typeof id === 'string' && validIds[id] && !seen[id]) { order.push(id); seen[id] = true; }
+      });
+    }
+    // 补齐：先内置再自定义，保持各自默认顺序
+    BUILTIN_SNIPPETS.forEach(function (b) { if (!seen[b.id]) { order.push(b.id); seen[b.id] = true; } });
+    s.customSnippets.forEach(function (c) { if (!seen[c.id]) { order.push(c.id); seen[c.id] = true; } });
+    s.snippetOrder = order;
+
     return s;
   }
 
@@ -822,7 +969,37 @@
     });
   }
 
-  function allSnippets() { return BUILTIN_SNIPPETS.concat(state.customSnippets); }
+  // 把一个 id 解析成可用的句子对象（内置合并覆盖；返回含 hidden 标记）
+  function resolveSnippet(id) {
+    var b = BUILTIN_BY_ID[id];
+    if (b) {
+      var p = state.builtinPatches[id] || {};
+      return {
+        id: id,
+        builtin: true,
+        tag: typeof p.tag === 'string' ? p.tag : b.tag,
+        zh: typeof p.zh === 'string' ? p.zh : b.zh,
+        en: typeof p.en === 'string' ? p.en : b.en,
+        hidden: p.hidden === true
+      };
+    }
+    var c = null;
+    for (var i = 0; i < state.customSnippets.length; i++) {
+      if (state.customSnippets[i].id === id) { c = state.customSnippets[i]; break; }
+    }
+    if (!c) return null;
+    return { id: id, builtin: false, tag: c.tag, zh: c.zh, en: c.en, hidden: false };
+  }
+
+  // 按顺序返回全部句子（含隐藏，供管理浮窗使用）
+  function orderedSnippets() {
+    return state.snippetOrder.map(resolveSnippet).filter(Boolean);
+  }
+
+  // 左栏可见句子（排除隐藏）
+  function allSnippets() {
+    return orderedSnippets().filter(function (s) { return !s.hidden; });
+  }
 
   function renderSnippets() {
     var lang = state.lang;
@@ -834,25 +1011,9 @@
       var t = document.createElement('span');
       t.textContent = snip.tag;
       pill.appendChild(t);
-      pill.addEventListener('click', function (e) {
-        if (e.target.classList.contains('remove-x')) return;
+      pill.addEventListener('click', function () {
         insertSnippet(snip[lang] || snip.zh || snip.en);
       });
-      if (!snip.builtin) {
-        var x = document.createElement('span');
-        x.className = 'remove-x';
-        x.textContent = '×';
-        x.setAttribute('role', 'button');
-        x.setAttribute('aria-label', '删除自定义常用句 ' + snip.tag);
-        x.addEventListener('click', function (e) {
-          e.stopPropagation();
-          var i = state.customSnippets.indexOf(snip);
-          if (i >= 0) state.customSnippets.splice(i, 1);
-          renderSnippets();
-          scheduleSave();
-        });
-        pill.appendChild(x);
-      }
       $snippetWrap.appendChild(pill);
     });
 
@@ -862,38 +1023,253 @@
     add.setAttribute('aria-label', '添加自定义常用句');
     add.title = '添加自定义常用句';
     add.textContent = '+';
-    add.addEventListener('click', function () { openSnippetAdd(add); });
+    add.addEventListener('click', openSnippetAdd);
     $snippetWrap.appendChild(add);
   }
 
-  function openSnippetAdd(addBtn) {
-    if ($snippetWrap.querySelector('.snippet-add-input')) return;
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'snippet-add-input';
-    input.placeholder = '输入常用句，回车保存';
-    $snippetWrap.insertBefore(input, addBtn);
-    input.focus();
+  // 左栏快速添加：新建一条空白自定义句并直接打开管理浮窗聚焦到它
+  function openSnippetAdd() {
+    var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false };
+    state.customSnippets.push(c);
+    state.snippetOrder.push(c.id);
+    scheduleSave();
+    renderSnippets();
+    openSnippetManager();
+    var row = $smList && $smList.querySelector('.sm-row:last-child .sm-tag');
+    if (row) { row.focus(); row.select(); }
+  }
 
-    var committed = false;
-    function commit() {
-      if (committed) return;
-      committed = true;
-      var text = input.value.trim();
-      if (text) {
-        var tag = text.length > 8 ? (text.slice(0, 8) + '…') : text;
-        state.customSnippets.push({ tag: tag, zh: text, en: text, builtin: false });
-        renderSnippets();
-        scheduleSave();
-      } else {
-        input.remove();
-      }
-    }
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      else if (e.key === 'Escape') { input.remove(); }
+  /* ---------- 管理常用句浮窗 ---------- */
+  var $smOverlay = null, $smList = null, smKeyHandler = null;
+
+  function ensureSnippetManager() {
+    if ($smOverlay) return;
+    $smOverlay = document.createElement('div');
+    $smOverlay.className = 'sm-overlay';
+    $smOverlay.setAttribute('role', 'dialog');
+    $smOverlay.setAttribute('aria-modal', 'true');
+    $smOverlay.setAttribute('aria-label', '管理常用句');
+    $smOverlay.innerHTML =
+      '<div class="sm-panel">' +
+        '<div class="sm-head">' +
+          '<span class="sm-title">管理常用句</span>' +
+          '<button type="button" class="sm-close" aria-label="关闭">×</button>' +
+        '</div>' +
+        '<div class="sm-hint">勾选决定是否在左栏显示 · 点标签或内容可直接编辑 · 用 ↑↓ 调整顺序</div>' +
+        '<div class="sm-list" id="smList"></div>' +
+        '<div class="sm-foot">' +
+          '<button type="button" class="sm-add" id="smAdd"><span>+</span> 新增自定义常用句</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild($smOverlay);
+    $smList = $smOverlay.querySelector('#smList');
+
+    $smOverlay.addEventListener('mousedown', function (e) {
+      if (e.target === $smOverlay) closeSnippetManager();
     });
-    input.addEventListener('blur', function () { setTimeout(commit, 0); });
+    $smOverlay.querySelector('.sm-close').addEventListener('click', closeSnippetManager);
+    $smOverlay.querySelector('#smAdd').addEventListener('click', function () {
+      var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false };
+      state.customSnippets.push(c);
+      state.snippetOrder.push(c.id);
+      scheduleSave();
+      renderSnippetManager();
+      renderSnippets();
+      // 聚焦到新条目的标签输入
+      var last = $smList.querySelector('.sm-row:last-child .sm-tag');
+      if (last) { last.focus(); last.select(); }
+    });
+  }
+
+  function openSnippetManager() {
+    ensureSnippetManager();
+    renderSnippetManager();
+    $smOverlay.classList.add('show');
+    smKeyHandler = function (e) { if (e.key === 'Escape') closeSnippetManager(); };
+    document.addEventListener('keydown', smKeyHandler);
+    var first = $smOverlay.querySelector('.sm-close');
+    if (first) first.focus();
+  }
+
+  function closeSnippetManager() {
+    if (!$smOverlay) return;
+    $smOverlay.classList.remove('show');
+    if (smKeyHandler) { document.removeEventListener('keydown', smKeyHandler); smKeyHandler = null; }
+  }
+
+  // 修改内置句的某字段：与默认相同则清除 patch，避免存冗余
+  function patchBuiltin(id, field, value) {
+    var b = BUILTIN_BY_ID[id];
+    if (!b) return;
+    var p = state.builtinPatches[id] || {};
+    if (field === 'hidden') {
+      if (value) p.hidden = true; else delete p.hidden;
+    } else {
+      if (value === b[field]) delete p[field]; else p[field] = value;
+    }
+    if (p.tag === undefined && p.zh === undefined && p.en === undefined && !p.hidden) {
+      delete state.builtinPatches[id];
+    } else {
+      state.builtinPatches[id] = p;
+    }
+  }
+
+  function moveSnippet(id, dir) {
+    var order = state.snippetOrder;
+    var i = order.indexOf(id);
+    if (i < 0) return;
+    var j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+    scheduleSave();
+    renderSnippetManager();
+    renderSnippets();
+  }
+
+  function deleteCustomSnippet(id) {
+    for (var i = 0; i < state.customSnippets.length; i++) {
+      if (state.customSnippets[i].id === id) { state.customSnippets.splice(i, 1); break; }
+    }
+    var oi = state.snippetOrder.indexOf(id);
+    if (oi >= 0) state.snippetOrder.splice(oi, 1);
+    scheduleSave();
+    renderSnippetManager();
+    renderSnippets();
+  }
+
+  function isBuiltinModified(id) {
+    var p = state.builtinPatches[id];
+    return !!(p && (p.tag !== undefined || p.zh !== undefined || p.en !== undefined || p.hidden));
+  }
+
+  function resetBuiltin(id) {
+    delete state.builtinPatches[id];
+    scheduleSave();
+    renderSnippetManager();
+    renderSnippets();
+  }
+
+  function renderSnippetManager() {
+    if (!$smList) return;
+    var lang = state.lang;
+    var order = state.snippetOrder;
+    $smList.innerHTML = '';
+
+    orderedSnippets().forEach(function (snip, idx) {
+      var row = document.createElement('div');
+      row.className = 'sm-row' + (snip.hidden ? ' hidden' : '');
+      var resetBtn = null;
+      function syncReset() { if (resetBtn) resetBtn.disabled = !isBuiltinModified(snip.id); }
+
+      // 显示/隐藏开关
+      var chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'sm-chk';
+      chk.checked = !snip.hidden;
+      chk.title = snip.hidden ? '已隐藏，勾选以显示' : '已显示，取消勾选以隐藏';
+      chk.setAttribute('aria-label', '显示 ' + snip.tag);
+      chk.addEventListener('change', function () {
+        patchBuiltin(snip.id, 'hidden', !chk.checked);
+        scheduleSave();
+        renderSnippetManager();
+        renderSnippets();
+      });
+      if (!snip.builtin) { chk.checked = true; chk.disabled = true; chk.title = '自定义常用句始终显示'; }
+      row.appendChild(chk);
+
+      // 主体：标签 + 内容
+      var body = document.createElement('div');
+      body.className = 'sm-body';
+
+      var tag = document.createElement('input');
+      tag.type = 'text';
+      tag.className = 'sm-tag';
+      tag.value = snip.tag;
+      tag.maxLength = 20;
+      tag.placeholder = '标签';
+      tag.setAttribute('aria-label', '标签');
+      tag.addEventListener('input', function () {
+        var v = tag.value;
+        if (snip.builtin) patchBuiltin(snip.id, 'tag', v);
+        else updateCustomField(snip.id, 'tag', v);
+        syncReset();
+        scheduleSave();
+        renderSnippets();
+      });
+      body.appendChild(tag);
+
+      var text = document.createElement('textarea');
+      text.className = 'sm-text';
+      text.rows = 1;
+      text.value = snip[lang] || '';
+      text.placeholder = lang === 'zh' ? '中文内容' : 'English content';
+      text.setAttribute('aria-label', '内容');
+      text.addEventListener('input', function () {
+        var v = text.value;
+        if (snip.builtin) patchBuiltin(snip.id, lang, v);
+        else updateCustomField(snip.id, lang, v);
+        autosizeSm(text);
+        syncReset();
+        scheduleSave();
+        renderSnippets();
+      });
+      body.appendChild(text);
+      row.appendChild(body);
+
+      // 操作区
+      var ops = document.createElement('div');
+      ops.className = 'sm-ops';
+
+      var up = mkOpBtn('↑', '上移', idx === 0);
+      up.addEventListener('click', function () { moveSnippet(snip.id, -1); });
+      var down = mkOpBtn('↓', '下移', idx === order.length - 1);
+      down.addEventListener('click', function () { moveSnippet(snip.id, 1); });
+      ops.appendChild(up);
+      ops.appendChild(down);
+
+      if (snip.builtin) {
+        resetBtn = mkOpBtn('↺', '恢复默认', !isBuiltinModified(snip.id));
+        resetBtn.addEventListener('click', function () { resetBuiltin(snip.id); });
+        ops.appendChild(resetBtn);
+      } else {
+        var del = mkOpBtn('×', '删除', false);
+        del.classList.add('danger');
+        del.addEventListener('click', function () { deleteCustomSnippet(snip.id); });
+        ops.appendChild(del);
+      }
+      row.appendChild(ops);
+
+      // 类型标记
+      var badge = document.createElement('span');
+      badge.className = 'sm-badge' + (snip.builtin ? ' builtin' : ' custom');
+      badge.textContent = snip.builtin ? '内置' : '自定义';
+      row.appendChild(badge);
+
+      $smList.appendChild(row);
+      autosizeSm(text);
+    });
+  }
+
+  function updateCustomField(id, field, value) {
+    for (var i = 0; i < state.customSnippets.length; i++) {
+      if (state.customSnippets[i].id === id) { state.customSnippets[i][field] = value; return; }
+    }
+  }
+
+  function mkOpBtn(label, title, disabled) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sm-op';
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    if (disabled) b.disabled = true;
+    return b;
+  }
+
+  function autosizeSm(area) {
+    area.style.height = 'auto';
+    area.style.height = (area.scrollHeight) + 'px';
   }
 
   /* ============================================================
@@ -1317,6 +1693,9 @@
   $btnCopy.addEventListener('click', doCopy);
   $btnDownload.addEventListener('click', doDownload);
 
+  var $btnManageSnippets = document.getElementById('btnManageSnippets');
+  if ($btnManageSnippets) $btnManageSnippets.addEventListener('click', openSnippetManager);
+
   var $themeToggle = document.getElementById('themeToggle');
   $themeToggle.addEventListener('click', function () {
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -1371,6 +1750,7 @@
     renderInsertGrid();
     renderSnippets();
     renderEditor();
+    if ($smOverlay && $smOverlay.classList.contains('show')) renderSnippetManager();
   }
 
   restoreState();
