@@ -106,6 +106,30 @@
     font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase;
     color:var(--faint);
   }
+  .fw-toolbar-left { display:flex; align-items:center; gap:10px; min-width:0; }
+
+  /* 自动粘贴开关：小拨片 + 文字说明 */
+  .fw-autopaste {
+    display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none;
+  }
+  .fw-autopaste input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
+  .fw-autopaste-slider {
+    position:relative; flex:none; width:24px; height:13px; border-radius:999px;
+    background:var(--surface-hi); border:1px solid var(--line-hi);
+    transition:background 0.16s ease, border-color 0.16s ease;
+  }
+  .fw-autopaste-slider::before {
+    content:''; position:absolute; top:1px; left:1px; width:9px; height:9px; border-radius:50%;
+    background:var(--muted); transition:transform 0.16s ease, background 0.16s ease;
+  }
+  .fw-autopaste input:checked + .fw-autopaste-slider { background:var(--amber-soft); border-color:var(--amber-deep); }
+  .fw-autopaste input:checked + .fw-autopaste-slider::before { transform:translateX(11px); background:var(--amber); }
+  .fw-autopaste-text { font-size:10px; color:var(--faint); letter-spacing:0.02em; white-space:nowrap; }
+  .fw-autopaste input:checked ~ .fw-autopaste-text { color:var(--amber-hi); }
+  .fw-autopaste input:disabled + .fw-autopaste-slider { opacity:0.5; }
+  .fw-autopaste input:disabled ~ .fw-autopaste-text { opacity:0.5; }
+  .fw-autopaste input:disabled { cursor:not-allowed; }
+  .fw-autopaste:has(input:disabled) { cursor:not-allowed; }
   .fw-copy-btn {
     flex:none; display:inline-flex; align-items:center; gap:5px;
     border:1px solid var(--line-hi); background:var(--surface-hi); color:var(--text-soft);
@@ -171,7 +195,14 @@
     <div class="fw-body">
       <div class="fw-editor-wrap">
         <div class="fw-editor-toolbar">
-          <span class="fw-editor-label" id="fwEditorLabel">正文</span>
+          <div class="fw-toolbar-left">
+            <span class="fw-editor-label" id="fwEditorLabel">正文</span>
+            <label class="fw-autopaste" id="fwAutoPasteLabel" title="开启后，点击下方“常用句/插入模块”会在复制后自动粘贴到刚才聚焦的外部窗口">
+              <input type="checkbox" id="fwAutoPasteToggle" />
+              <span class="fw-autopaste-slider"></span>
+              <span class="fw-autopaste-text">点击即粘贴</span>
+            </label>
+          </div>
           <button class="fw-copy-btn" id="fwCopyBtn" type="button" title="复制编辑器内容">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             复制
@@ -215,6 +246,7 @@
   var clipboardApi = TAURI && TAURI.clipboardManager;
   var eventApi = TAURI && TAURI.event;
   var webviewWindowApi = TAURI && TAURI.webviewWindow;
+  var coreApi = TAURI && TAURI.core;
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
   var STATE_FILE = 'composer-state.json';
   function tauriAvailable() { return !!(TAURI && fsApi && BaseDirectory); }
@@ -239,6 +271,7 @@
   var $copyBtn = document.getElementById('fwCopyBtn');
   var $closeBtn = document.getElementById('fwCloseBtn');
   var $toast = document.getElementById('fwToast');
+  var $autoPasteToggle = document.getElementById('fwAutoPasteToggle');
 
   var toastTimer = null;
   function showToast(msg) {
@@ -392,16 +425,64 @@
     return { id: id, tag: c.tag, zh: c.zh, en: c.en, hidden: c.hidden === true };
   }
 
-  function copyToClipboard(text, doneMsg) {
-    if (clipboardApi && clipboardApi.writeText) {
-      clipboardApi.writeText(text).then(function () { showToast(doneMsg); }).catch(function () { fallbackCopy(text, doneMsg); });
+  /* ============================================================
+   * 自动粘贴开关：仅浮窗本地生效，存 localStorage，不写入
+   * composer-state.json（主窗口没这个功能，别污染同步）。
+   * ============================================================ */
+  var AUTOPASTE_STORAGE_KEY = 'composer-fw-autopaste';
+  var canAutoPaste = !!(coreApi && coreApi.invoke);
+  var autoPasteEnabled = false;
+  try { autoPasteEnabled = window.localStorage.getItem(AUTOPASTE_STORAGE_KEY) === '1'; } catch (e) { autoPasteEnabled = false; }
+
+  if ($autoPasteToggle) {
+    if (!canAutoPaste) {
+      // 非 Tauri 环境（浏览器预览）没有粘贴命令可调，开关禁用并保持关闭
+      autoPasteEnabled = false;
+      $autoPasteToggle.disabled = true;
+    }
+    $autoPasteToggle.checked = autoPasteEnabled;
+    $autoPasteToggle.addEventListener('change', function () {
+      autoPasteEnabled = $autoPasteToggle.checked;
+      try { window.localStorage.setItem(AUTOPASTE_STORAGE_KEY, autoPasteEnabled ? '1' : '0'); } catch (e) { /* 存不了就算了，不影响当次使用 */ }
+      renderModuleGrid(); // 刷新“插入模块”pill 的提示文案（复制 / 复制并粘贴）
+    });
+  }
+
+  function isAutoPasteOn() { return canAutoPaste && autoPasteEnabled; }
+
+  function formatPasteError(err) {
+    if (!err) return '未知错误';
+    if (typeof err === 'string') return err;
+    if (err.message) return err.message;
+    try { return String(err); } catch (e) { return '未知错误'; }
+  }
+
+  /* 复制成功后的收尾：若开关打开且提供了 pasteMsg，则再尝试自动粘贴到外部窗口；
+   * 否则（或粘贴失败）就只提示复制结果。粘贴失败时降级提示，不让异常往上抛。 */
+  function afterCopySucceeded(doneMsg, pasteMsg) {
+    if (pasteMsg && isAutoPasteOn()) {
+      coreApi.invoke('paste_to_active_window').then(function () {
+        showToast(pasteMsg);
+      }).catch(function (err) {
+        showToast(doneMsg + '（粘贴失败：' + formatPasteError(err) + '）');
+      });
     } else {
-      fallbackCopy(text, doneMsg);
+      showToast(doneMsg);
     }
   }
-  function fallbackCopy(text, doneMsg) {
+
+  /* pasteMsg 为可选参数：传了才会在自动粘贴开启时触发粘贴，
+   * 编辑器工具栏的“复制”按钮不传，保持纯复制不变。 */
+  function copyToClipboard(text, doneMsg, pasteMsg) {
+    if (clipboardApi && clipboardApi.writeText) {
+      clipboardApi.writeText(text).then(function () { afterCopySucceeded(doneMsg, pasteMsg); }).catch(function () { fallbackCopy(text, doneMsg, pasteMsg); });
+    } else {
+      fallbackCopy(text, doneMsg, pasteMsg);
+    }
+  }
+  function fallbackCopy(text, doneMsg, pasteMsg) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function () { showToast(doneMsg); }).catch(function () { showToast('复制失败'); });
+      navigator.clipboard.writeText(text).then(function () { afterCopySucceeded(doneMsg, pasteMsg); }).catch(function () { showToast('复制失败'); });
     } else { showToast('复制失败：当前环境不支持'); }
   }
 
@@ -417,12 +498,12 @@
       var pill = document.createElement('button');
       pill.type = 'button';
       pill.className = 'fw-pill';
-      pill.title = '点击复制到剪贴板';
+      pill.title = isAutoPasteOn() ? '点击复制并粘贴到外部窗口' : '点击复制到剪贴板';
       var label = mod.label[lang] || mod.label.zh || mod.label.en || '';
       pill.innerHTML = '<span class="fw-pill-plus">+</span><span class="fw-pill-label">' + escapeHtml(label) + '</span>';
       pill.addEventListener('click', function () {
         var text = mod.text[lang] || mod.text.zh || mod.text.en || '';
-        copyToClipboard(text, '已复制「' + label + '」');
+        copyToClipboard(text, '已复制「' + label + '」', '已粘贴「' + label + '」');
       });
       $moduleWrap.appendChild(pill);
     });
@@ -444,7 +525,7 @@
       pill.innerHTML = '<span class="fw-pill-label">' + escapeHtml(snip.tag) + '</span>';
       pill.addEventListener('click', function () {
         var text = snip[lang] || snip.zh || snip.en || '';
-        copyToClipboard(text, '已复制「' + snip.tag + '」');
+        copyToClipboard(text, '已复制「' + snip.tag + '」', '已粘贴「' + snip.tag + '」');
       });
       $snippetWrap.appendChild(pill);
     });
