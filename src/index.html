@@ -534,6 +534,12 @@
             <span class="brand-tagline">Prompt Editor</span>
           </span>
         </div>
+        <button class="theme-toggle" id="btnCheckUpdate" type="button" title="检查更新" aria-label="检查更新">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+            <path d="M21 3v6h-6"/>
+          </svg>
+        </button>
         <button class="theme-toggle" id="themeToggle" type="button" title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
           <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -635,6 +641,8 @@
   var fsApi = TAURI && TAURI.fs;
   var dialogApi = TAURI && TAURI.dialog;
   var clipboardApi = TAURI && TAURI.clipboardManager;
+  var updaterApi = TAURI && TAURI.updater;
+  var processApi = TAURI && TAURI.process;
 
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
   var STATE_FILE = 'composer-state.json';
@@ -1887,6 +1895,9 @@
   var $btnManageModules = document.getElementById('btnManageModules');
   if ($btnManageModules) $btnManageModules.addEventListener('click', openModuleManager);
 
+  var $btnCheckUpdate = document.getElementById('btnCheckUpdate');
+  if ($btnCheckUpdate) $btnCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
+
   var $themeToggle = document.getElementById('themeToggle');
   $themeToggle.addEventListener('click', function () {
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -1933,7 +1944,33 @@
   });
 
   /* ============================================================
-   * 12. 汇总渲染
+   * 12. 检查更新
+   * ============================================================ */
+  var checkingUpdate = false;
+  function checkForUpdate(manual) {
+    if (!updaterApi) { if (manual) showToast('当前环境不支持自动更新'); return; }
+    if (checkingUpdate) return;
+    checkingUpdate = true;
+    updaterApi.check().then(function (update) {
+      checkingUpdate = false;
+      if (!update) { if (manual) showToast('已是最新版本'); return; }
+      var ok = window.confirm('发现新版本 ' + update.version + '，是否立即下载并安装？\n\n' + (update.body || ''));
+      if (!ok) return;
+      showToast('正在下载更新…');
+      update.downloadAndInstall().then(function () {
+        showToast('更新完成，即将重启');
+        if (processApi) processApi.relaunch();
+      }).catch(function (err) {
+        showToast('更新安装失败：' + (err && err.message ? err.message : err), true);
+      });
+    }).catch(function (err) {
+      checkingUpdate = false;
+      if (manual) showToast('检查更新失败：' + (err && err.message ? err.message : err), true);
+    });
+  }
+
+  /* ============================================================
+   * 13. 汇总渲染
    * ============================================================ */
   function renderAll() {
     renderLangSeg();
@@ -1945,6 +1982,7 @@
   }
 
   restoreState();
+  setTimeout(function () { checkForUpdate(false); }, 3000);
 })();
 </script>
 </body>
