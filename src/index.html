@@ -29,11 +29,11 @@
     --muted:#918d84;
     --faint:#b0aca3;
 
-    --amber:#2383e2;
-    --amber-hi:#0b6fca;
-    --amber-deep:#a7cbf0;
-    --amber-glow:rgba(35,131,226,0.14);
-    --amber-soft:rgba(35,131,226,0.08);
+    --amber:#d97757;
+    --amber-hi:#c25f3f;
+    --amber-deep:#edb69f;
+    --amber-glow:rgba(217,119,87,0.14);
+    --amber-soft:rgba(217,119,87,0.08);
 
     --warn:#e03e3e;
     --warn-soft:rgba(224,62,62,0.10);
@@ -50,11 +50,11 @@
     --shadow-card:0 1px 2px rgba(15,15,15,0.05), 0 2px 8px rgba(15,15,15,0.06);
     --shadow-toast:0 6px 20px rgba(15,15,15,0.14), 0 1px 3px rgba(15,15,15,0.08);
 
-    --bg-glow:rgba(35,131,226,0.04);
-    --brand-mark-a:#2f8ee8;
-    --brand-mark-b:#2383e2;
+    --bg-glow:rgba(217,119,87,0.04);
+    --brand-mark-a:#e08a6d;
+    --brand-mark-b:#d97757;
     --brand-mark-fg:#ffffff;
-    --brand-mark-shadow:0 2px 6px rgba(35,131,226,0.28), inset 0 1px 0 rgba(255,255,255,0.25);
+    --brand-mark-shadow:0 2px 6px rgba(217,119,87,0.28), inset 0 1px 0 rgba(255,255,255,0.25);
     --seg-active-bg:#ffffff;
     --seg-active-fg:var(--text);
     --seg-active-shadow:0 1px 2px rgba(15,15,15,0.08), 0 1px 3px rgba(15,15,15,0.06);
@@ -80,11 +80,11 @@
     --muted:#8a8987;
     --faint:#6a6a68;
 
-    --amber:#5e9fe6;
-    --amber-hi:#7db4ee;
-    --amber-deep:#3d84cc;
-    --amber-glow:rgba(94,159,230,0.18);
-    --amber-soft:rgba(94,159,230,0.12);
+    --amber:#e08d70;
+    --amber-hi:#eaa78e;
+    --amber-deep:#c25f3f;
+    --amber-glow:rgba(224,141,112,0.18);
+    --amber-soft:rgba(224,141,112,0.12);
 
     --warn:#eb5757;
     --warn-soft:rgba(235,87,87,0.16);
@@ -94,11 +94,11 @@
     --shadow-card:0 1px 0 rgba(255,255,255,0.02), 0 4px 16px rgba(0,0,0,0.36);
     --shadow-toast:0 8px 30px rgba(0,0,0,0.55);
 
-    --bg-glow:rgba(94,159,230,0.05);
-    --brand-mark-a:#5e9fe6;
-    --brand-mark-b:#3d84cc;
+    --bg-glow:rgba(224,141,112,0.05);
+    --brand-mark-a:#e08d70;
+    --brand-mark-b:#c25f3f;
     --brand-mark-fg:#ffffff;
-    --brand-mark-shadow:0 2px 8px rgba(94,159,230,0.32), inset 0 1px 0 rgba(255,255,255,0.18);
+    --brand-mark-shadow:0 2px 8px rgba(224,141,112,0.32), inset 0 1px 0 rgba(255,255,255,0.18);
     --seg-active-bg:#3a3a3a;
     --seg-active-fg:var(--text);
     --seg-active-shadow:0 1px 2px rgba(0,0,0,0.4);
@@ -143,12 +143,6 @@
     min-width:0;
     overflow:hidden;
     position:relative;
-  }
-  .rail::before {
-    content:'';
-    position:absolute; top:0; left:0; bottom:0; width:2px;
-    background:linear-gradient(180deg, var(--amber), transparent 70%);
-    opacity:0.5;
   }
 
   .rail-head { padding:20px 18px 14px; border-bottom:1px solid var(--line-soft); }
@@ -493,8 +487,8 @@
   }
   .btn svg { width:15px; height:15px; }
   .btn:active { transform:translateY(1px); }
-  .btn-primary { background:linear-gradient(160deg, var(--amber-hi), var(--amber-deep)); color:#241a10; box-shadow:0 2px 10px rgba(224,150,74,0.28); }
-  .btn-primary:hover { background:linear-gradient(160deg, var(--amber-hi), var(--amber)); }
+  .btn-primary { background:var(--amber); color:#ffffff; box-shadow:0 2px 10px rgba(217,119,87,0.28); }
+  .btn-primary:hover { background:var(--amber-hi); }
   .btn-outline { background:var(--surface); border-color:var(--line-hi); color:var(--text-soft); }
   .btn-outline:hover { border-color:var(--amber-deep); color:var(--text); }
 
