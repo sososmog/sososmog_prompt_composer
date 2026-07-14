@@ -1698,7 +1698,10 @@
   }
 
   /* ---------- Markdown 语法高亮：轻量正则 + overlay 渲染 ---------- */
-  // 转义 HTML 特殊字符，防止用户输入被当成标签解析（XSS 防护）
+  // 转义 HTML 特殊字符，防止用户输入被当成标签解析（XSS 防护）。
+  // 注意：这里刻意只转义 & < >，不转义引号——高亮结果全部落在元素的
+  // 文本内容位置（span 之间），不进入任何属性值，故无需像通用的
+  // escapeHtml 那样转义 " '；两者语义不同，不可互相替换。
   function hlEscape(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
@@ -1721,8 +1724,9 @@
     });
     // 粗体 **x**
     escaped = escaped.replace(/\*\*([^*\n]+)\*\*/g, '<span class="hl-bold">**$1**</span>');
-    // 斜体 *x*（避免匹配到已处理过的 ** 场景，简单正则已够用）
-    escaped = escaped.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<span class="hl-italic">*$2*</span>');
+    // 斜体 *x*（用 lookbehind/lookahead 界定 * 边界，避免消费前导字符
+    // 而漏掉相邻斜体，如 *a* *b* 中的第二段）
+    escaped = escaped.replace(/(?<![*\w])\*([^*\n]+)\*(?!\*)/g, '<span class="hl-italic">*$1*</span>');
     // 还原行内代码 token
     escaped = escaped.replace(/(\d+)/g, function (m, i) { return codeTokens[+i]; });
     return escaped;
