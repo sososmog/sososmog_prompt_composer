@@ -531,7 +531,6 @@
           <span class="brand-mark" aria-hidden="true">C</span>
           <span class="brand-text">
             <span class="brand-name">Composer</span>
-            <span class="brand-tagline">Prompt Editor</span>
           </span>
         </div>
         <button class="theme-toggle" id="themeToggle" type="button" title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
@@ -578,10 +577,6 @@
   <!-- ========== 右栏：主写作编辑器 ========== -->
   <main class="editor">
     <div class="editor-head">
-      <div class="editor-title-wrap">
-        <span class="editor-title">Composer</span>
-        <span class="editor-sub" id="editorSub"></span>
-      </div>
       <div class="segmented" id="langSegmented" role="group" aria-label="切换语言">
         <button type="button" data-lang="zh" aria-pressed="true">中文</button>
         <button type="button" data-lang="en" aria-pressed="false">English</button>
@@ -903,7 +898,6 @@
   var $langSegmented = document.getElementById('langSegmented');
   var $viewSeg = document.getElementById('viewSeg');
   var $etLabel = document.getElementById('etLabel');
-  var $editorSub = document.getElementById('editorSub');
   var $editorStat = document.getElementById('editorStat');
   var $blocks = document.getElementById('blocks');
   var $preview = document.getElementById('editorPreview');
@@ -1756,7 +1750,6 @@
   function refreshStat() {
     var tokens = estimateTokens(state.content[state.lang] || '');
     $editorStat.innerHTML = '<b>~' + tokens + '</b> tokens';
-    $editorSub.textContent = state.lang === 'zh' ? '中文' : 'English';
   }
 
   function renderPreview() {
