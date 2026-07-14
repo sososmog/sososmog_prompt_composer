@@ -188,7 +188,6 @@
   }
   .rail-section-title::after { content:''; flex:1; height:1px; background:var(--line); }
   .rail-section-title .rst-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); letter-spacing:0; text-transform:none; }
-  .rail-section-title .rst-bad { color:var(--warn); }
 
   /* 插入模块：小药丸网格 */
   .insert-grid { display:flex; flex-wrap:wrap; gap:6px; }
@@ -202,27 +201,6 @@
   .insert-pill:hover { background:var(--surface-hi); border-color:var(--amber-deep); color:var(--text); }
   .insert-pill:active { transform:translateY(1px); }
   .insert-pill .ip-plus { color:var(--amber); font-family:var(--font-mono); font-weight:600; }
-
-  /* 变量列表 */
-  .var-list { display:flex; flex-direction:column; gap:7px; }
-  .var-row { display:flex; align-items:center; gap:7px; }
-  .var-name-chip {
-    font-family:var(--font-mono); font-size:11px;
-    background:var(--amber-soft); color:var(--amber); border:1px solid var(--amber-deep);
-    border-radius:6px; padding:6px 8px; flex:none;
-    max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
-  .var-name-chip.empty { background:var(--warn-soft); color:var(--warn); border-color:var(--warn); }
-  .var-value-input {
-    flex:1; min-width:0;
-    border:1px solid var(--line-hi); background:var(--surface-inset);
-    border-radius:6px; padding:6px 9px; font-size:12px; color:var(--text);
-    transition:border-color 0.12s ease;
-  }
-  .var-value-input::placeholder { color:var(--faint); }
-  .var-value-input:focus { border-color:var(--amber); }
-  .var-empty-hint { font-size:12px; color:var(--faint); line-height:1.6; }
-  .var-empty-hint code { font-family:var(--font-mono); color:var(--amber); background:var(--amber-soft); padding:0 4px; border-radius:4px; }
 
   /* 常用句 */
   .snippet-wrap { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
@@ -329,7 +307,7 @@
   }
   .seg-mini button[aria-pressed="true"] { background:var(--surface-hi); color:var(--amber); }
 
-  /* 预览层（替换变量后，只读渲染）— 与编辑框互斥显示 */
+  /* 预览层（只读渲染）— 与编辑框互斥显示 */
   .editor-preview {
     flex:1; width:100%; min-height:0; overflow-y:auto;
     padding:22px 26px;
@@ -337,13 +315,6 @@
     white-space:pre-wrap; word-break:break-word;
   }
   .editor-preview .pv-h { color:var(--amber); font-weight:600; }
-  .editor-preview .pv-var {
-    display:inline-block; background:var(--amber-soft); color:var(--amber);
-    border:1px solid var(--amber-deep); border-radius:5px; padding:0 5px; cursor:pointer;
-    transition:background 0.1s ease;
-  }
-  .editor-preview .pv-var:hover { background:var(--amber-glow); }
-  .editor-preview .pv-var.unfilled { background:var(--warn-soft); color:var(--warn); border-color:var(--warn); }
   .editor-preview-empty { color:var(--faint); }
 
   /* ---------- 块化编辑器（Notion 式，每个 ## 段落一张卡片） ---------- */
@@ -510,14 +481,6 @@
       </div>
 
       <div class="rail-section">
-        <div class="rail-section-title">
-          变量
-          <span class="rst-count" id="varCount"></span>
-        </div>
-        <div class="var-list" id="varList"></div>
-      </div>
-
-      <div class="rail-section">
         <div class="rail-section-title">常用句</div>
         <div class="snippet-wrap" id="snippetWrap"></div>
       </div>
@@ -598,25 +561,25 @@
    * ============================================================ */
   var INSERT_MODULES = [
     { label: { zh: '角色', en: 'Role' },
-      text: { zh: '## 角色\n你是{{角色}}，擅长{{领域}}。', en: '## Role\nYou are {{角色}}, skilled in {{领域}}.' } },
+      text: { zh: '## 角色\n你是……，擅长……。', en: '## Role\nYou are …, skilled in ….' } },
     { label: { zh: '场景', en: 'Scenario' },
-      text: { zh: '## 场景\n使用场景：{{场景}}。目标用户是{{用户}}。', en: '## Scenario\nScenario: {{场景}}. Target users are {{用户}}.' } },
+      text: { zh: '## 场景\n使用场景：……。目标用户是……。', en: '## Scenario\nScenario: …. Target users are ….' } },
     { label: { zh: '问题', en: 'Problem' },
-      text: { zh: '## 问题\n当前遇到的问题：{{问题}}。', en: '## Problem\nThe current problem: {{问题}}.' } },
+      text: { zh: '## 问题\n当前遇到的问题：……。', en: '## Problem\nThe current problem: ….' } },
     { label: { zh: '需求效果', en: 'Outcome' },
-      text: { zh: '## 需求效果\n期望达成的效果：{{需求效果}}。', en: '## Desired outcome\nDesired outcome: {{需求效果}}.' } },
+      text: { zh: '## 需求效果\n期望达成的效果：……。', en: '## Desired outcome\nDesired outcome: ….' } },
     { label: { zh: '解决方案', en: 'Solution' },
-      text: { zh: '## 解决方案\n建议的解决方案：{{解决方案}}。', en: '## Solution\nProposed solution: {{解决方案}}.' } },
+      text: { zh: '## 解决方案\n建议的解决方案：……。', en: '## Solution\nProposed solution: ….' } },
     { label: { zh: '规则', en: 'Rules' },
-      text: { zh: '## 规则\n- 始终{{必须做}}\n- 绝不{{禁止做}}', en: '## Rules\n- Always {{必须做}}\n- Never {{禁止做}}' } },
+      text: { zh: '## 规则\n- 始终……\n- 绝不……', en: '## Rules\n- Always …\n- Never …' } },
     { label: { zh: '工作流程', en: 'Workflow' },
-      text: { zh: '## 工作流程\n1. {{步骤一}}\n2. {{步骤二}}\n3. {{步骤三}}', en: '## Workflow\n1. {{步骤一}}\n2. {{步骤二}}\n3. {{步骤三}}' } },
+      text: { zh: '## 工作流程\n1. ……\n2. ……\n3. ……', en: '## Workflow\n1. …\n2. …\n3. …' } },
     { label: { zh: '输出格式', en: 'Format' },
-      text: { zh: '## 输出格式\n以{{格式}}形式输出。', en: '## Output format\nOutput in {{格式}}.' } },
+      text: { zh: '## 输出格式\n以……形式输出。', en: '## Output format\nOutput in ….' } },
     { label: { zh: '示例', en: 'Examples' },
-      text: { zh: '## 示例\n输入：{{示例输入}}\n输出：{{示例输出}}', en: '## Examples\nInput: {{示例输入}}\nOutput: {{示例输出}}' } },
+      text: { zh: '## 示例\n输入：……\n输出：……', en: '## Examples\nInput: …\nOutput: …' } },
     { label: { zh: '约束', en: 'Constraints' },
-      text: { zh: '## 约束\n不要{{约束}}。', en: '## Constraints\nDo not {{约束}}.' } }
+      text: { zh: '## 约束\n不要……。', en: '## Constraints\nDo not ….' } }
   ];
 
   var BUILTIN_SNIPPETS = [
@@ -634,26 +597,13 @@
 
   function demoContent() {
     return {
-      zh: '## 角色\n你是{{角色}}，擅长{{领域}}。你服务的对象是{{用户}}。\n\n## 场景\n使用场景：{{场景}}。\n\n## 需求效果\n期望达成的效果：{{需求效果}}。\n\n## 解决方案\n请围绕以下方向给出方案：{{解决方案}}。\n\n## 输出格式\n以{{格式}}输出，并附上{{附加要求}}。',
-      en: '## Role\nYou are {{角色}}, skilled in {{领域}}. You serve {{用户}}.\n\n## Scenario\nScenario: {{场景}}.\n\n## Desired outcome\nDesired outcome: {{需求效果}}.\n\n## Solution\nPropose a solution along these lines: {{解决方案}}.\n\n## Output format\nOutput in {{格式}}, and include {{附加要求}}.'
-    };
-  }
-
-  function demoValues() {
-    return {
-      '角色': { zh: '一名资深全栈工程师', en: 'a senior full-stack engineer' },
-      '领域': { zh: 'Web 产品开发与代码审查', en: 'web product development and code review' },
-      '用户': { zh: '产品团队的开发者', en: 'developers on the product team' },
-      '场景': { zh: '在现有 SaaS 产品中新增一个功能模块', en: 'adding a new feature module to an existing SaaS product' },
-      '需求效果': { zh: '', en: '' },
-      '解决方案': { zh: '技术选型、接口设计、关键实现步骤', en: 'tech stack choice, API design, key implementation steps' },
-      '格式': { zh: 'Markdown', en: 'Markdown' },
-      '附加要求': { zh: '示例代码', en: 'sample code' }
+      zh: '## 角色\n你是一名资深全栈工程师，擅长 Web 产品开发与代码审查。你服务的对象是产品团队的开发者。\n\n## 场景\n使用场景：在现有 SaaS 产品中新增一个功能模块。\n\n## 需求效果\n期望达成的效果：……\n\n## 解决方案\n请围绕以下方向给出方案：技术选型、接口设计、关键实现步骤。\n\n## 输出格式\n以 Markdown 输出，并附上示例代码。',
+      en: '## Role\nYou are a senior full-stack engineer, skilled in web product development and code review. You serve developers on the product team.\n\n## Scenario\nScenario: adding a new feature module to an existing SaaS product.\n\n## Desired outcome\nDesired outcome: …\n\n## Solution\nPropose a solution along these lines: tech stack choice, API design, key implementation steps.\n\n## Output format\nOutput in Markdown, and include sample code.'
     };
   }
 
   function defaultState() {
-    return { lang: 'zh', content: demoContent(), values: demoValues(), customSnippets: [] };
+    return { lang: 'zh', content: demoContent(), customSnippets: [] };
   }
 
   /* ============================================================
@@ -725,13 +675,6 @@
       s.content = { zh: modulesToText(raw.modules, 'zh'), en: modulesToText(raw.modules, 'en') };
     }
 
-    if (raw.values && typeof raw.values === 'object') {
-      s.values = {};
-      Object.keys(raw.values).forEach(function (k) {
-        var v = raw.values[k] || {};
-        s.values[k] = { zh: v.zh || '', en: v.en || '' };
-      });
-    }
     if (Array.isArray(raw.customSnippets)) {
       s.customSnippets = raw.customSnippets.filter(function (sn) { return sn && typeof sn.tag === 'string'; });
     }
@@ -739,37 +682,8 @@
   }
 
   /* ============================================================
-   * 3. 变量 / 编译 / token
+   * 3. token 估算
    * ============================================================ */
-  var VAR_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
-
-  function extractVarNames(text) {
-    var names = [], seen = {}, m;
-    VAR_RE.lastIndex = 0;
-    while ((m = VAR_RE.exec(text || '')) !== null) {
-      if (!seen[m[1]]) { seen[m[1]] = true; names.push(m[1]); }
-    }
-    return names;
-  }
-
-  // 只收集“当前语言正文”里出现的变量（编辑器所见即所得）
-  function currentVarNames() { return extractVarNames(state.content[state.lang]); }
-
-  function ensureValueEntry(name) {
-    if (!state.values[name]) state.values[name] = { zh: '', en: '' };
-    return state.values[name];
-  }
-  function syncValues() { currentVarNames().forEach(ensureValueEntry); }
-
-  function compile(lang) {
-    var text = state.content[lang] || '';
-    return text.replace(VAR_RE, function (full, name) {
-      var entry = state.values[name];
-      var val = entry ? entry[lang] : '';
-      return val ? val : full;
-    });
-  }
-
   function estimateTokens(text) {
     if (!text) return 0;
     var cjk = 0, other = 0;
@@ -785,8 +699,6 @@
    * 4. DOM
    * ============================================================ */
   var $insertGrid = document.getElementById('insertGrid');
-  var $varList = document.getElementById('varList');
-  var $varCount = document.getElementById('varCount');
   var $snippetWrap = document.getElementById('snippetWrap');
   var $langSegmented = document.getElementById('langSegmented');
   var $viewSeg = document.getElementById('viewSeg');
@@ -883,8 +795,6 @@
       var joined = text ? (text + '\n\n' + snippet) : snippet;
       state.content[state.lang] = joined;
       renderBlocks();
-      syncValues();
-      renderVarList();
       refreshStat();
       scheduleSave();
       // 聚焦新块末尾
@@ -909,72 +819,6 @@
       pill.addEventListener('click', function () { insertSnippet(mod.text[state.lang]); });
       $insertGrid.appendChild(pill);
     });
-  }
-
-  function renderVarList() {
-    var lang = state.lang;
-    var names = currentVarNames();
-
-    var filled = 0;
-    names.forEach(function (n) { var e = state.values[n]; if (e && e[lang]) filled++; });
-    if (names.length === 0) {
-      $varCount.textContent = '';
-    } else {
-      var unfilled = names.length - filled;
-      $varCount.innerHTML = unfilled > 0
-        ? '<span class="rst-bad">' + filled + '/' + names.length + '</span>'
-        : (filled + '/' + names.length);
-    }
-
-    $varList.innerHTML = '';
-    if (names.length === 0) {
-      var hint = document.createElement('div');
-      hint.className = 'var-empty-hint';
-      hint.innerHTML = '在正文中输入 <code>{{名称}}</code> 即可创建变量，填值在此按语言分别录入。';
-      $varList.appendChild(hint);
-      return;
-    }
-    names.forEach(function (name) {
-      var entry = ensureValueEntry(name);
-      var row = document.createElement('div');
-      row.className = 'var-row';
-
-      var chip = document.createElement('span');
-      var isEmpty = !entry[lang];
-      chip.className = 'var-name-chip' + (isEmpty ? ' empty' : '');
-      chip.textContent = name;
-      chip.title = name;
-      row.appendChild(chip);
-
-      var input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'var-value-input';
-      input.value = entry[lang] || '';
-      input.setAttribute('aria-label', '变量 ' + name + ' 的值');
-      input.placeholder = '填写变量值…';
-      input.addEventListener('input', function () {
-        entry[lang] = input.value;
-        chip.classList.toggle('empty', !input.value);
-        if (view === 'preview') renderPreview();
-        refreshVarCount();
-        refreshStat();
-        scheduleSave();
-      });
-      row.appendChild(input);
-      $varList.appendChild(row);
-    });
-  }
-
-  function refreshVarCount() {
-    var lang = state.lang;
-    var names = currentVarNames();
-    if (names.length === 0) { $varCount.textContent = ''; return; }
-    var filled = 0;
-    names.forEach(function (n) { var e = state.values[n]; if (e && e[lang]) filled++; });
-    var unfilled = names.length - filled;
-    $varCount.innerHTML = unfilled > 0
-      ? '<span class="rst-bad">' + filled + '/' + names.length + '</span>'
-      : (filled + '/' + names.length);
   }
 
   function allSnippets() { return BUILTIN_SNIPPETS.concat(state.customSnippets); }
@@ -1074,7 +918,7 @@
     if (blocks.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'blocks-empty';
-      empty.innerHTML = '还没有内容。点左侧「插入模块」快速开始，或直接在下方新建一个块。<br>用 <code>## 标题</code> 组织段落，<code>{{变量}}</code> 占位。';
+      empty.innerHTML = '还没有内容。点左侧「插入模块」快速开始，或直接在下方新建一个块。<br>用 <code>## 标题</code> 组织段落。';
       $blocks.appendChild(empty);
       appendAddBlockButton();
       return;
@@ -1162,11 +1006,9 @@
     return card;
   }
 
-  // 块内容变化：收集回写 + 同步变量（不重建 DOM，避免打断输入）
+  // 块内容变化：收集回写（不重建 DOM，避免打断输入）
   function onBlocksChanged() {
     collectText();
-    syncValues();
-    renderVarList();
     refreshStat();
     scheduleSave();
   }
@@ -1177,8 +1019,6 @@
     if (area && area.value.trim() && !window.confirm('删除这个块？')) return;
     card.remove();
     collectText();
-    syncValues();
-    renderVarList();
     refreshStat();
     scheduleSave();
     // 若删空了，重渲染以显示空态
@@ -1348,18 +1188,8 @@
   }
 
   function refreshStat() {
-    var lang = state.lang;
-    var compiled = compile(lang);
-    var tokens = estimateTokens(compiled);
-    var names = currentVarNames();
-    var unfilled = names.filter(function (n) { var e = state.values[n]; return !e || !e[lang]; }).length;
-
-    var parts = '<b>~' + tokens + '</b> tokens';
-    if (names.length > 0) {
-      if (unfilled > 0) parts += ' · <span class="et-bad">' + unfilled + ' 变量未填</span>';
-      else parts += ' · 变量已填齐';
-    }
-    $editorStat.innerHTML = parts;
+    var tokens = estimateTokens(state.content[state.lang] || '');
+    $editorStat.innerHTML = '<b>~' + tokens + '</b> tokens';
     $editorSub.textContent = state.lang === 'zh' ? '中文' : 'English';
   }
 
@@ -1376,7 +1206,7 @@
       return;
     }
 
-    // 按行渲染：## 开头的行做标题色；变量替换为值（未填高亮）
+    // 按行渲染：## 开头的行做标题色，其余作为纯文本
     var lines = raw.split('\n');
     lines.forEach(function (line, i) {
       if (/^##\s?/.test(line)) {
@@ -1385,48 +1215,10 @@
         h.textContent = line;
         $preview.appendChild(h);
       } else {
-        appendLineWithVars($preview, line, lang);
+        $preview.appendChild(document.createTextNode(line));
       }
       if (i < lines.length - 1) $preview.appendChild(document.createTextNode('\n'));
     });
-  }
-
-  function appendLineWithVars(container, line, lang) {
-    var lastIndex = 0, m;
-    VAR_RE.lastIndex = 0;
-    var found = false;
-    while ((m = VAR_RE.exec(line)) !== null) {
-      found = true;
-      if (m.index > lastIndex) container.appendChild(document.createTextNode(line.slice(lastIndex, m.index)));
-      var name = m[1];
-      var entry = state.values[name] || { zh: '', en: '' };
-      var val = entry[lang];
-      var chip = document.createElement('span');
-      chip.className = 'pv-var' + (val ? '' : ' unfilled');
-      chip.textContent = val ? val : m[0];
-      chip.title = val ? name : (name + '（未填）');
-      chip.setAttribute('role', 'button');
-      (function (nm) {
-        chip.addEventListener('click', function () { focusVarInput(nm); });
-      })(name);
-      container.appendChild(chip);
-      lastIndex = m.index + m[0].length;
-    }
-    if (!found) { container.appendChild(document.createTextNode(line)); return; }
-    if (lastIndex < line.length) container.appendChild(document.createTextNode(line.slice(lastIndex)));
-  }
-
-  // 点预览里的变量 -> 聚焦左栏对应输入框
-  function focusVarInput(name) {
-    var rows = $varList.querySelectorAll('.var-row');
-    for (var i = 0; i < rows.length; i++) {
-      var chip = rows[i].querySelector('.var-name-chip');
-      if (chip && chip.textContent === name) {
-        var input = rows[i].querySelector('.var-value-input');
-        if (input) { input.focus(); input.select(); }
-        return;
-      }
-    }
   }
 
   /* ============================================================
@@ -1484,7 +1276,7 @@
    * ============================================================ */
   function doCopy() {
     if (view !== 'preview') collectText();
-    var text = compile(state.lang);
+    var text = state.content[state.lang] || '';
     var langName = state.lang === 'zh' ? '中文' : 'English';
     if (clipboardApi && clipboardApi.writeText) {
       clipboardApi.writeText(text).then(function () { showToast('已复制' + langName + '提示词'); }).catch(function () { fallbackCopy(text, langName); });
@@ -1500,7 +1292,7 @@
 
   function doDownload() {
     if (view !== 'preview') collectText();
-    var text = compile(state.lang);
+    var text = state.content[state.lang] || '';
     var defaultName = state.lang === 'zh' ? 'prompt-zh.md' : 'prompt-en.md';
     var langName = state.lang === 'zh' ? '中文' : 'English';
     if (dialogApi && dialogApi.save && fsApi && fsApi.writeTextFile) {
@@ -1537,7 +1329,6 @@
 
   $btnLoadDemo.addEventListener('click', function () {
     state.content = demoContent();
-    state.values = demoValues();
     if (view === 'preview') setView('write');
     renderAll();
     scheduleSave();
@@ -1574,11 +1365,9 @@
    * 12. 汇总渲染
    * ============================================================ */
   function renderAll() {
-    syncValues();
     renderLangSeg();
     renderViewSeg();
     renderInsertGrid();
-    renderVarList();
     renderSnippets();
     renderEditor();
   }
