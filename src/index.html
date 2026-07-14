@@ -13,32 +13,32 @@
    * 布局：左侧辅助栏 + 右侧大写作编辑器（文本为唯一真相源）
    * ============================================================ */
   :root {
-    --bg-deep:#17130f;
-    --bg-rail:#120f0c;
-    --bg-editor:#1b1611;
-    --surface:#241e17;
-    --surface-hi:#2c261d;
-    --surface-inset:#181410;
+    --bg-deep:#ffffff;
+    --bg-rail:#fbfbfa;
+    --bg-editor:#ffffff;
+    --surface:#f7f6f3;
+    --surface-hi:#efeeec;
+    --surface-inset:#f7f7f5;
 
-    --line:#332b21;
-    --line-soft:#28221a;
-    --line-hi:#453a2c;
+    --line:#e9e9e7;
+    --line-soft:#efefee;
+    --line-hi:#dcdbd8;
 
-    --text:#efe6d6;
-    --text-soft:#c8bda9;
-    --muted:#948872;
-    --faint:#6b6152;
+    --text:#37352f;
+    --text-soft:#5c594f;
+    --muted:#918d84;
+    --faint:#b0aca3;
 
-    --amber:#e0964a;
-    --amber-hi:#f2ab5e;
-    --amber-deep:#c47b34;
-    --amber-glow:rgba(224,150,74,0.16);
-    --amber-soft:rgba(224,150,74,0.10);
+    --amber:#2383e2;
+    --amber-hi:#0b6fca;
+    --amber-deep:#a7cbf0;
+    --amber-glow:rgba(35,131,226,0.14);
+    --amber-soft:rgba(35,131,226,0.08);
 
-    --warn:#e0674a;
-    --warn-soft:rgba(224,103,74,0.14);
-    --ok:#8ab06a;
-    --ok-soft:rgba(138,176,106,0.14);
+    --warn:#e03e3e;
+    --warn-soft:rgba(224,62,62,0.10);
+    --ok:#0f7b6c;
+    --ok-soft:rgba(15,123,108,0.10);
 
     --radius:10px;
     --radius-sm:7px;
@@ -46,7 +46,63 @@
     --font-mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --font-sans:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 
-    --shadow-card:0 1px 0 rgba(255,255,255,0.02), 0 4px 16px rgba(0,0,0,0.28);
+    --shadow-card:0 1px 2px rgba(15,15,15,0.05), 0 2px 8px rgba(15,15,15,0.06);
+    --shadow-toast:0 6px 20px rgba(15,15,15,0.14), 0 1px 3px rgba(15,15,15,0.08);
+
+    --bg-glow:rgba(35,131,226,0.04);
+    --brand-mark-a:#2f8ee8;
+    --brand-mark-b:#2383e2;
+    --brand-mark-fg:#ffffff;
+    --brand-mark-shadow:0 2px 6px rgba(35,131,226,0.28), inset 0 1px 0 rgba(255,255,255,0.25);
+    --seg-active-bg:#ffffff;
+    --seg-active-fg:var(--text);
+    --seg-active-shadow:0 1px 2px rgba(15,15,15,0.08), 0 1px 3px rgba(15,15,15,0.06);
+    --block-hover:rgba(55,53,47,0.03);
+    --block-focus:rgba(55,53,47,0.02);
+  }
+
+  /* 深色主题（Notion 深色：冷调深灰黑） */
+  [data-theme="dark"] {
+    --bg-deep:#191919;
+    --bg-rail:#202020;
+    --bg-editor:#191919;
+    --surface:#252525;
+    --surface-hi:#2f2f2f;
+    --surface-inset:#1e1e1e;
+
+    --line:#373737;
+    --line-soft:#2c2c2c;
+    --line-hi:#474747;
+
+    --text:#e6e6e5;
+    --text-soft:#b3b3b1;
+    --muted:#8a8987;
+    --faint:#6a6a68;
+
+    --amber:#5e9fe6;
+    --amber-hi:#7db4ee;
+    --amber-deep:#3d84cc;
+    --amber-glow:rgba(94,159,230,0.18);
+    --amber-soft:rgba(94,159,230,0.12);
+
+    --warn:#eb5757;
+    --warn-soft:rgba(235,87,87,0.16);
+    --ok:#4dab9a;
+    --ok-soft:rgba(77,171,154,0.16);
+
+    --shadow-card:0 1px 0 rgba(255,255,255,0.02), 0 4px 16px rgba(0,0,0,0.36);
+    --shadow-toast:0 8px 30px rgba(0,0,0,0.55);
+
+    --bg-glow:rgba(94,159,230,0.05);
+    --brand-mark-a:#5e9fe6;
+    --brand-mark-b:#3d84cc;
+    --brand-mark-fg:#ffffff;
+    --brand-mark-shadow:0 2px 8px rgba(94,159,230,0.32), inset 0 1px 0 rgba(255,255,255,0.18);
+    --seg-active-bg:#3a3a3a;
+    --seg-active-fg:var(--text);
+    --seg-active-shadow:0 1px 2px rgba(0,0,0,0.4);
+    --block-hover:rgba(255,255,255,0.03);
+    --block-focus:rgba(255,255,255,0.045);
   }
 
   * { box-sizing:border-box; }
@@ -59,7 +115,7 @@
     color:var(--text);
     background:var(--bg-deep);
     background-image:
-      radial-gradient(1100px 500px at 82% -8%, rgba(224,150,74,0.07), transparent 60%);
+      radial-gradient(1100px 500px at 82% -8%, var(--bg-glow), transparent 60%);
     height:100vh;
     overflow:hidden;
     display:grid;
@@ -96,13 +152,26 @@
 
   .rail-head { padding:20px 18px 14px; border-bottom:1px solid var(--line-soft); }
   .brand { display:flex; align-items:center; gap:10px; }
+  .rail-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .theme-toggle {
+    flex:none; width:34px; height:34px; border-radius:var(--radius-sm);
+    border:1px solid var(--line); background:var(--surface); color:var(--text-soft);
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition:background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  }
+  .theme-toggle:hover { background:var(--surface-hi); border-color:var(--line-hi); color:var(--text); }
+  .theme-toggle svg { width:17px; height:17px; }
+  .theme-toggle .icon-sun { display:none; }
+  .theme-toggle .icon-moon { display:block; }
+  [data-theme="dark"] .theme-toggle .icon-sun { display:block; }
+  [data-theme="dark"] .theme-toggle .icon-moon { display:none; }
   .brand-mark {
     width:30px; height:30px; border-radius:8px;
-    background:linear-gradient(150deg, var(--amber-hi), var(--amber-deep));
+    background:linear-gradient(150deg, var(--brand-mark-a), var(--brand-mark-b));
     display:flex; align-items:center; justify-content:center;
-    font-family:var(--font-display); font-weight:700; font-size:18px; color:#241a10;
+    font-family:var(--font-display); font-weight:700; font-size:18px; color:var(--brand-mark-fg);
     flex:none;
-    box-shadow:0 2px 8px rgba(224,150,74,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+    box-shadow:var(--brand-mark-shadow);
   }
   .brand-text { display:flex; flex-direction:column; line-height:1.1; }
   .brand-name { font-family:var(--font-display); font-weight:600; font-size:21px; color:var(--text); letter-spacing:-0.01em; }
@@ -225,8 +294,8 @@
     transition:background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
   }
   .segmented button[aria-pressed="true"] {
-    background:linear-gradient(160deg, var(--amber-hi), var(--amber-deep));
-    color:#241a10; font-weight:600; box-shadow:0 2px 8px rgba(224,150,74,0.3);
+    background:var(--seg-active-bg);
+    color:var(--seg-active-fg); font-weight:600; box-shadow:var(--seg-active-shadow);
   }
 
   /* 编辑区主体：占满剩余高度 */
@@ -288,8 +357,8 @@
     border:1px solid transparent; border-radius:var(--radius-sm);
     transition:border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, opacity 0.15s ease;
   }
-  .block:hover { background:rgba(255,255,255,0.012); }
-  .block:focus-within { border-color:var(--line-hi); background:rgba(255,255,255,0.02); }
+  .block:hover { background:var(--block-hover); }
+  .block:focus-within { border-color:var(--line-hi); background:var(--block-focus); }
   /* FLIP：让位块从旧位置平滑滑到新位置（transform 由 JS 设置，这里给过渡曲线） */
   .block.flip { transition:transform 0.22s cubic-bezier(0.2, 0, 0, 1), border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease; }
   /* 被拖块：跟随指针，浮起，脱离命中检测 */
@@ -381,7 +450,7 @@
     padding:11px 20px; border-radius:999px; font-size:13px;
     display:flex; align-items:center; gap:8px;
     opacity:0; pointer-events:none; transition:opacity 0.2s ease, transform 0.2s ease;
-    z-index:999; box-shadow:0 8px 30px rgba(0,0,0,0.5);
+    z-index:999; box-shadow:var(--shadow-toast);
   }
   .toast::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ok); flex:none; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
@@ -400,18 +469,37 @@
   ::-webkit-scrollbar-thumb { background:var(--line-hi); border-radius:5px; border:2px solid transparent; background-clip:padding-box; }
   ::-webkit-scrollbar-thumb:hover { background:var(--muted); background-clip:padding-box; }
 </style>
+<script>
+  /* 在渲染前应用主题，避免首屏闪烁；默认深色 */
+  (function () {
+    var t = 'dark';
+    try { t = localStorage.getItem('composer-theme') || 'dark'; } catch (e) {}
+    if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+  })();
+</script>
 </head>
 <body>
 
   <!-- ========== 左栏：辅助栏 ========== -->
   <aside class="rail">
     <div class="rail-head">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">C</span>
-        <span class="brand-text">
-          <span class="brand-name">Composer</span>
-          <span class="brand-tagline">Prompt Editor</span>
-        </span>
+      <div class="rail-head-row">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">C</span>
+          <span class="brand-text">
+            <span class="brand-name">Composer</span>
+            <span class="brand-tagline">Prompt Editor</span>
+          </span>
+        </div>
+        <button class="theme-toggle" id="themeToggle" type="button" title="切换深色 / 浅色" aria-label="切换深色 / 浅色">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -1435,6 +1523,17 @@
 
   $btnCopy.addEventListener('click', doCopy);
   $btnDownload.addEventListener('click', doDownload);
+
+  var $themeToggle = document.getElementById('themeToggle');
+  $themeToggle.addEventListener('click', function () {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (dark) {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+    try { localStorage.setItem('composer-theme', dark ? 'light' : 'dark'); } catch (e) {}
+  });
 
   $btnLoadDemo.addEventListener('click', function () {
     state.content = demoContent();
