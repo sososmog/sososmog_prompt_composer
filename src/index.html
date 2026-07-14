@@ -199,10 +199,10 @@
     padding:6px 10px; border-radius:999px;
     background:var(--surface); border:1px solid var(--line);
     color:var(--text-soft); cursor:pointer; font-size:12px;
-    transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.07s ease;
+    transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.12s cubic-bezier(0.2,0,0,1), box-shadow 0.14s ease;
   }
-  .insert-pill:hover { background:var(--surface-hi); border-color:var(--amber-deep); color:var(--text); }
-  .insert-pill:active { transform:translateY(1px); }
+  .insert-pill:hover { background:var(--surface-hi); border-color:var(--amber-deep); color:var(--text); transform:translateY(-1px); box-shadow:var(--shadow-card); }
+  .insert-pill:active { transform:translateY(0px); }
   .insert-pill .ip-plus { color:var(--amber); font-family:var(--font-mono); font-weight:600; }
 
   /* 常用句 */
@@ -211,9 +211,10 @@
     display:inline-flex; align-items:center; gap:5px;
     background:var(--surface-inset); border:1px solid var(--line);
     border-radius:999px; padding:4px 10px; font-size:11.5px; color:var(--text-soft);
-    cursor:pointer; transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    cursor:pointer; transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s cubic-bezier(0.2,0,0,1);
   }
-  .snippet-pill:hover { background:var(--amber-soft); border-color:var(--amber-deep); color:var(--amber); }
+  .snippet-pill:hover { background:var(--amber-soft); border-color:var(--amber-deep); color:var(--amber); transform:translateY(-1px); }
+  .snippet-pill:active { transform:translateY(0px); }
 
   /* 管理常用句浮窗 */
   .sm-overlay {
@@ -237,10 +238,12 @@
   .sm-title { font-size:15px; font-weight:600; color:var(--text); }
   .sm-close {
     width:28px; height:28px; border-radius:var(--radius-sm);
+    display:inline-flex; align-items:center; justify-content:center;
     border:1px solid transparent; background:transparent; color:var(--muted);
-    font-size:18px; line-height:1; cursor:pointer;
+    line-height:1; cursor:pointer;
     transition:background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   }
+  .sm-close svg { width:16px; height:16px; }
   .sm-close:hover { background:var(--surface); color:var(--text); border-color:var(--line); }
   .sm-hint { padding:10px 20px 4px; font-size:11.5px; color:var(--muted); flex:none; }
   .sm-list { padding:8px 20px; overflow-y:auto; flex:1 1 auto; }
@@ -274,10 +277,12 @@
   .sm-ops { display:flex; gap:3px; flex:none; margin-top:2px; }
   .sm-op {
     width:24px; height:24px; border-radius:5px;
+    display:inline-flex; align-items:center; justify-content:center;
     border:1px solid var(--line); background:var(--surface); color:var(--text-soft);
-    font-size:13px; line-height:1; cursor:pointer;
+    line-height:1; cursor:pointer;
     transition:border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
   }
+  .sm-op svg { width:13px; height:13px; }
   .sm-op:hover:not(:disabled) { border-color:var(--amber-deep); color:var(--amber); }
   .sm-op.danger:hover:not(:disabled) { border-color:var(--warn); color:var(--warn); }
   .sm-op:disabled { opacity:0.32; cursor:default; }
@@ -295,17 +300,19 @@
     transition:border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
   }
   .sm-add:hover { border-color:var(--amber); color:var(--amber); background:var(--amber-soft); }
-  .sm-add span { font-size:15px; line-height:1; }
+  .sm-add svg { width:14px; height:14px; }
 
   .btn-ghost-rail {
     display:inline-flex; align-items:center; gap:6px;
     background:transparent; border:1px solid var(--line); color:var(--text-soft);
     border-radius:var(--radius-sm); padding:0 14px; height:40px; cursor:pointer; font-size:12.5px; white-space:nowrap; flex:none;
-    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease, transform 0.12s cubic-bezier(0.2,0,0,1);
   }
-  .btn-ghost-rail:hover { border-color:var(--amber-deep); color:var(--text); background:var(--surface); }
+  .btn-ghost-rail:hover { border-color:var(--amber-deep); color:var(--text); background:var(--surface); transform:translateY(-1px); }
+  .btn-ghost-rail:active { transform:translateY(0px); }
   .btn-ghost-rail.danger:hover { border-color:var(--warn); color:var(--warn); }
-  .btn-ghost-rail .bg-ico { width:15px; text-align:center; opacity:0.7; }
+  .btn-ghost-rail .bg-ico { width:15px; display:inline-flex; align-items:center; justify-content:center; opacity:0.7; }
+  .btn-ghost-rail .bg-ico svg { width:14px; height:14px; }
 
   .rail-foot { padding:12px 18px 16px; border-top:1px solid var(--line-soft); flex:none; }
   .btn-load-tpl {
@@ -317,7 +324,8 @@
   }
   .btn-load-tpl:hover { background:var(--surface-hi); border-color:var(--amber-hi); }
   .btn-load-tpl:active { transform:translateY(1px); }
-  .btn-load-tpl .bg-ico { text-align:center; opacity:0.85; }
+  .btn-load-tpl .bg-ico { display:inline-flex; align-items:center; justify-content:center; opacity:0.85; }
+  .btn-load-tpl .bg-ico svg { width:15px; height:15px; }
 
   /* ============================================================
    * 右栏：主写作编辑器
@@ -436,9 +444,10 @@
   .block-handle {
     width:22px; height:22px; border-radius:5px;
     display:flex; align-items:center; justify-content:center;
-    color:var(--faint); cursor:grab; user-select:none; font-size:15px;
+    color:var(--faint); cursor:grab; user-select:none;
     touch-action:none; transition:color 0.12s ease, background 0.12s ease;
   }
+  .block-handle svg { width:15px; height:15px; }
   .block-handle:hover { color:var(--amber); background:var(--amber-soft); }
   .block-handle:active { cursor:grabbing; }
   .block-del {
@@ -450,11 +459,39 @@
   .block-del:hover { color:var(--warn); background:var(--warn-soft); }
 
   .block-body { flex:1; min-width:0; padding:4px 6px 4px 0; }
+
+  /* ---------- Markdown 语法高亮：overlay 技术 ----------
+   * .hl-wrap 相对定位；.hl-overlay 绝对铺满，与 textarea 使用完全相同的
+   * font/padding/line-height/white-space/word-break，逐字渲染高亮 HTML；
+   * textarea 本体文字设为透明但保留可见光标（caret-color），
+   * 这样"看起来"是 textarea 在显示高亮文字，实际输入体验不受影响。 */
+  .hl-wrap { position:relative; display:block; width:100%; }
+  .hl-overlay {
+    position:absolute; inset:0;
+    pointer-events:none; overflow:hidden;
+    white-space:pre-wrap; word-break:break-word;
+    padding:6px 8px;
+    font-family:var(--font-read); font-size:15px; line-height:1.75;
+    tab-size:2;
+    color:var(--text);
+  }
+  .hl-overlay .hl-h { color:var(--amber); font-weight:600; }
+  .hl-overlay .hl-bold { color:var(--text); font-weight:700; }
+  .hl-overlay .hl-italic { color:var(--text-soft); font-style:italic; }
+  .hl-overlay .hl-code { font-family:var(--font-mono); color:var(--amber-hi); background:var(--amber-soft); border-radius:3px; }
+  .hl-overlay .hl-fence { font-family:var(--font-mono); color:var(--muted); }
+  .hl-overlay .hl-list { color:var(--amber); font-weight:600; }
+  .hl-overlay .hl-quote { color:var(--muted); font-style:italic; }
+  .hl-overlay .hl-link-text { color:var(--amber-hi); }
+  .hl-overlay .hl-link-url { color:var(--muted); }
+
   .block-textarea {
-    width:100%; resize:none; overflow:hidden;
+    position:relative; z-index:1;
+    width:100%; height:100%; resize:none; overflow:hidden;
     border:none; outline:none; background:transparent;
     padding:6px 8px;
-    font-family:var(--font-read); font-size:15px; line-height:1.75; color:var(--text);
+    font-family:var(--font-read); font-size:15px; line-height:1.75;
+    color:transparent; caret-color:var(--text);
     tab-size:2; display:block;
   }
   .block-textarea::placeholder { color:var(--faint); }
@@ -484,15 +521,33 @@
     display:inline-flex; align-items:center; justify-content:center; gap:7px;
     border-radius:var(--radius-sm); padding:11px 20px; font-size:13px; font-weight:600;
     cursor:pointer; border:1px solid transparent;
-    transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.08s ease;
+    transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s cubic-bezier(0.2,0,0,1), box-shadow 0.14s ease;
     flex:none;
   }
   .btn svg { width:15px; height:15px; }
-  .btn:active { transform:translateY(1px); }
+  .btn:hover { transform:translateY(-1px); }
+  .btn:active { transform:translateY(0px); }
   .btn-primary { background:var(--amber); color:#ffffff; box-shadow:0 2px 10px rgba(217,119,87,0.28); }
-  .btn-primary:hover { background:var(--amber-hi); }
+  .btn-primary:hover { background:var(--amber-hi); box-shadow:0 4px 14px rgba(217,119,87,0.34); }
   .btn-outline { background:var(--surface); border-color:var(--line-hi); color:var(--text-soft); }
-  .btn-outline:hover { border-color:var(--amber-deep); color:var(--text); }
+  .btn-outline:hover { border-color:var(--amber-deep); color:var(--text); box-shadow:var(--shadow-card); }
+
+  /* ============================================================
+   * 微交互动效：块新增淡入、toast 滑入淡入、预览切换过渡
+   * ============================================================ */
+  @keyframes blockEnter {
+    from { opacity:0; transform:translateY(6px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  @keyframes toastSlideIn {
+    from { opacity:0; transform:translateX(-50%) translateY(10px); }
+    to   { opacity:1; transform:translateX(-50%) translateY(0); }
+  }
+  @keyframes viewFadeIn {
+    from { opacity:0; }
+    to   { opacity:1; }
+  }
+  .block.block-enter { animation:blockEnter 0.18s ease both; }
 
   /* Toast */
   .toast {
@@ -505,8 +560,10 @@
     z-index:999; box-shadow:var(--shadow-toast);
   }
   .toast::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ok); flex:none; }
-  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); animation:toastSlideIn 0.22s cubic-bezier(0.2,0,0,1); }
   .toast.err::before { background:var(--warn); }
+
+  .blocks, .editor-preview { animation:viewFadeIn 0.16s ease both; }
 
   @media (max-width: 860px) {
     body { grid-template-columns:1fr; grid-auto-rows:auto; height:auto; min-height:100vh; overflow:auto; }
@@ -585,7 +642,7 @@
     </div>
 
     <div class="rail-foot">
-      <button class="btn-load-tpl" id="btnLoadDemo" type="button"><span class="bg-ico">◇</span>一键载入模板</button>
+      <button class="btn-load-tpl" id="btnLoadDemo" type="button"><span class="bg-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></span>一键载入模板</button>
     </div>
   </aside>
 
@@ -623,7 +680,7 @@
       <span class="foot-hint">
         <kbd>Alt</kbd> <kbd>↑↓</kbd> 移动块 · <kbd>Ctrl</kbd> <kbd>C</kbd> 复制 · <kbd>Ctrl</kbd> <kbd>S</kbd> 下载 · <kbd>Ctrl</kbd> <kbd>L</kbd> 切换语言 · <kbd>Ctrl</kbd> <kbd>P</kbd> 预览
       </span>
-      <button class="btn-ghost-rail danger" id="btnClearAll" type="button"><span class="bg-ico">⌫</span>清空正文</button>
+      <button class="btn-ghost-rail danger" id="btnClearAll" type="button"><span class="bg-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg></span>清空正文</button>
       <button class="btn btn-outline" id="btnCopy" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         复制
@@ -944,6 +1001,32 @@
   }
 
   /* ============================================================
+   * 5.1 Lucide 风格内联图标：统一图标来源，避免 emoji / 字符占位
+   * 用法：icon('trash-2') 返回可直接塞进 innerHTML 的 SVG 字符串
+   * ============================================================ */
+  var ICON_PATHS = {
+    'copy': '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    'trash-2': '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+    'eraser': '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+    'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    'moon': '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    'sun': '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+    'chevron-up': '<polyline points="18 15 12 9 6 15"/>',
+    'chevron-down': '<polyline points="6 9 12 15 18 15"/>',
+    'rotate-ccw': '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+    'x': '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>',
+    'settings': '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'
+  };
+  function icon(name, extraAttrs) {
+    var body = ICON_PATHS[name];
+    if (!body) return '';
+    var attrs = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extraAttrs ? ' ' + extraAttrs : '');
+    return '<svg ' + attrs + '>' + body + '</svg>';
+  }
+
+  /* ============================================================
    * 6. 块模型：正文 ⇄ 块 的解析与回写
    * ------------------------------------------------------------
    * 真相源仍是 state.content[lang] 大文本。块只是视图：
@@ -1009,6 +1092,7 @@
       var joined = text ? (text + '\n\n' + snippet) : snippet;
       state.content[state.lang] = joined;
       renderBlocks();
+      markLastBlockAsNew();
       refreshStat();
       scheduleSave();
       // 聚焦新块末尾
@@ -1135,12 +1219,12 @@
       '<div class="sm-panel">' +
         '<div class="sm-head">' +
           '<span class="sm-title" id="smTitle"></span>' +
-          '<button type="button" class="sm-close" aria-label="关闭">×</button>' +
+          '<button type="button" class="sm-close" aria-label="关闭">' + icon('x') + '</button>' +
         '</div>' +
         '<div class="sm-hint" id="smHint"></div>' +
         '<div class="sm-list" id="smList"></div>' +
         '<div class="sm-foot">' +
-          '<button type="button" class="sm-add" id="smAdd"><span>+</span> <span class="sm-add-label"></span></button>' +
+          '<button type="button" class="sm-add" id="smAdd">' + icon('plus') + ' <span class="sm-add-label"></span></button>' +
         '</div>' +
       '</div>';
     document.body.appendChild($smOverlay);
@@ -1419,15 +1503,15 @@
       var ops = document.createElement('div');
       ops.className = 'sm-ops';
 
-      var up = mkOpBtn('↑', '上移', idx === 0);
+      var up = mkOpBtn('chevron-up', '上移', idx === 0);
       up.addEventListener('click', function () { moveManagerItem(item.id, -1); });
-      var down = mkOpBtn('↓', '下移', idx === order.length - 1);
+      var down = mkOpBtn('chevron-down', '下移', idx === order.length - 1);
       down.addEventListener('click', function () { moveManagerItem(item.id, 1); });
       ops.appendChild(up);
       ops.appendChild(down);
 
       if (item.builtin) {
-        resetBtn = mkOpBtn('↺', '恢复默认', !SM.isModified(item.id));
+        resetBtn = mkOpBtn('rotate-ccw', '恢复默认', !SM.isModified(item.id));
         resetBtn.addEventListener('click', function () {
           SM.reset(item.id);
           scheduleSave();
@@ -1436,7 +1520,7 @@
         });
         ops.appendChild(resetBtn);
       } else {
-        var del = mkOpBtn('×', '删除', false);
+        var del = mkOpBtn('x', '删除', false);
         del.classList.add('danger');
         del.addEventListener('click', function () {
           SM.deleteCustom(item.id);
@@ -1459,11 +1543,11 @@
     });
   }
 
-  function mkOpBtn(label, title, disabled) {
+  function mkOpBtn(iconName, title, disabled) {
     var b = document.createElement('button');
     b.type = 'button';
     b.className = 'sm-op';
-    b.textContent = label;
+    b.innerHTML = icon(iconName);
     b.title = title;
     b.setAttribute('aria-label', title);
     if (disabled) b.disabled = true;
@@ -1519,6 +1603,7 @@
       var text = collectText();
       state.content[state.lang] = text ? (text + '\n\n## ') : '## ';
       renderBlocks();
+      markLastBlockAsNew();
       refreshStat();
       scheduleSave();
       var areas = $blocks.querySelectorAll('.block-textarea');
@@ -1526,6 +1611,18 @@
       if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
     });
     $blocks.appendChild(add);
+  }
+
+  // 给刚新增的最后一个块打上入场动效标记，动画结束后自动移除
+  function markLastBlockAsNew() {
+    var cards = $blocks.querySelectorAll('.block');
+    var last = cards[cards.length - 1];
+    if (!last) return;
+    last.classList.add('block-enter');
+    last.addEventListener('animationend', function handler() {
+      last.classList.remove('block-enter');
+      last.removeEventListener('animationend', handler);
+    });
   }
 
   function buildBlockCard(blockText, idx) {
@@ -1542,7 +1639,7 @@
     handle.setAttribute('role', 'button');
     handle.setAttribute('aria-label', '拖动排序');
     handle.title = '拖动排序（或 Alt+↑/↓）';
-    handle.textContent = '⠿';
+    handle.innerHTML = icon('grip-vertical');
     attachDrag(handle, card);
     gutter.appendChild(handle);
 
@@ -1551,15 +1648,23 @@
     del.className = 'block-del';
     del.setAttribute('aria-label', '删除此块');
     del.title = '删除此块';
-    del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    del.innerHTML = icon('trash-2');
     del.addEventListener('click', function () { deleteBlock(card); });
     gutter.appendChild(del);
 
     card.appendChild(gutter);
 
-    // body：块内 textarea
+    // body：块内 textarea + 高亮 overlay（同一个 .hl-wrap 内像素对齐叠放）
     var body = document.createElement('div');
     body.className = 'block-body';
+
+    var wrap = document.createElement('div');
+    wrap.className = 'hl-wrap';
+
+    var overlay = document.createElement('div');
+    overlay.className = 'hl-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+
     var area = document.createElement('textarea');
     area.className = 'block-textarea';
     area.spellcheck = false;
@@ -1568,8 +1673,10 @@
     area.setAttribute('aria-label', '块内容');
     area.addEventListener('input', function () {
       autosize(area);
+      renderHighlight(area, overlay);
       onBlocksChanged();
     });
+    area.addEventListener('scroll', function () { syncOverlayScroll(area, overlay); });
     area.addEventListener('keydown', function (e) {
       // Alt+↑/↓ 移动块
       if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
@@ -1577,13 +1684,89 @@
         moveBlock(card, e.key === 'ArrowUp' ? -1 : 1);
       }
     });
-    body.appendChild(area);
+
+    wrap.appendChild(overlay);
+    wrap.appendChild(area);
+    body.appendChild(wrap);
     card.appendChild(body);
 
-    // 初次布局后自适应高度
+    // 初次布局后自适应高度 + 首次高亮
+    renderHighlight(area, overlay);
     requestAnimationFrame(function () { autosize(area); });
 
     return card;
+  }
+
+  /* ---------- Markdown 语法高亮：轻量正则 + overlay 渲染 ---------- */
+  // 转义 HTML 特殊字符，防止用户输入被当成标签解析（XSS 防护）
+  function hlEscape(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // 对单行做行内高亮（粗体/斜体/行内代码/链接），返回已转义 + 包裹好 span 的 HTML
+  // 行内代码先临时替换成“私有区字符包裹序号”的占位符，待粗体/斜体规则
+  // 处理完之后再还原为高亮 span；私有区字符正常输入几乎不会产生，
+  // 用它做占位符边界，比直接用纯数字更不容易和正文本身的数字冲突。
+  function highlightInline(line) {
+    var escaped = hlEscape(line);
+    var codeTokens = [];
+    // 行内代码优先处理并保护其内容不被粗体/斜体规则二次匹配
+    escaped = escaped.replace(/`([^`\n]+)`/g, function (m, code) {
+      codeTokens.push('<span class="hl-code">`' + code + '`</span>');
+      return '' + (codeTokens.length - 1) + '';
+    });
+    // 链接 [text](url)
+    escaped = escaped.replace(/\[([^\]\n]*)\]\(([^)\n]*)\)/g, function (m, t, u) {
+      return '<span class="hl-link-text">[' + t + ']</span><span class="hl-link-url">(' + u + ')</span>';
+    });
+    // 粗体 **x**
+    escaped = escaped.replace(/\*\*([^*\n]+)\*\*/g, '<span class="hl-bold">**$1**</span>');
+    // 斜体 *x*（避免匹配到已处理过的 ** 场景，简单正则已够用）
+    escaped = escaped.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<span class="hl-italic">*$2*</span>');
+    // 还原行内代码 token
+    escaped = escaped.replace(/(\d+)/g, function (m, i) { return codeTokens[+i]; });
+    return escaped;
+  }
+
+  // 整块文本 → 高亮 HTML（按行处理：标题/列表/引用/代码围栏识别行首，其余走行内高亮）
+  function highlightMarkdown(text) {
+    var lines = text.split('\n');
+    var inFence = false;
+    var out = lines.map(function (line) {
+      // 代码块围栏 ```
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        return '<span class="hl-fence">' + hlEscape(line) + '</span>';
+      }
+      if (inFence) return '<span class="hl-fence">' + hlEscape(line) + '</span>';
+
+      // 标题 #, ##, ### ...
+      var hMatch = line.match(/^(#{1,6})(\s.*)?$/);
+      if (hMatch) return '<span class="hl-h">' + hlEscape(line) + '</span>';
+
+      // 引用 >
+      var qMatch = line.match(/^(\s*>\s?)(.*)$/);
+      if (qMatch) return '<span class="hl-quote">' + hlEscape(qMatch[1]) + '</span>' + highlightInline(qMatch[2]);
+
+      // 列表 -, *, 1.
+      var lMatch = line.match(/^(\s*)([-*]|\d+\.)(\s+)(.*)$/);
+      if (lMatch) {
+        return hlEscape(lMatch[1]) + '<span class="hl-list">' + hlEscape(lMatch[2]) + '</span>' + hlEscape(lMatch[3]) + highlightInline(lMatch[4]);
+      }
+
+      return highlightInline(line);
+    });
+    return out.join('\n');
+  }
+
+  function renderHighlight(area, overlay) {
+    overlay.innerHTML = highlightMarkdown(area.value);
+    syncOverlayScroll(area, overlay);
+  }
+
+  function syncOverlayScroll(area, overlay) {
+    overlay.scrollTop = area.scrollTop;
+    overlay.scrollLeft = area.scrollLeft;
   }
 
   // 块内容变化：收集回写（不重建 DOM，避免打断输入）
