@@ -370,6 +370,49 @@
   .qm-add-item:hover { border-color:var(--amber); color:var(--amber); background:var(--amber-soft); }
   .qm-add-item svg { width:12px; height:12px; }
 
+  /* 阶段4：应用设置面板（快捷键录制 + 粘贴等待时长），沿用管理浮窗同款视觉 */
+  .st-panel { width:min(460px, 100%); }
+  .st-body { padding:16px 20px 6px; display:flex; flex-direction:column; gap:20px; }
+  .st-field { display:flex; flex-direction:column; gap:8px; }
+  .st-label { font-size:12.5px; font-weight:600; color:var(--text); }
+  .st-desc { font-size:11.5px; color:var(--muted); line-height:1.5; }
+  .st-recorder {
+    display:flex; align-items:center; gap:10px;
+  }
+  .st-recorder-box {
+    flex:1; min-width:0;
+    display:flex; align-items:center; justify-content:center;
+    height:40px; border-radius:var(--radius-sm);
+    border:1px solid var(--line-hi); background:var(--surface-inset);
+    font-family:var(--font-mono); font-size:13px; font-weight:600; color:var(--amber-hi);
+    letter-spacing:0.02em; cursor:pointer; user-select:none;
+    transition:border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+  }
+  .st-recorder-box:hover { border-color:var(--amber-deep); }
+  .st-recorder-box.recording {
+    border-color:var(--amber); background:var(--amber-soft); color:var(--amber);
+    animation:st-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes st-pulse { 0%, 100% { box-shadow:0 0 0 0 rgba(224,141,112,0.35); } 50% { box-shadow:0 0 0 4px rgba(224,141,112,0.06); } }
+  .st-recorder-clear {
+    flex:none; width:32px; height:32px; border-radius:6px;
+    display:inline-flex; align-items:center; justify-content:center;
+    border:1px solid var(--line); background:var(--surface); color:var(--text-soft);
+    cursor:pointer; transition:border-color 0.12s ease, color 0.12s ease;
+  }
+  .st-recorder-clear:hover { border-color:var(--warn); color:var(--warn); }
+  .st-recorder-clear svg { width:14px; height:14px; }
+  .st-delay-row { display:flex; align-items:center; gap:10px; }
+  .st-delay-input {
+    width:88px; height:36px; border-radius:var(--radius-sm);
+    border:1px solid var(--line-hi); background:var(--surface-inset); color:var(--text);
+    font-family:var(--font-mono); font-size:13px; text-align:center;
+    padding:0 8px;
+  }
+  .st-delay-input:focus { border-color:var(--amber-deep); outline:none; }
+  .st-delay-unit { font-size:12px; color:var(--muted); }
+  .st-foot-hint { padding:2px 20px 16px; font-size:11px; color:var(--faint); }
+
   .btn-ghost-rail {
     display:inline-flex; align-items:center; gap:6px;
     background:transparent; border:1px solid var(--line); color:var(--text-soft);
@@ -797,6 +840,7 @@
   var processApi = TAURI && TAURI.process;
   var eventApi = TAURI && TAURI.event;
   var webviewWindowApi = TAURI && TAURI.webviewWindow;
+  var coreApi = TAURI && TAURI.core;
 
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
   var STATE_FILE = 'composer-state.json';
@@ -917,7 +961,12 @@
         if (parsed && typeof parsed === 'object') state = normalizeState(parsed);
       })
       .catch(function () { state = defaultState(); })
-      .then(function () { renderAll(); });
+      .then(function () {
+        renderAll();
+        // state 就绪后，把持久化的自定义热键应用到 Rust 侧。只有主窗口做这件事
+        // （float.html 没有这段逻辑），避免两个窗口在启动时竞相注册同一个全局热键。
+        applyStartupShortcut();
+      });
   }
 
   // modulesToText / normalizeState：纯迁移逻辑已抽离到 core.js
@@ -2240,6 +2289,219 @@
   if ($btnCheckUpdate) $btnCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
 
   /* ============================================================
+   * 12.0 设置面板：快捷键录制（项1） + 粘贴前等待 ms（项2）
+   * ------------------------------------------------------------
+   * 只有主窗口负责把 state.settings.toggleShortcut 应用到 Rust 侧
+   * （invoke set_toggle_shortcut），浮窗不做这件事，避免两个窗口在
+   * 启动时争相注册同一个全局热键。
+   * ============================================================ */
+  var $stOverlay = null, $stRecorderBox = null, $stDelayInput = null;
+  var stKeyHandler = null;
+  var isRecordingShortcut = false;
+
+  // Rust 命令返回 Result<(), String> 时，invoke 失败会直接以该字符串 reject，
+  // 不是一个带 .message 的 Error 对象；做个防御性兜底，避免显示 [object Object]。
+  function formatInvokeError(err) {
+    if (!err) return '未知错误';
+    if (typeof err === 'string') return err;
+    if (err.message) return err.message;
+    try { return String(err); } catch (e) { return '未知错误'; }
+  }
+
+  // accelerator 主键映射：event.code -> Tauri accelerator 里的主键片段。
+  // 纯修饰键（Control/Alt/Shift/Meta 本身）不算主键，需要过滤掉。
+  var MODIFIER_CODES = {
+    ControlLeft: true, ControlRight: true,
+    AltLeft: true, AltRight: true,
+    ShiftLeft: true, ShiftRight: true,
+    MetaLeft: true, MetaRight: true, OSLeft: true, OSRight: true
+  };
+  var ARROW_CODE_MAP = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right' };
+  function codeToMainKey(code) {
+    if (!code || MODIFIER_CODES[code]) return null;
+    if (ARROW_CODE_MAP[code]) return ARROW_CODE_MAP[code];
+    if (code === 'Space') return 'Space';
+    if (/^F([1-9]|1[0-2])$/.test(code)) return code; // F1..F12 原样
+    var km = code.match(/^Key([A-Z])$/);
+    if (km) return km[1];
+    var dm = code.match(/^Digit([0-9])$/);
+    if (dm) return dm[1];
+    // 其余（Comma、Period、Minus 等）没有在规格里列出映射，兜底直接去掉前缀分类词，
+    // 拿不准的场景宁可让用户重录，也不要生成一个 Tauri 不认识的 accelerator。
+    return null;
+  }
+
+  function formatAccelerator(e) {
+    var mods = [];
+    if (e.ctrlKey) mods.push('Ctrl');
+    if (e.altKey) mods.push('Alt');
+    if (e.shiftKey) mods.push('Shift');
+    if (e.metaKey) mods.push('Super');
+    var mainKey = codeToMainKey(e.code);
+    if (mods.length === 0 || !mainKey) return null;
+    return mods.concat([mainKey]).join('+');
+  }
+
+  function ensureSettingsPanel() {
+    if ($stOverlay) return;
+    $stOverlay = document.createElement('div');
+    $stOverlay.className = 'sm-overlay';
+    $stOverlay.setAttribute('role', 'dialog');
+    $stOverlay.setAttribute('aria-modal', 'true');
+    $stOverlay.setAttribute('aria-label', '设置');
+    $stOverlay.innerHTML =
+      '<div class="sm-panel st-panel">' +
+        '<div class="sm-head">' +
+          '<span class="sm-title">设置</span>' +
+          '<button type="button" class="sm-close" aria-label="关闭">' + icon('x') + '</button>' +
+        '</div>' +
+        '<div class="st-body">' +
+          '<div class="st-field">' +
+            '<span class="st-label">呼出浮窗快捷键</span>' +
+            '<span class="st-desc">点击输入框后按下新的组合键（至少一个 Ctrl/Alt/Shift/Super + 一个主键），松开自动保存。</span>' +
+            '<div class="st-recorder">' +
+              '<div class="st-recorder-box" id="stRecorderBox" tabindex="0" role="button" aria-label="点击录制快捷键"></div>' +
+              '<button type="button" class="st-recorder-clear" id="stRecorderReset" title="恢复默认（Ctrl+Alt+C）" aria-label="恢复默认快捷键">' + icon('rotate-ccw') + '</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="st-field">' +
+            '<span class="st-label">粘贴前等待</span>' +
+            '<span class="st-desc">自动粘贴前等待焦点切换到目标窗口的时长，切换较慢的电脑可以调大一些。</span>' +
+            '<div class="st-delay-row">' +
+              '<input type="number" class="st-delay-input" id="stDelayInput" min="30" max="500" step="10" />' +
+              '<span class="st-delay-unit">毫秒（30–500）</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="st-foot-hint">改动会立即保存并同步到浮窗。</div>' +
+      '</div>';
+    document.body.appendChild($stOverlay);
+    $stRecorderBox = $stOverlay.querySelector('#stRecorderBox');
+    $stDelayInput = $stOverlay.querySelector('#stDelayInput');
+
+    $stOverlay.addEventListener('mousedown', function (e) {
+      if (e.target === $stOverlay) closeSettingsPanel();
+    });
+    $stOverlay.querySelector('.sm-close').addEventListener('click', closeSettingsPanel);
+
+    $stRecorderBox.addEventListener('click', startRecordingShortcut);
+    $stRecorderBox.addEventListener('keydown', function (e) {
+      // 空格/回车 激活录制态；录制态本身的按键在 startRecordingShortcut 里单独监听
+      if (!isRecordingShortcut && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        startRecordingShortcut();
+      }
+    });
+
+    $stOverlay.querySelector('#stRecorderReset').addEventListener('click', function () {
+      applyToggleShortcut('Ctrl+Alt+C');
+    });
+
+    $stDelayInput.addEventListener('change', function () {
+      var v = parseInt($stDelayInput.value, 10);
+      if (!isFinite(v)) v = 60;
+      v = Math.min(500, Math.max(30, v));
+      $stDelayInput.value = v;
+      state.settings.pasteDelayMs = v;
+      scheduleSave();
+      showToast('粘贴等待时长已更新为 ' + v + ' 毫秒');
+    });
+  }
+
+  function renderSettingsPanel() {
+    if (!$stOverlay || isRecordingShortcut) return;
+    $stRecorderBox.textContent = state.settings.toggleShortcut;
+    $stDelayInput.value = state.settings.pasteDelayMs;
+  }
+
+  function startRecordingShortcut() {
+    if (isRecordingShortcut) return;
+    isRecordingShortcut = true;
+    var previous = state.settings.toggleShortcut;
+    $stRecorderBox.classList.add('recording');
+    $stRecorderBox.textContent = '请按下快捷键…';
+
+    function finish(newAccelerator) {
+      isRecordingShortcut = false;
+      $stRecorderBox.classList.remove('recording');
+      document.removeEventListener('keydown', onKeydown, true);
+      if (newAccelerator) {
+        applyToggleShortcut(newAccelerator);
+      } else {
+        $stRecorderBox.textContent = previous;
+      }
+    }
+
+    function onKeydown(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { finish(null); return; }
+      var accelerator = formatAccelerator(e);
+      if (!accelerator) {
+        // 无效组合（缺修饰键或缺主键）：提示但保持录制态，让用户重试
+        $stRecorderBox.textContent = '无效组合，请至少按 1 个修饰键 + 1 个主键';
+        return;
+      }
+      finish(accelerator);
+    }
+
+    document.addEventListener('keydown', onKeydown, true);
+  }
+
+  // 应用新快捷键：先本地更新 + 保存 + 广播（前端体验立即生效），
+  // 再调用 Rust 命令真正切换全局注册；失败则把显示值回滚为旧值并提示原因。
+  function applyToggleShortcut(accelerator) {
+    var previous = state.settings.toggleShortcut;
+    state.settings.toggleShortcut = accelerator;
+    if ($stRecorderBox) $stRecorderBox.textContent = accelerator;
+    scheduleSave();
+
+    if (!coreApi || !coreApi.invoke) {
+      showToast('当前环境不支持设置全局快捷键（仅桌面应用可用）', true);
+      return;
+    }
+    coreApi.invoke('set_toggle_shortcut', { accelerator: accelerator }).then(function () {
+      showToast('快捷键已更新为 ' + accelerator);
+    }).catch(function (err) {
+      var reason = formatInvokeError(err);
+      showToast('快捷键设置失败：' + reason, true);
+      // 回滚：注册失败时 Rust 侧会把旧热键重新注册回来（仍可用），
+      // 这里只需把前端显示与持久化的值同步回旧值，保持一致。
+      state.settings.toggleShortcut = previous;
+      if ($stRecorderBox && !isRecordingShortcut) $stRecorderBox.textContent = previous;
+      scheduleSave();
+    });
+  }
+
+  // 启动时把持久化的自定义热键应用到 Rust 侧。只有主窗口做这件事。
+  function applyStartupShortcut() {
+    if (!coreApi || !coreApi.invoke) return;
+    coreApi.invoke('set_toggle_shortcut', { accelerator: state.settings.toggleShortcut }).catch(function (err) {
+      var reason = formatInvokeError(err);
+      console.warn('启动时应用自定义快捷键失败：', reason);
+    });
+  }
+
+  function openSettingsPanel() {
+    ensureSettingsPanel();
+    renderSettingsPanel();
+    $stOverlay.classList.add('show');
+    stKeyHandler = function (e) { if (e.key === 'Escape' && !isRecordingShortcut) closeSettingsPanel(); };
+    document.addEventListener('keydown', stKeyHandler);
+    $stRecorderBox.focus();
+  }
+
+  function closeSettingsPanel() {
+    if (!$stOverlay) return;
+    if (isRecordingShortcut) return; // 录制中先不关闭，避免误触丢失操作
+    $stOverlay.classList.remove('show');
+    if (stKeyHandler) { document.removeEventListener('keydown', stKeyHandler); stKeyHandler = null; }
+  }
+
+  var $btnEditorSettings = document.getElementById('btnEditorSettings');
+  if ($btnEditorSettings) $btnEditorSettings.addEventListener('click', openSettingsPanel);
+
+  /* ============================================================
    * 12.1 浮窗开关：显示/隐藏 label 为 'float' 的窗口
    * ============================================================ */
   var $btnFloatWindow = document.getElementById('btnFloatWindow');
@@ -2347,6 +2609,7 @@
     renderEditor();
     if ($smOverlay && $smOverlay.classList.contains('show')) renderSnippetManager();
     if ($qmOverlay && $qmOverlay.classList.contains('show')) renderQuickManager();
+    if ($stOverlay && $stOverlay.classList.contains('show')) renderSettingsPanel();
   }
 
   restoreState();

@@ -461,7 +461,8 @@
    * 否则（或粘贴失败）就只提示复制结果。粘贴失败时降级提示，不让异常往上抛。 */
   function afterCopySucceeded(doneMsg, pasteMsg) {
     if (pasteMsg && isAutoPasteOn()) {
-      coreApi.invoke('paste_to_active_window').then(function () {
+      var delayMs = (state.settings && typeof state.settings.pasteDelayMs === 'number') ? state.settings.pasteDelayMs : 60;
+      coreApi.invoke('paste_to_active_window', { delayMs: delayMs }).then(function () {
         showToast(pasteMsg);
       }).catch(function (err) {
         showToast(doneMsg + '（粘贴失败：' + formatPasteError(err) + '）');

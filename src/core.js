@@ -97,7 +97,11 @@
       customModules: [],
       modulePatches: {},                               // { moduleId: {labelZh?, labelEn?, textZh?, textEn?, hidden?} }
       moduleOrder: INSERT_MODULES.map(function (m) { return m.id; }),
-      quickGroups: defaultQuickGroups()                // 快速段落分组（用户可完全增删改）
+      quickGroups: defaultQuickGroups(),               // 快速段落分组（用户可完全增删改）
+      settings: {                                      // 阶段4：可自定义的快捷键 + 粘贴前等待时长
+        toggleShortcut: 'Ctrl+Alt+C',
+        pasteDelayMs: 60
+      }
     };
   }
 
@@ -269,6 +273,18 @@
         });
     } else {
       s.quickGroups = defaultQuickGroups();
+    }
+
+    // 阶段4：设置项——快捷键 + 粘贴前等待时长，做好防御性校验，任何脏值都回退默认
+    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60 };
+    if (raw.settings && typeof raw.settings === 'object') {
+      if (typeof raw.settings.toggleShortcut === 'string' && raw.settings.toggleShortcut.trim() !== '') {
+        s.settings.toggleShortcut = raw.settings.toggleShortcut;
+      }
+      var delay = raw.settings.pasteDelayMs;
+      if (typeof delay === 'number' && isFinite(delay)) {
+        s.settings.pasteDelayMs = Math.min(500, Math.max(30, Math.round(delay)));
+      }
     }
 
     return s;
