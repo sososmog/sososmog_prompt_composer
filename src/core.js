@@ -55,6 +55,31 @@
   var BUILTIN_BY_ID = {};
   BUILTIN_SNIPPETS.forEach(function (b) { BUILTIN_BY_ID[b.id] = b; });
 
+  // 快速段落：两级结构（分组 → 段落）。作为用户可完全增删改的数据，
+  // 首次运行时以下面这些分组作为种子写入 state.quickGroups。
+  function defaultQuickGroups() {
+    return [
+      { id: 'qg_open', label: { zh: '开场铺垫', en: 'Opening' }, hidden: false, items: [
+        { id: 'qi_bg', label: { zh: '背景说明', en: 'Background' },
+          text: { zh: '## 背景\n以下是本次任务的背景信息：……', en: '## Background\nHere is the background for this task: …' } },
+        { id: 'qi_task', label: { zh: '任务概述', en: 'Task overview' },
+          text: { zh: '## 任务\n请完成以下任务：……', en: '## Task\nPlease complete the following task: …' } }
+      ] },
+      { id: 'qg_rule', label: { zh: '约束要求', en: 'Constraints' }, hidden: false, items: [
+        { id: 'qi_fmt', label: { zh: '严格遵循格式', en: 'Follow the format' },
+          text: { zh: '请严格按照要求的格式输出，不要添加额外说明。', en: 'Follow the required format strictly; do not add extra commentary.' } },
+        { id: 'qi_src', label: { zh: '仅用给定信息', en: 'Only given info' },
+          text: { zh: '只依据我提供的信息作答，缺少信息时明确指出。', en: 'Answer only from the information I provide; flag anything missing.' } }
+      ] },
+      { id: 'qg_close', label: { zh: '收尾追问', en: 'Wrap-up' }, hidden: false, items: [
+        { id: 'qi_check', label: { zh: '完成前自检', en: 'Self-check' },
+          text: { zh: '给出答案前，请先自检是否满足上述所有要求。', en: 'Before answering, self-check that all the above requirements are met.' } },
+        { id: 'qi_ask', label: { zh: '不清楚先追问', en: 'Ask if unclear' },
+          text: { zh: '如有不清楚之处，请先向我提问澄清，再开始。', en: 'If anything is unclear, ask me to clarify before starting.' } }
+      ] }
+    ];
+  }
+
   function demoContent() {
     return {
       zh: '## 角色\n你是一名资深全栈工程师，擅长 Web 产品开发与代码审查。你服务的对象是产品团队的开发者。\n\n## 场景\n使用场景：在现有 SaaS 产品中新增一个功能模块。\n\n## 需求效果\n期望达成的效果：……\n\n## 解决方案\n请围绕以下方向给出方案：技术选型、接口设计、关键实现步骤。\n\n## 输出格式\n以 Markdown 输出，并附上示例代码。',
@@ -71,7 +96,8 @@
       snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; }),
       customModules: [],
       modulePatches: {},                               // { moduleId: {labelZh?, labelEn?, textZh?, textEn?, hidden?} }
-      moduleOrder: INSERT_MODULES.map(function (m) { return m.id; })
+      moduleOrder: INSERT_MODULES.map(function (m) { return m.id; }),
+      quickGroups: defaultQuickGroups()                // 快速段落分组（用户可完全增删改）
     };
   }
 
@@ -84,6 +110,15 @@
   function newModuleId() {
     moduleSeq++;
     return 'mc_' + Date.now().toString(36) + '_' + moduleSeq.toString(36);
+  }
+  var quickSeq = 0;
+  function newQuickGroupId() {
+    quickSeq++;
+    return 'qg_' + Date.now().toString(36) + '_' + quickSeq.toString(36);
+  }
+  function newQuickItemId() {
+    quickSeq++;
+    return 'qi_' + Date.now().toString(36) + '_' + quickSeq.toString(36);
   }
 
   // 兼容旧存档：旧版是 modules 数组，编译成一份大文本。
@@ -206,6 +241,35 @@
     INSERT_MODULES.forEach(function (m) { if (!mSeen[m.id]) { mOrder.push(m.id); mSeen[m.id] = true; } });
     s.customModules.forEach(function (m) { if (!mSeen[m.id]) { mOrder.push(m.id); mSeen[m.id] = true; } });
     s.moduleOrder = mOrder;
+
+    // 快速段落分组：存档里有合法数组则以存档为准（含空数组，尊重用户删空）；
+    // 缺失（老存档升级）时用默认种子填充。
+    if (Array.isArray(raw.quickGroups)) {
+      s.quickGroups = raw.quickGroups
+        .filter(function (g) { return g && typeof g === 'object'; })
+        .map(function (g) {
+          var lab = (g.label && typeof g.label === 'object') ? g.label : {};
+          var items = Array.isArray(g.items) ? g.items : [];
+          return {
+            id: (typeof g.id === 'string' && g.id) ? g.id : newQuickGroupId(),
+            label: { zh: typeof lab.zh === 'string' ? lab.zh : '', en: typeof lab.en === 'string' ? lab.en : '' },
+            hidden: g.hidden === true,
+            items: items
+              .filter(function (it) { return it && typeof it === 'object'; })
+              .map(function (it) {
+                var il = (it.label && typeof it.label === 'object') ? it.label : {};
+                var tx = (it.text && typeof it.text === 'object') ? it.text : {};
+                return {
+                  id: (typeof it.id === 'string' && it.id) ? it.id : newQuickItemId(),
+                  label: { zh: typeof il.zh === 'string' ? il.zh : '', en: typeof il.en === 'string' ? il.en : '' },
+                  text: { zh: typeof tx.zh === 'string' ? tx.zh : '', en: typeof tx.en === 'string' ? tx.en : '' }
+                };
+              })
+          };
+        });
+    } else {
+      s.quickGroups = defaultQuickGroups();
+    }
 
     return s;
   }
@@ -357,8 +421,11 @@
   window.Composer.BUILTIN_BY_ID = BUILTIN_BY_ID;
   window.Composer.demoContent = demoContent;
   window.Composer.defaultState = defaultState;
+  window.Composer.defaultQuickGroups = defaultQuickGroups;
   window.Composer.newSnippetId = newSnippetId;
   window.Composer.newModuleId = newModuleId;
+  window.Composer.newQuickGroupId = newQuickGroupId;
+  window.Composer.newQuickItemId = newQuickItemId;
   window.Composer.modulesToText = modulesToText;
   window.Composer.normalizeState = normalizeState;
   window.Composer.estimateTokens = estimateTokens;

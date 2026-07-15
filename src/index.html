@@ -302,6 +302,74 @@
   .sm-add:hover { border-color:var(--amber); color:var(--amber); background:var(--amber-soft); }
   .sm-add svg { width:14px; height:14px; }
 
+  /* 快速段落：可下拉的分组 block */
+  .quick-wrap { display:flex; flex-direction:column; gap:6px; }
+  .quick-block { display:flex; flex-direction:column; }
+  .qb-head {
+    display:flex; align-items:center; gap:8px; width:100%;
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius-sm); padding:7px 11px; cursor:pointer;
+    color:var(--text-soft); font-size:12.5px; text-align:left;
+    transition:background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .qb-head:hover { background:var(--surface-hi); border-color:var(--amber-deep); color:var(--text); }
+  .quick-block.open .qb-head { border-color:var(--amber-deep); background:var(--surface-hi); color:var(--text); border-bottom-left-radius:0; border-bottom-right-radius:0; }
+  .qb-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .qb-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); flex:none; }
+  .qb-caret { flex:none; display:inline-flex; align-items:center; color:var(--muted); transition:transform 0.16s ease; }
+  .qb-caret svg { width:14px; height:14px; }
+  .quick-block.open .qb-caret { transform:rotate(180deg); color:var(--amber); }
+  .qb-list {
+    display:flex; flex-direction:column;
+    border:1px solid var(--amber-deep); border-top:none;
+    border-radius:0 0 var(--radius-sm) var(--radius-sm);
+    background:var(--bg-rail); overflow:hidden;
+  }
+  .qb-item {
+    text-align:left; background:transparent; border:none; border-top:1px solid var(--line-soft);
+    padding:7px 11px 7px 14px; cursor:pointer; color:var(--text-soft); font-size:12px;
+    display:flex; flex-direction:column; gap:2px;
+    transition:background 0.1s ease, color 0.1s ease;
+  }
+  .qb-item:first-child { border-top:none; }
+  .qb-item:hover { background:var(--amber-soft); color:var(--amber); }
+  .qb-item-label { font-weight:500; }
+  .qb-item-preview {
+    font-size:10.5px; color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .qb-item:hover .qb-item-preview { color:var(--amber-hi); }
+  .qb-empty { padding:8px 12px; font-size:11px; color:var(--faint); }
+  .quick-empty { font-size:11.5px; color:var(--faint); padding:2px 0; }
+
+  /* 快速段落管理：两级嵌套 */
+  .qm-group {
+    border:1px solid var(--line); border-radius:var(--radius-sm);
+    margin-bottom:12px; overflow:hidden; background:var(--surface-inset);
+  }
+  .qm-group-head {
+    display:flex; align-items:center; gap:8px;
+    padding:9px 11px; background:var(--surface); border-bottom:1px solid var(--line-soft);
+  }
+  .qm-group-head .sm-tag { font-size:12.5px; }
+  .qm-order { display:flex; flex-direction:column; gap:1px; flex:none; }
+  .qm-order .sm-op { width:22px; height:15px; }
+  .qm-order .sm-op svg { width:11px; height:11px; }
+  .qm-items { padding:8px 11px 4px; display:flex; flex-direction:column; gap:8px; }
+  .qm-item-row {
+    display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:start;
+    padding-bottom:8px; border-bottom:1px dashed var(--line-soft);
+  }
+  .qm-item-row:last-child { border-bottom:none; }
+  .qm-item-body { display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .qm-add-item {
+    display:inline-flex; align-items:center; gap:6px; align-self:flex-start;
+    border:1px dashed var(--line-hi); background:transparent; color:var(--muted);
+    border-radius:5px; padding:5px 10px; font-size:11.5px; cursor:pointer; margin:2px 0 8px;
+    transition:border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  }
+  .qm-add-item:hover { border-color:var(--amber); color:var(--amber); background:var(--amber-soft); }
+  .qm-add-item svg { width:12px; height:12px; }
+
   .btn-ghost-rail {
     display:inline-flex; align-items:center; gap:6px;
     background:transparent; border:1px solid var(--line); color:var(--text-soft);
@@ -639,6 +707,17 @@
         </div>
         <div class="snippet-wrap" id="snippetWrap"></div>
       </div>
+
+      <div class="rail-section">
+        <div class="rail-section-title has-action">
+          <span class="rst-label">快速段落</span>
+          <span class="rst-line"></span>
+          <button type="button" class="rst-gear" id="btnManageQuick" title="管理快速段落" aria-label="管理快速段落">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </button>
+        </div>
+        <div class="quick-wrap" id="quickWrap"></div>
+      </div>
     </div>
 
     <div class="rail-foot">
@@ -736,6 +815,8 @@
   var defaultState = Composer.defaultState;
   var newSnippetId = Composer.newSnippetId;
   var newModuleId = Composer.newModuleId;
+  var newQuickGroupId = Composer.newQuickGroupId;
+  var newQuickItemId = Composer.newQuickItemId;
 
   /* ============================================================
    * 2. 状态 + 持久化
@@ -853,6 +934,7 @@
    * ============================================================ */
   var $insertGrid = document.getElementById('insertGrid');
   var $snippetWrap = document.getElementById('snippetWrap');
+  var $quickWrap = document.getElementById('quickWrap');
   var $langSegmented = document.getElementById('langSegmented');
   var $viewSeg = document.getElementById('viewSeg');
   var $etLabel = document.getElementById('etLabel');
@@ -1048,6 +1130,94 @@
       $snippetWrap.appendChild(pill);
     });
   }
+
+  /* ---------- 快速段落：可下拉的分组 block ---------- */
+  var openQuickGroupId = null; // 当前展开的分组 id（同时只展开一个）
+
+  function renderQuick() {
+    if (!$quickWrap) return;
+    var lang = state.lang;
+    $quickWrap.innerHTML = '';
+
+    var visible = state.quickGroups.filter(function (g) { return !g.hidden; });
+    if (visible.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'quick-empty';
+      empty.textContent = '还没有快速段落，点右上角齿轮添加。';
+      $quickWrap.appendChild(empty);
+      return;
+    }
+    // 若当前展开的分组已不可见/被删，收起
+    if (openQuickGroupId && !visible.some(function (g) { return g.id === openQuickGroupId; })) {
+      openQuickGroupId = null;
+    }
+
+    visible.forEach(function (group) {
+      var isOpen = group.id === openQuickGroupId;
+      var block = document.createElement('div');
+      block.className = 'quick-block' + (isOpen ? ' open' : '');
+
+      var head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'qb-head';
+      head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      var name = group.label[lang] || group.label.zh || group.label.en || '未命名分组';
+      head.innerHTML =
+        '<span class="qb-name"></span>' +
+        '<span class="qb-count">' + group.items.length + '</span>' +
+        '<span class="qb-caret">' + icon('chevron-down') + '</span>';
+      head.querySelector('.qb-name').textContent = name;
+      head.title = name;
+      head.addEventListener('click', function () {
+        openQuickGroupId = isOpen ? null : group.id;
+        renderQuick();
+      });
+      block.appendChild(head);
+
+      if (isOpen) {
+        var list = document.createElement('div');
+        list.className = 'qb-list';
+        if (group.items.length === 0) {
+          var ie = document.createElement('div');
+          ie.className = 'qb-empty';
+          ie.textContent = '该分组还没有段落。';
+          list.appendChild(ie);
+        } else {
+          group.items.forEach(function (item) {
+            var text = item.text[lang] || item.text.zh || item.text.en || '';
+            var itemLabel = item.label[lang] || item.label.zh || item.label.en || '（未命名段落）';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'qb-item';
+            btn.title = text;
+            var lb = document.createElement('span');
+            lb.className = 'qb-item-label';
+            lb.textContent = itemLabel;
+            var pv = document.createElement('span');
+            pv.className = 'qb-item-preview';
+            pv.textContent = text.replace(/\s+/g, ' ').trim();
+            btn.appendChild(lb);
+            btn.appendChild(pv);
+            btn.addEventListener('click', function () {
+              if (!text) { showToast('该段落还没有内容'); return; }
+              insertSnippet(text);
+            });
+            list.appendChild(btn);
+          });
+        }
+        block.appendChild(list);
+      }
+      $quickWrap.appendChild(block);
+    });
+  }
+
+  // 点击 block 之外的区域收起下拉
+  document.addEventListener('mousedown', function (e) {
+    if (openQuickGroupId === null) return;
+    if ($quickWrap && $quickWrap.contains(e.target)) return;
+    openQuickGroupId = null;
+    renderQuick();
+  });
 
   /* ---------- 通用管理浮窗（常用句 / 插入模块共用） ---------- */
   var $smOverlay = null, $smList = null, $smTitle = null, $smHint = null, $smAddBtn = null;
@@ -1402,6 +1572,198 @@
   function autosizeSm(area) {
     area.style.height = 'auto';
     area.style.height = (area.scrollHeight) + 'px';
+  }
+
+  /* ---------- 快速段落管理浮窗（两级嵌套：分组 → 段落） ---------- */
+  var $qmOverlay = null, $qmList = null, qmKeyHandler = null;
+
+  function moveInArray(arr, id, dir) {
+    var i = -1;
+    for (var k = 0; k < arr.length; k++) { if (arr[k].id === id) { i = k; break; } }
+    if (i < 0) return;
+    var j = i + dir;
+    if (j < 0 || j >= arr.length) return;
+    var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+
+  function afterQuickChange() {
+    scheduleSave();
+    renderQuickManager();
+    renderQuick();
+  }
+
+  function ensureQuickManager() {
+    if ($qmOverlay) return;
+    $qmOverlay = document.createElement('div');
+    $qmOverlay.className = 'sm-overlay';
+    $qmOverlay.setAttribute('role', 'dialog');
+    $qmOverlay.setAttribute('aria-modal', 'true');
+    $qmOverlay.setAttribute('aria-label', '管理快速段落');
+    $qmOverlay.innerHTML =
+      '<div class="sm-panel">' +
+        '<div class="sm-head">' +
+          '<span class="sm-title">管理快速段落</span>' +
+          '<button type="button" class="sm-close" aria-label="关闭">' + icon('x') + '</button>' +
+        '</div>' +
+        '<div class="sm-hint">分组即左栏可下拉的 block · 勾选决定是否显示 · 点名称/内容可直接编辑 · 用 ↑↓ 调整顺序</div>' +
+        '<div class="sm-list" id="qmList"></div>' +
+        '<div class="sm-foot">' +
+          '<button type="button" class="sm-add" id="qmAddGroup">' + icon('plus') + ' <span>新增分组</span></button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild($qmOverlay);
+    $qmList = $qmOverlay.querySelector('#qmList');
+
+    $qmOverlay.addEventListener('mousedown', function (e) {
+      if (e.target === $qmOverlay) closeQuickManager();
+    });
+    $qmOverlay.querySelector('.sm-close').addEventListener('click', closeQuickManager);
+    $qmOverlay.querySelector('#qmAddGroup').addEventListener('click', function () {
+      var g = { id: newQuickGroupId(), label: { zh: '新分组', en: 'New group' }, hidden: false, items: [] };
+      state.quickGroups.push(g);
+      afterQuickChange();
+      var last = $qmList.querySelector('.qm-group:last-child .sm-tag');
+      if (last) { last.focus(); last.select(); }
+    });
+  }
+
+  function renderQuickManager() {
+    if (!$qmList) return;
+    var lang = state.lang;
+    $qmList.innerHTML = '';
+
+    if (state.quickGroups.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'qb-empty';
+      empty.textContent = '还没有分组，点下方「新增分组」开始。';
+      $qmList.appendChild(empty);
+      return;
+    }
+
+    state.quickGroups.forEach(function (group, gIdx) {
+      var wrap = document.createElement('div');
+      wrap.className = 'qm-group';
+
+      // 分组头部
+      var head = document.createElement('div');
+      head.className = 'qm-group-head';
+
+      var order = document.createElement('div');
+      order.className = 'qm-order';
+      var up = mkOpBtn('chevron-up', '上移分组', gIdx === 0);
+      up.addEventListener('click', function () { moveInArray(state.quickGroups, group.id, -1); afterQuickChange(); });
+      var down = mkOpBtn('chevron-down', '下移分组', gIdx === state.quickGroups.length - 1);
+      down.addEventListener('click', function () { moveInArray(state.quickGroups, group.id, 1); afterQuickChange(); });
+      order.appendChild(up); order.appendChild(down);
+      head.appendChild(order);
+
+      var chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'sm-chk';
+      chk.checked = !group.hidden;
+      chk.title = '在左栏显示该分组';
+      chk.addEventListener('change', function () { group.hidden = !chk.checked; afterQuickChange(); });
+      head.appendChild(chk);
+
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'sm-tag';
+      nameInput.value = group.label[lang] || '';
+      nameInput.maxLength = 24;
+      nameInput.placeholder = lang === 'zh' ? '分组名称' : 'Group name';
+      nameInput.addEventListener('input', function () { group.label[lang] = nameInput.value; scheduleSave(); renderQuick(); });
+      head.appendChild(nameInput);
+
+      var delGroup = mkOpBtn('trash-2', '删除分组', false);
+      delGroup.classList.add('danger');
+      delGroup.addEventListener('click', function () {
+        var idx = state.quickGroups.indexOf(group);
+        if (idx >= 0) state.quickGroups.splice(idx, 1);
+        afterQuickChange();
+      });
+      head.appendChild(delGroup);
+      wrap.appendChild(head);
+
+      // 段落列表
+      var itemsBox = document.createElement('div');
+      itemsBox.className = 'qm-items';
+      group.items.forEach(function (item, iIdx) {
+        var row = document.createElement('div');
+        row.className = 'qm-item-row';
+
+        var iorder = document.createElement('div');
+        iorder.className = 'qm-order';
+        var iup = mkOpBtn('chevron-up', '上移', iIdx === 0);
+        iup.addEventListener('click', function () { moveInArray(group.items, item.id, -1); afterQuickChange(); });
+        var idown = mkOpBtn('chevron-down', '下移', iIdx === group.items.length - 1);
+        idown.addEventListener('click', function () { moveInArray(group.items, item.id, 1); afterQuickChange(); });
+        iorder.appendChild(iup); iorder.appendChild(idown);
+        row.appendChild(iorder);
+
+        var body = document.createElement('div');
+        body.className = 'qm-item-body';
+        var labInput = document.createElement('input');
+        labInput.type = 'text';
+        labInput.className = 'sm-tag';
+        labInput.value = item.label[lang] || '';
+        labInput.maxLength = 24;
+        labInput.placeholder = lang === 'zh' ? '段落名称' : 'Paragraph name';
+        labInput.addEventListener('input', function () { item.label[lang] = labInput.value; scheduleSave(); renderQuick(); });
+        var txArea = document.createElement('textarea');
+        txArea.className = 'sm-text';
+        txArea.value = item.text[lang] || '';
+        txArea.rows = 2;
+        txArea.placeholder = lang === 'zh' ? '插入的中文文本（以 ## 开头会作为新块追加）' : 'Inserted English text';
+        txArea.addEventListener('input', function () { item.text[lang] = txArea.value; autosizeSm(txArea); scheduleSave(); renderQuick(); });
+        body.appendChild(labInput);
+        body.appendChild(txArea);
+        row.appendChild(body);
+
+        var delItem = mkOpBtn('x', '删除段落', false);
+        delItem.classList.add('danger');
+        delItem.addEventListener('click', function () {
+          var ii = group.items.indexOf(item);
+          if (ii >= 0) group.items.splice(ii, 1);
+          afterQuickChange();
+        });
+        row.appendChild(delItem);
+
+        itemsBox.appendChild(row);
+        autosizeSm(txArea);
+      });
+      wrap.appendChild(itemsBox);
+
+      var addItem = document.createElement('button');
+      addItem.type = 'button';
+      addItem.className = 'qm-add-item';
+      addItem.innerHTML = icon('plus') + ' <span>新增段落</span>';
+      addItem.addEventListener('click', function () {
+        group.items.push({ id: newQuickItemId(), label: { zh: '新段落', en: 'New paragraph' }, text: { zh: '', en: '' } });
+        afterQuickChange();
+        var rows = wrap.querySelectorAll('.qm-item-row');
+        var lastLab = rows.length ? rows[rows.length - 1].querySelector('.sm-tag') : null;
+        if (lastLab) { lastLab.focus(); lastLab.select(); }
+      });
+      wrap.appendChild(addItem);
+
+      $qmList.appendChild(wrap);
+    });
+  }
+
+  function openQuickManager() {
+    ensureQuickManager();
+    $qmOverlay.classList.add('show');
+    renderQuickManager();
+    qmKeyHandler = function (e) { if (e.key === 'Escape') closeQuickManager(); };
+    document.addEventListener('keydown', qmKeyHandler);
+    var first = $qmOverlay.querySelector('.sm-close');
+    if (first) first.focus();
+  }
+
+  function closeQuickManager() {
+    if (!$qmOverlay) return;
+    $qmOverlay.classList.remove('show');
+    if (qmKeyHandler) { document.removeEventListener('keydown', qmKeyHandler); qmKeyHandler = null; }
   }
 
   /* ============================================================
@@ -1871,6 +2233,8 @@
   if ($btnManageSnippets) $btnManageSnippets.addEventListener('click', openSnippetManager);
   var $btnManageModules = document.getElementById('btnManageModules');
   if ($btnManageModules) $btnManageModules.addEventListener('click', openModuleManager);
+  var $btnManageQuick = document.getElementById('btnManageQuick');
+  if ($btnManageQuick) $btnManageQuick.addEventListener('click', openQuickManager);
 
   var $btnCheckUpdate = document.getElementById('btnCheckUpdate');
   if ($btnCheckUpdate) $btnCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
@@ -1979,8 +2343,10 @@
     renderViewSeg();
     renderInsertGrid();
     renderSnippets();
+    renderQuick();
     renderEditor();
     if ($smOverlay && $smOverlay.classList.contains('show')) renderSnippetManager();
+    if ($qmOverlay && $qmOverlay.classList.contains('show')) renderQuickManager();
   }
 
   restoreState();
