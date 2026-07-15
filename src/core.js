@@ -1,0 +1,372 @@
+/* ============================================================
+ * core.js —— 纯逻辑层（无 DOM 依赖）
+ * ------------------------------------------------------------
+ * 从 index.html 抽离出来的预设数据 / 纯函数，挂到全局命名空间
+ * window.Composer 下。普通 <script> 加载，不用 ES module，
+ * 因此没有 import/export，index.html 主 IIFE 直接读取
+ * window.Composer.xxx 使用。
+ *
+ * 铁律：这里的内容必须保持"纯"——不引用 document、不引用任何
+ * DOM 变量、不触发渲染。任何需要这些的逻辑都应留在 index.html。
+ * ============================================================ */
+(function () {
+  'use strict';
+
+  /* ============================================================
+   * 1. 预设：可插入的模块片段 / 常用句 / 示例正文
+   * ============================================================ */
+  var INSERT_MODULES = [
+    { id: 'm_role', label: { zh: '角色', en: 'Role' },
+      text: { zh: '## 角色\n你是……，擅长……。', en: '## Role\nYou are …, skilled in ….' } },
+    { id: 'm_scenario', label: { zh: '场景', en: 'Scenario' },
+      text: { zh: '## 场景\n使用场景：……。目标用户是……。', en: '## Scenario\nScenario: …. Target users are ….' } },
+    { id: 'm_problem', label: { zh: '问题', en: 'Problem' },
+      text: { zh: '## 问题\n当前遇到的问题：……。', en: '## Problem\nThe current problem: ….' } },
+    { id: 'm_outcome', label: { zh: '需求效果', en: 'Outcome' },
+      text: { zh: '## 需求效果\n期望达成的效果：……。', en: '## Desired outcome\nDesired outcome: ….' } },
+    { id: 'm_solution', label: { zh: '解决方案', en: 'Solution' },
+      text: { zh: '## 解决方案\n建议的解决方案：……。', en: '## Solution\nProposed solution: ….' } },
+    { id: 'm_rules', label: { zh: '规则', en: 'Rules' },
+      text: { zh: '## 规则\n- 始终……\n- 绝不……', en: '## Rules\n- Always …\n- Never …' } },
+    { id: 'm_workflow', label: { zh: '工作流程', en: 'Workflow' },
+      text: { zh: '## 工作流程\n1. ……\n2. ……\n3. ……', en: '## Workflow\n1. …\n2. …\n3. …' } },
+    { id: 'm_format', label: { zh: '输出格式', en: 'Format' },
+      text: { zh: '## 输出格式\n以……形式输出。', en: '## Output format\nOutput in ….' } },
+    { id: 'm_examples', label: { zh: '示例', en: 'Examples' },
+      text: { zh: '## 示例\n输入：……\n输出：……', en: '## Examples\nInput: …\nOutput: …' } },
+    { id: 'm_constraints', label: { zh: '约束', en: 'Constraints' },
+      text: { zh: '## 约束\n不要……。', en: '## Constraints\nDo not ….' } }
+  ];
+  var MODULE_BY_ID = {};
+  INSERT_MODULES.forEach(function (m) { MODULE_BY_ID[m.id] = m; });
+
+  var BUILTIN_SNIPPETS = [
+    { id: 'b_step',     tag: '分步思考', zh: '请先一步步思考，再给出最终答案。', en: 'Think step by step, then give the final answer.', builtin: true },
+    { id: 'b_concl',    tag: '先给结论', zh: '请先给出结论，再展开说明理由。', en: 'State the conclusion first, then explain the reasoning.', builtin: true },
+    { id: 'b_concise',  tag: '保持简洁', zh: '回答请保持简洁，避免冗余表述。', en: 'Keep the answer concise and avoid redundancy.', builtin: true },
+    { id: 'b_tone',     tag: '语气专业', zh: '请使用专业、客观的语气。', en: 'Use a professional and objective tone.', builtin: true },
+    { id: 'b_example',  tag: '举例说明', zh: '请结合具体例子进行说明。', en: 'Illustrate with concrete examples.', builtin: true },
+    { id: 'b_bullets',  tag: '分点列出', zh: '请使用分点列表清晰呈现。', en: 'Present the answer as a clear bulleted list.', builtin: true },
+    { id: 'b_beginner', tag: '面向新手', zh: '面向零基础用户解释。', en: 'Explain for a complete beginner.', builtin: true },
+    { id: 'b_nofab',    tag: '不要编造', zh: '不确定时如实说明，不要编造。', en: 'If uncertain, say so — do not make things up.', builtin: true },
+    { id: 'b_md',       tag: 'Markdown', zh: '请使用 Markdown 格式输出。', en: 'Format the output using Markdown.', builtin: true },
+    { id: 'b_limit',    tag: '限制字数', zh: '请将回答控制在 200 字以内。', en: 'Limit the response to about 200 words.', builtin: true }
+  ];
+  var BUILTIN_BY_ID = {};
+  BUILTIN_SNIPPETS.forEach(function (b) { BUILTIN_BY_ID[b.id] = b; });
+
+  function demoContent() {
+    return {
+      zh: '## 角色\n你是一名资深全栈工程师，擅长 Web 产品开发与代码审查。你服务的对象是产品团队的开发者。\n\n## 场景\n使用场景：在现有 SaaS 产品中新增一个功能模块。\n\n## 需求效果\n期望达成的效果：……\n\n## 解决方案\n请围绕以下方向给出方案：技术选型、接口设计、关键实现步骤。\n\n## 输出格式\n以 Markdown 输出，并附上示例代码。',
+      en: '## Role\nYou are a senior full-stack engineer, skilled in web product development and code review. You serve developers on the product team.\n\n## Scenario\nScenario: adding a new feature module to an existing SaaS product.\n\n## Desired outcome\nDesired outcome: …\n\n## Solution\nPropose a solution along these lines: tech stack choice, API design, key implementation steps.\n\n## Output format\nOutput in Markdown, and include sample code.'
+    };
+  }
+
+  function defaultState() {
+    return {
+      lang: 'zh',
+      content: demoContent(),
+      customSnippets: [],
+      builtinPatches: {},                              // { builtinId: {tag?, zh?, en?, hidden?} }
+      snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; }),
+      customModules: [],
+      modulePatches: {},                               // { moduleId: {labelZh?, labelEn?, textZh?, textEn?, hidden?} }
+      moduleOrder: INSERT_MODULES.map(function (m) { return m.id; })
+    };
+  }
+
+  var snippetSeq = 0;
+  function newSnippetId() {
+    snippetSeq++;
+    return 'c_' + Date.now().toString(36) + '_' + snippetSeq.toString(36);
+  }
+  var moduleSeq = 0;
+  function newModuleId() {
+    moduleSeq++;
+    return 'mc_' + Date.now().toString(36) + '_' + moduleSeq.toString(36);
+  }
+
+  // 兼容旧存档：旧版是 modules 数组，编译成一份大文本。
+  function modulesToText(modules, lang) {
+    if (!Array.isArray(modules)) return '';
+    return modules
+      .filter(function (m) { return m && m.enabled !== false; })
+      .map(function (m) {
+        var label = (m.label && (m.label[lang] || m.label.zh || m.label.en)) || '';
+        var body = (m.content && (m.content[lang] || '')) || '';
+        return '## ' + label + '\n' + body;
+      })
+      .join('\n\n');
+  }
+
+  function normalizeState(raw) {
+    var s = defaultState();
+    s.lang = (raw.lang === 'en') ? 'en' : 'zh';
+
+    if (raw.content && typeof raw.content === 'object' &&
+        (typeof raw.content.zh === 'string' || typeof raw.content.en === 'string')) {
+      // 新格式
+      s.content = { zh: raw.content.zh || '', en: raw.content.en || '' };
+    } else if (Array.isArray(raw.modules)) {
+      // 旧格式迁移
+      s.content = { zh: modulesToText(raw.modules, 'zh'), en: modulesToText(raw.modules, 'en') };
+    }
+
+    if (Array.isArray(raw.customSnippets)) {
+      s.customSnippets = raw.customSnippets
+        .filter(function (sn) { return sn && typeof sn.tag === 'string'; })
+        .map(function (sn) {
+          return {
+            id: (typeof sn.id === 'string' && sn.id) ? sn.id : newSnippetId(),
+            tag: sn.tag,
+            zh: typeof sn.zh === 'string' ? sn.zh : (sn.text || ''),
+            en: typeof sn.en === 'string' ? sn.en : (sn.text || ''),
+            builtin: false,
+            hidden: sn.hidden === true
+          };
+        });
+    }
+
+    // 内置句覆盖（隐藏 / 改标签 / 改内容）
+    s.builtinPatches = {};
+    if (raw.builtinPatches && typeof raw.builtinPatches === 'object') {
+      Object.keys(raw.builtinPatches).forEach(function (id) {
+        if (!BUILTIN_BY_ID[id]) return;
+        var p = raw.builtinPatches[id];
+        if (!p || typeof p !== 'object') return;
+        var clean = {};
+        if (typeof p.tag === 'string') clean.tag = p.tag;
+        if (typeof p.zh === 'string') clean.zh = p.zh;
+        if (typeof p.en === 'string') clean.en = p.en;
+        if (p.hidden === true) clean.hidden = true;
+        s.builtinPatches[id] = clean;
+      });
+    }
+
+    // 顺序：以存档顺序为准，去掉失效 id，再把新出现的补到末尾
+    var validIds = {};
+    BUILTIN_SNIPPETS.forEach(function (b) { validIds[b.id] = true; });
+    s.customSnippets.forEach(function (c) { validIds[c.id] = true; });
+    var order = [];
+    var seen = {};
+    if (Array.isArray(raw.snippetOrder)) {
+      raw.snippetOrder.forEach(function (id) {
+        if (typeof id === 'string' && validIds[id] && !seen[id]) { order.push(id); seen[id] = true; }
+      });
+    }
+    // 补齐：先内置再自定义，保持各自默认顺序
+    BUILTIN_SNIPPETS.forEach(function (b) { if (!seen[b.id]) { order.push(b.id); seen[b.id] = true; } });
+    s.customSnippets.forEach(function (c) { if (!seen[c.id]) { order.push(c.id); seen[c.id] = true; } });
+    s.snippetOrder = order;
+
+    // 自定义插入模块
+    if (Array.isArray(raw.customModules)) {
+      s.customModules = raw.customModules
+        .filter(function (m) { return m && m.label && typeof m.label === 'object'; })
+        .map(function (m) {
+          var t = (m.text && typeof m.text === 'object') ? m.text : {};
+          return {
+            id: (typeof m.id === 'string' && m.id) ? m.id : newModuleId(),
+            label: { zh: m.label.zh || '', en: m.label.en || '' },
+            text: { zh: typeof t.zh === 'string' ? t.zh : '', en: typeof t.en === 'string' ? t.en : '' },
+            builtin: false,
+            hidden: m.hidden === true
+          };
+        });
+    }
+
+    // 内置模块覆盖
+    s.modulePatches = {};
+    if (raw.modulePatches && typeof raw.modulePatches === 'object') {
+      Object.keys(raw.modulePatches).forEach(function (id) {
+        if (!MODULE_BY_ID[id]) return;
+        var p = raw.modulePatches[id];
+        if (!p || typeof p !== 'object') return;
+        var clean = {};
+        if (typeof p.labelZh === 'string') clean.labelZh = p.labelZh;
+        if (typeof p.labelEn === 'string') clean.labelEn = p.labelEn;
+        if (typeof p.textZh === 'string') clean.textZh = p.textZh;
+        if (typeof p.textEn === 'string') clean.textEn = p.textEn;
+        if (p.hidden === true) clean.hidden = true;
+        s.modulePatches[id] = clean;
+      });
+    }
+
+    // 模块顺序
+    var mValid = {};
+    INSERT_MODULES.forEach(function (m) { mValid[m.id] = true; });
+    s.customModules.forEach(function (m) { mValid[m.id] = true; });
+    var mOrder = [];
+    var mSeen = {};
+    if (Array.isArray(raw.moduleOrder)) {
+      raw.moduleOrder.forEach(function (id) {
+        if (typeof id === 'string' && mValid[id] && !mSeen[id]) { mOrder.push(id); mSeen[id] = true; }
+      });
+    }
+    INSERT_MODULES.forEach(function (m) { if (!mSeen[m.id]) { mOrder.push(m.id); mSeen[m.id] = true; } });
+    s.customModules.forEach(function (m) { if (!mSeen[m.id]) { mOrder.push(m.id); mSeen[m.id] = true; } });
+    s.moduleOrder = mOrder;
+
+    return s;
+  }
+
+  /* ============================================================
+   * 3. token 估算
+   * ============================================================ */
+  function estimateTokens(text) {
+    if (!text) return 0;
+    var cjk = 0, other = 0;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.codePointAt(i);
+      var isCjk = (code >= 0x3000 && code <= 0x303f) || (code >= 0x3400 && code <= 0x9fff) || (code >= 0xff00 && code <= 0xffef);
+      if (isCjk) cjk++; else other++;
+    }
+    return Math.round(cjk * 1.6 + other / 4);
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /* ============================================================
+   * 5.1 Lucide 风格内联图标：统一图标来源，避免 emoji / 字符占位
+   * 用法：icon('trash-2') 返回可直接塞进 innerHTML 的 SVG 字符串
+   * ============================================================ */
+  var ICON_PATHS = {
+    'copy': '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    'trash-2': '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+    'eraser': '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+    'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    'moon': '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    'sun': '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+    'chevron-up': '<polyline points="18 15 12 9 6 15"/>',
+    'chevron-down': '<polyline points="6 9 12 15 18 15"/>',
+    'rotate-ccw': '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+    'x': '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>',
+    'settings': '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'
+  };
+  function icon(name, extraAttrs) {
+    var body = ICON_PATHS[name];
+    if (!body) return '';
+    var attrs = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extraAttrs ? ' ' + extraAttrs : '');
+    return '<svg ' + attrs + '>' + body + '</svg>';
+  }
+
+  /* ============================================================
+   * 6. 块模型：正文 ⇄ 块 的解析
+   * ------------------------------------------------------------
+   * 真相源仍是 state.content[lang] 大文本。块只是视图：
+   *   parseBlocks(text) 把文本按 "## " 开头切成块（首个 ## 之前的
+   *   内容作为一个无标题“前言块”）。
+   * ============================================================ */
+  function parseBlocks(text) {
+    text = text || '';
+    if (!text.trim()) return [];
+    var lines = text.split('\n');
+    var blocks = [];
+    var cur = null;
+    lines.forEach(function (line) {
+      if (/^##\s/.test(line) || /^##$/.test(line)) {
+        if (cur !== null) blocks.push(cur);
+        cur = line;
+      } else {
+        if (cur === null) cur = line;            // 前言块
+        else cur += '\n' + line;
+      }
+    });
+    if (cur !== null) blocks.push(cur);
+    // 去掉纯空白块（多为块间的空行）
+    return blocks.filter(function (b) { return b.trim() !== ''; });
+  }
+
+  /* ---------- Markdown 语法高亮：轻量正则 ---------- */
+  // 转义 HTML 特殊字符，防止用户输入被当成标签解析（XSS 防护）。
+  // 注意：这里刻意只转义 & < >，不转义引号——高亮结果全部落在元素的
+  // 文本内容位置（span 之间），不进入任何属性值，故无需像通用的
+  // escapeHtml 那样转义 " '；两者语义不同，不可互相替换。
+  function hlEscape(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // 对单行做行内高亮（粗体/斜体/行内代码/链接），返回已转义 + 包裹好 span 的 HTML
+  // 行内代码先临时替换成“私有区字符包裹序号”的占位符，待粗体/斜体规则
+  // 处理完之后再还原为高亮 span；私有区字符正常输入几乎不会产生，
+  // 用它做占位符边界，比直接用纯数字更不容易和正文本身的数字冲突。
+  function highlightInline(line) {
+    var escaped = hlEscape(line);
+    var codeTokens = [];
+    // 行内代码优先处理并保护其内容不被粗体/斜体规则二次匹配
+    escaped = escaped.replace(/`([^`\n]+)`/g, function (m, code) {
+      codeTokens.push('<span class="hl-code">`' + code + '`</span>');
+      return '' + (codeTokens.length - 1) + '';
+    });
+    // 链接 [text](url)
+    escaped = escaped.replace(/\[([^\]\n]*)\]\(([^)\n]*)\)/g, function (m, t, u) {
+      return '<span class="hl-link-text">[' + t + ']</span><span class="hl-link-url">(' + u + ')</span>';
+    });
+    // 粗体 **x**
+    escaped = escaped.replace(/\*\*([^*\n]+)\*\*/g, '<span class="hl-bold">**$1**</span>');
+    // 斜体 *x*（用 lookbehind/lookahead 界定 * 边界，避免消费前导字符
+    // 而漏掉相邻斜体，如 *a* *b* 中的第二段）
+    escaped = escaped.replace(/(?<![*\w])\*([^*\n]+)\*(?!\*)/g, '<span class="hl-italic">*$1*</span>');
+    // 还原行内代码 token
+    escaped = escaped.replace(/(\d+)/g, function (m, i) { return codeTokens[+i]; });
+    return escaped;
+  }
+
+  // 整块文本 → 高亮 HTML（按行处理：标题/列表/引用/代码围栏识别行首，其余走行内高亮）
+  function highlightMarkdown(text) {
+    var lines = text.split('\n');
+    var inFence = false;
+    var out = lines.map(function (line) {
+      // 代码块围栏 ```
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        return '<span class="hl-fence">' + hlEscape(line) + '</span>';
+      }
+      if (inFence) return '<span class="hl-fence">' + hlEscape(line) + '</span>';
+
+      // 标题 #, ##, ### ...
+      var hMatch = line.match(/^(#{1,6})(\s.*)?$/);
+      if (hMatch) return '<span class="hl-h">' + hlEscape(line) + '</span>';
+
+      // 引用 >
+      var qMatch = line.match(/^(\s*>\s?)(.*)$/);
+      if (qMatch) return '<span class="hl-quote">' + hlEscape(qMatch[1]) + '</span>' + highlightInline(qMatch[2]);
+
+      // 列表 -, *, 1.
+      var lMatch = line.match(/^(\s*)([-*]|\d+\.)(\s+)(.*)$/);
+      if (lMatch) {
+        return hlEscape(lMatch[1]) + '<span class="hl-list">' + hlEscape(lMatch[2]) + '</span>' + hlEscape(lMatch[3]) + highlightInline(lMatch[4]);
+      }
+
+      return highlightInline(line);
+    });
+    return out.join('\n');
+  }
+
+  /* ============================================================
+   * 挂载到全局命名空间
+   * ============================================================ */
+  window.Composer = window.Composer || {};
+  window.Composer.INSERT_MODULES = INSERT_MODULES;
+  window.Composer.MODULE_BY_ID = MODULE_BY_ID;
+  window.Composer.BUILTIN_SNIPPETS = BUILTIN_SNIPPETS;
+  window.Composer.BUILTIN_BY_ID = BUILTIN_BY_ID;
+  window.Composer.demoContent = demoContent;
+  window.Composer.defaultState = defaultState;
+  window.Composer.newSnippetId = newSnippetId;
+  window.Composer.newModuleId = newModuleId;
+  window.Composer.modulesToText = modulesToText;
+  window.Composer.normalizeState = normalizeState;
+  window.Composer.estimateTokens = estimateTokens;
+  window.Composer.parseBlocks = parseBlocks;
+  window.Composer.escapeHtml = escapeHtml;
+  window.Composer.ICON_PATHS = ICON_PATHS;
+  window.Composer.icon = icon;
+  window.Composer.hlEscape = hlEscape;
+  window.Composer.highlightInline = highlightInline;
+  window.Composer.highlightMarkdown = highlightMarkdown;
+})();

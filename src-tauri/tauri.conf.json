@@ -10,11 +10,28 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Composer",
         "width": 1200,
         "height": 800,
         "minWidth": 900,
         "minHeight": 600
+      },
+      {
+        "label": "float",
+        "url": "float.html",
+        "title": "Composer 浮窗",
+        "width": 380,
+        "height": 520,
+        "minWidth": 300,
+        "minHeight": 360,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": true,
+        "shadow": false
       }
     ],
     "security": {
