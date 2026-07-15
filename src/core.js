@@ -291,6 +291,38 @@
   }
 
   /* ============================================================
+   * 2.1 内置句 / 内置模块 patch 清除逻辑
+   * ------------------------------------------------------------
+   * 与默认值相同则从 patch 里删掉对应字段，避免存档里堆积冗余覆盖；
+   * 字段全部清空后连整条 patch 记录一起删除。
+   * ============================================================ */
+  function patchBuiltinSnippet(id, state, field, value) {
+    var b = BUILTIN_BY_ID[id];
+    if (!b) return;
+    var p = state.builtinPatches[id] || {};
+    if (field === 'hidden') { if (value) p.hidden = true; else delete p.hidden; }
+    else { if (value === b[field]) delete p[field]; else p[field] = value; }
+    if (p.tag === undefined && p.zh === undefined && p.en === undefined && !p.hidden) delete state.builtinPatches[id];
+    else state.builtinPatches[id] = p;
+  }
+
+  function patchBuiltinModule(id, state, field, value) {
+    var b = MODULE_BY_ID[id];
+    if (!b) return;
+    var defVal;
+    if (field === 'labelZh') defVal = b.label.zh;
+    else if (field === 'labelEn') defVal = b.label.en;
+    else if (field === 'textZh') defVal = b.text.zh;
+    else if (field === 'textEn') defVal = b.text.en;
+    var p = state.modulePatches[id] || {};
+    if (field === 'hidden') { if (value) p.hidden = true; else delete p.hidden; }
+    else { if (value === defVal) delete p[field]; else p[field] = value; }
+    if (p.labelZh === undefined && p.labelEn === undefined &&
+        p.textZh === undefined && p.textEn === undefined && !p.hidden) delete state.modulePatches[id];
+    else state.modulePatches[id] = p;
+  }
+
+  /* ============================================================
    * 3. token 估算
    * ============================================================ */
   function estimateTokens(text) {
@@ -446,10 +478,17 @@
   window.Composer.normalizeState = normalizeState;
   window.Composer.estimateTokens = estimateTokens;
   window.Composer.parseBlocks = parseBlocks;
+  window.Composer.patchBuiltinSnippet = patchBuiltinSnippet;
+  window.Composer.patchBuiltinModule = patchBuiltinModule;
   window.Composer.escapeHtml = escapeHtml;
   window.Composer.ICON_PATHS = ICON_PATHS;
   window.Composer.icon = icon;
   window.Composer.hlEscape = hlEscape;
   window.Composer.highlightInline = highlightInline;
   window.Composer.highlightMarkdown = highlightMarkdown;
+
+  // Node/Vitest 环境下暴露 CommonJS 导出，浏览器端 module 未定义不受影响
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = window.Composer;
+  }
 })();
