@@ -1422,15 +1422,9 @@
   }
   function renderLeft() { if (SM) SM.renderLeft(); }
 
-  // 内置句 patch（与默认相同则清除，避免冗余）
+  // 内置句 patch 清除逻辑已抽离到 core.js（纯函数，显式传入 state）
   function patchBuiltinSnippet(id, field, value) {
-    var b = BUILTIN_BY_ID[id];
-    if (!b) return;
-    var p = state.builtinPatches[id] || {};
-    if (field === 'hidden') { if (value) p.hidden = true; else delete p.hidden; }
-    else { if (value === b[field]) delete p[field]; else p[field] = value; }
-    if (p.tag === undefined && p.zh === undefined && p.en === undefined && !p.hidden) delete state.builtinPatches[id];
-    else state.builtinPatches[id] = p;
+    Composer.patchBuiltinSnippet(id, state, field, value);
   }
   function updateCustomSnippetField(id, field, value) {
     for (var i = 0; i < state.customSnippets.length; i++) {
@@ -1438,21 +1432,9 @@
     }
   }
 
-  // 内置模块 patch（与默认相同则清除）
+  // 内置模块 patch 清除逻辑已抽离到 core.js（纯函数，显式传入 state）
   function patchBuiltinModule(id, field, value) {
-    var b = MODULE_BY_ID[id];
-    if (!b) return;
-    var defVal;
-    if (field === 'labelZh') defVal = b.label.zh;
-    else if (field === 'labelEn') defVal = b.label.en;
-    else if (field === 'textZh') defVal = b.text.zh;
-    else if (field === 'textEn') defVal = b.text.en;
-    var p = state.modulePatches[id] || {};
-    if (field === 'hidden') { if (value) p.hidden = true; else delete p.hidden; }
-    else { if (value === defVal) delete p[field]; else p[field] = value; }
-    if (p.labelZh === undefined && p.labelEn === undefined &&
-        p.textZh === undefined && p.textEn === undefined && !p.hidden) delete state.modulePatches[id];
-    else state.modulePatches[id] = p;
+    Composer.patchBuiltinModule(id, state, field, value);
   }
   function updateCustomModuleField(id, kind, lang, value) {
     for (var i = 0; i < state.customModules.length; i++) {

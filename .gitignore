@@ -5,6 +5,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# --- 测试覆盖率报告 ---
+coverage/
+
 # --- Rust / Tauri 编译产物 ---
 src-tauri/target/
 
