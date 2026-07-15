@@ -1,0 +1,7 @@
+# 统一行尾为 LF，消除 core.autocrlf 在 Windows 上造成的“假修改”，跨平台一致。
+# text=auto 会自动识别二进制文件并跳过，不会破坏图标/字体等。
+* text=auto eol=lf
+
+# Windows 批处理脚本仍需 CRLF 才能可靠运行。
+*.bat text eol=crlf
+*.cmd text eol=crlf
