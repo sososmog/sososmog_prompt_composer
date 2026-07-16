@@ -6,23 +6,19 @@ export default [
     files: ['src/core.js'],
     languageOptions: {
       ecmaVersion: 2021,
-      sourceType: 'script',
-      globals: {
-        window: 'readonly',
-        module: 'readonly',
-      },
+      sourceType: 'module',
     },
     rules: {
       'no-unused-vars': ['warn', { args: 'none' }],
     },
   },
   {
-    // 浏览器端主窗口脚本：普通 <script> 加载（非 module），可用浏览器全局。
-    // app.js 及其后续拆分文件（state/render/events/quick）共享此配置。
-    files: ['src/app.js', 'src/state.js', 'src/render.js', 'src/events.js', 'src/quick.js'],
+    // 浏览器端主窗口模块：<script type="module"> 加载，ESM，可用浏览器全局。
+    // store/render/quick/events 四个拆分文件共享此配置。
+    files: ['src/store.js', 'src/render.js', 'src/quick.js', 'src/events.js'],
     languageOptions: {
       ecmaVersion: 2021,
-      sourceType: 'script',
+      sourceType: 'module',
       globals: {
         window: 'readonly',
         document: 'readonly',

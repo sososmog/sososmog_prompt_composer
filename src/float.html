@@ -226,17 +226,17 @@
     <div class="fw-toast" id="fwToast" role="status" aria-live="polite"></div>
   </div>
 
-<script src="core.js"></script>
-<script>
+<script type="module">
+import {
+  MODULE_BY_ID,
+  BUILTIN_BY_ID,
+  defaultState,
+  normalizeState,
+  escapeHtml,
+} from './core.js';
+
 (function () {
   'use strict';
-
-  var Composer = window.Composer || {};
-  var MODULE_BY_ID = Composer.MODULE_BY_ID;
-  var BUILTIN_BY_ID = Composer.BUILTIN_BY_ID;
-  var defaultState = Composer.defaultState;
-  var normalizeState = Composer.normalizeState;
-  var escapeHtml = Composer.escapeHtml;
 
   /* ============================================================
    * Tauri API 安全获取（浏览器预览时降级，不报错）
