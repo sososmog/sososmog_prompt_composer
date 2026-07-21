@@ -259,6 +259,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // 翻译功能：通过 HTTP 插件从应用侧发请求，绕开 webview 的 CORS，
+        // API key 留在应用侧而非网页环境。允许的目标域名在 capabilities 里声明。
+        .plugin(tauri_plugin_http::init())
         // 阶段4项3：记忆窗口位置/尺寸。只存 位置+尺寸，不存可见性——
         // 浮窗默认隐藏的行为必须保持，不能因为“上次退出时是显示的”而在启动时自动弹出。
         .plugin(

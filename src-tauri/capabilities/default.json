@@ -37,6 +37,16 @@
     "dialog:allow-save",
     "clipboard-manager:allow-write-text",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://generativelanguage.googleapis.com/*" },
+        { "url": "https://open.bigmodel.cn/*" },
+        { "url": "https://api.groq.com/*" },
+        { "url": "https://openrouter.ai/*" },
+        { "url": "https://*/*" }
+      ]
+    }
   ]
 }

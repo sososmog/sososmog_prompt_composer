@@ -84,6 +84,44 @@
     };
   }
 
+  /* ============================================================
+   * 1.1 翻译功能：LLM 提供商预设 + 默认配置
+   * ------------------------------------------------------------
+   * 模型名 / baseURL / key 全部可配置（免费层模型目录变动频繁，写死
+   * 容易某天 404）。这里只提供“选预设时自动填入”的默认值，用户可覆盖。
+   *   - protocol 'gemini'：Google 原生 generateContent 端点，走 URL 上
+   *     的 ?key= 鉴权，强制 JSON 用 generationConfig.responseMimeType。
+   *   - protocol 'openai'：OpenAI 兼容 /chat/completions，Bearer 鉴权，
+   *     强制 JSON 用 response_format:{type:'json_object'}。GLM / Groq /
+   *     OpenRouter 都走这条，仅 baseURL 与模型名不同。
+   * ============================================================ */
+  var TRANSLATE_PROVIDERS = [
+    { id: 'gemini', label: 'Google Gemini', protocol: 'gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
+    { id: 'glm', label: 'GLM 智谱', protocol: 'openai',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+    { id: 'groq', label: 'Groq', protocol: 'openai',
+      baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+    { id: 'openrouter', label: 'OpenRouter', protocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct:free' },
+    { id: 'custom', label: '自定义（OpenAI 兼容）', protocol: 'openai',
+      baseUrl: '', model: '' }
+  ];
+  var TRANSLATE_PROVIDER_BY_ID = {};
+  TRANSLATE_PROVIDERS.forEach(function (p) { TRANSLATE_PROVIDER_BY_ID[p.id] = p; });
+
+  function defaultTranslateSettings() {
+    var g = TRANSLATE_PROVIDER_BY_ID.gemini;
+    return {
+      provider: 'gemini',       // 预设 id，见 TRANSLATE_PROVIDERS
+      protocol: g.protocol,     // 'gemini' | 'openai'
+      baseUrl: g.baseUrl,
+      model: g.model,
+      apiKey: '',               // 用户填写；持久化进本地 state 文件，不硬编码进源码
+      overwrite: true           // 覆盖已有译文（默认勾选）
+    };
+  }
+
   function defaultState() {
     return {
       lang: 'zh',
@@ -97,7 +135,8 @@
       quickGroups: defaultQuickGroups(),               // 快速段落分组（用户可完全增删改）
       settings: {                                      // 阶段4：可自定义的快捷键 + 粘贴前等待时长
         toggleShortcut: 'Ctrl+Alt+C',
-        pasteDelayMs: 60
+        pasteDelayMs: 60,
+        translation: defaultTranslateSettings()        // 翻译：LLM 提供商配置
       }
     };
   }
@@ -273,7 +312,7 @@
     }
 
     // 阶段4：设置项——快捷键 + 粘贴前等待时长，做好防御性校验，任何脏值都回退默认
-    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60 };
+    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings() };
     if (raw.settings && typeof raw.settings === 'object') {
       if (typeof raw.settings.toggleShortcut === 'string' && raw.settings.toggleShortcut.trim() !== '') {
         s.settings.toggleShortcut = raw.settings.toggleShortcut;
@@ -282,6 +321,7 @@
       if (typeof delay === 'number' && isFinite(delay)) {
         s.settings.pasteDelayMs = Math.min(500, Math.max(30, Math.round(delay)));
       }
+      s.settings.translation = normalizeTranslateSettings(raw.settings.translation);
     }
 
     return s;
@@ -317,6 +357,148 @@
     if (p.labelZh === undefined && p.labelEn === undefined &&
         p.textZh === undefined && p.textEn === undefined && !p.hidden) delete state.modulePatches[id];
     else state.modulePatches[id] = p;
+  }
+
+  /* ============================================================
+   * 2.2 翻译设置校验（纯函数）
+   * ------------------------------------------------------------
+   * 任何脏值都回退到默认。protocol 只接受 'gemini' / 'openai'；
+   * 未知预设 id 归到 'custom'。key/baseUrl/model 取字符串，缺失留空。
+   * ============================================================ */
+  function normalizeTranslateSettings(raw) {
+    var d = defaultTranslateSettings();
+    if (!raw || typeof raw !== 'object') return d;
+    var out = {
+      provider: (typeof raw.provider === 'string' && TRANSLATE_PROVIDER_BY_ID[raw.provider]) ? raw.provider : 'custom',
+      protocol: (raw.protocol === 'gemini' || raw.protocol === 'openai') ? raw.protocol : d.protocol,
+      baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl.trim() : '',
+      model: typeof raw.model === 'string' ? raw.model.trim() : '',
+      apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '',
+      overwrite: raw.overwrite !== false
+    };
+    // provider 为已知预设、但 protocol 缺失时，用预设的 protocol 兜底
+    if (TRANSLATE_PROVIDER_BY_ID[out.provider] && (raw.protocol !== 'gemini' && raw.protocol !== 'openai')) {
+      out.protocol = TRANSLATE_PROVIDER_BY_ID[out.provider].protocol;
+    }
+    return out;
+  }
+
+  /* ============================================================
+   * 2.3 翻译：代码/行内代码“遮罩 + 还原”（可选增强）
+   * ------------------------------------------------------------
+   * 翻前把代码块（```…```）与行内代码（`code`）替换成不易被模型改动的
+   * 记号 〖0〗〖1〗…，翻后再还原。系统指令里也会要求模型保留记号原样、
+   * 不翻译不重排；遮罩是双保险，进一步降低代码被改动的概率。
+   *
+   * maskCode(text) -> { masked, tokens }
+   * unmaskCode(masked, tokens) -> text
+   * 记号用全角括号包住序号，正文里几乎不会自然出现，冲突概率极低。
+   * ============================================================ */
+  function maskCode(text) {
+    text = text == null ? '' : String(text);
+    var tokens = [];
+    function makeToken(chunk) {
+      var t = '〖' + tokens.length + '〗';
+      tokens.push(chunk);
+      return t;
+    }
+    // 先遮罩围栏代码块（含跨行），再遮罩行内代码，避免行内规则吃掉围栏内的反引号
+    var masked = text.replace(/```[\s\S]*?```/g, function (m) { return makeToken(m); });
+    masked = masked.replace(/`[^`\n]+`/g, function (m) { return makeToken(m); });
+    return { masked: masked, tokens: tokens };
+  }
+
+  function unmaskCode(masked, tokens) {
+    if (!tokens || tokens.length === 0) return masked == null ? '' : String(masked);
+    return String(masked).replace(/〖(\d+)〗/g, function (m, i) {
+      var idx = +i;
+      return (idx >= 0 && idx < tokens.length) ? tokens[idx] : m;
+    });
+  }
+
+  /* ============================================================
+   * 2.4 翻译：请求体构造 + 响应解析（纯函数，不发请求）
+   * ------------------------------------------------------------
+   * buildTranslatePayload：给定源/目标语言名与文本数组，产出
+   *   { url, headers, body } —— 由 UI 层交给 Tauri http fetch 发出。
+   * parseTranslateResponse：从两种协议的响应里提取 translations 数组。
+   * 强制结构化输出：Gemini 用 responseMimeType='application/json'；
+   * OpenAI 兼容用 response_format:{type:'json_object'}，故返回体统一用
+   *   对象 {"translations":[...]} 而非裸数组，跨提供商都兼容。
+   * ============================================================ */
+  function translateSystemPrompt(srcName, tgtName) {
+    return '你是专业翻译。把用户给出的 JSON 里 texts 数组中的每个字符串从「' + srcName + '」翻译成「' + tgtName + '」。' +
+      '规则：只翻译自然语言文字；不要翻译或改动代码块、行内代码、URL、路径、命令、标识符/变量名/函数名；' +
+      '保留 Markdown 格式、换行、列表符号与编号、标题标记、粗斜体标记、链接语法等结构，只翻其中的自然语言文字，不改结构；' +
+      '如遇形如〖0〗〖1〗的记号，请原样保留、不翻译不重排；不要输出任何解释。' +
+      '只返回 JSON 对象 {"translations": [...]}，其中数组与输入 texts 等长、顺序一致。';
+  }
+
+  function buildTranslatePayload(cfg, srcName, tgtName, texts) {
+    var sys = translateSystemPrompt(srcName, tgtName);
+    var userObj = { texts: texts };
+    if (cfg.protocol === 'gemini') {
+      var base = (cfg.baseUrl || '').replace(/\/+$/, '');
+      var url = base + '/models/' + encodeURIComponent(cfg.model) + ':generateContent?key=' + encodeURIComponent(cfg.apiKey);
+      var body = {
+        systemInstruction: { parts: [{ text: sys }] },
+        contents: [{ role: 'user', parts: [{ text: JSON.stringify(userObj) }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
+      };
+      return { url: url, headers: { 'Content-Type': 'application/json' }, body: body };
+    }
+    // openai 兼容
+    var baseU = (cfg.baseUrl || '').replace(/\/+$/, '');
+    var urlO = baseU + '/chat/completions';
+    var bodyO = {
+      model: cfg.model,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: JSON.stringify(userObj) }
+      ],
+      temperature: 0.2,
+      response_format: { type: 'json_object' }
+    };
+    return {
+      url: urlO,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
+      body: bodyO
+    };
+  }
+
+  // 从响应 JSON 里取出模型返回的文本，再解析成 { translations: [...] }。
+  // 两种协议的“外层信封”不同：Gemini 在 candidates[0].content.parts[0].text，
+  // OpenAI 兼容在 choices[0].message.content。内层都是我们要求的 JSON 字符串。
+  function extractModelText(protocol, resp) {
+    if (!resp || typeof resp !== 'object') return null;
+    if (protocol === 'gemini') {
+      var cand = resp.candidates && resp.candidates[0];
+      var parts = cand && cand.content && cand.content.parts;
+      if (Array.isArray(parts)) {
+        return parts.map(function (p) { return (p && typeof p.text === 'string') ? p.text : ''; }).join('');
+      }
+      return null;
+    }
+    var choice = resp.choices && resp.choices[0];
+    var content = choice && choice.message && choice.message.content;
+    return typeof content === 'string' ? content : null;
+  }
+
+  function parseTranslateResponse(protocol, resp) {
+    var text = extractModelText(protocol, resp);
+    if (typeof text !== 'string' || text.trim() === '') return null;
+    var obj;
+    try {
+      obj = JSON.parse(text);
+    } catch (e) {
+      // 有些模型会包一层 ```json …```，兜底剥掉围栏再试一次
+      var m = text.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      try { obj = JSON.parse(m[0]); } catch (e2) { return null; }
+    }
+    if (obj && Array.isArray(obj.translations)) return obj.translations;
+    if (Array.isArray(obj)) return obj; // 极少数模型直接返回裸数组，也接住
+    return null;
   }
 
   /* ============================================================
@@ -509,6 +691,16 @@
     MODULE_BY_ID,
     BUILTIN_SNIPPETS,
     BUILTIN_BY_ID,
+    TRANSLATE_PROVIDERS,
+    TRANSLATE_PROVIDER_BY_ID,
+    defaultTranslateSettings,
+    normalizeTranslateSettings,
+    maskCode,
+    unmaskCode,
+    translateSystemPrompt,
+    buildTranslatePayload,
+    extractModelText,
+    parseTranslateResponse,
     demoContent,
     defaultState,
     defaultQuickGroups,
