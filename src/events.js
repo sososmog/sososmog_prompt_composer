@@ -14,7 +14,6 @@ import {
   showToast,
   collectText,
   restoreState,
-  demoContent,
   history,
   captureHistory,
   applyContentSnapshot,
@@ -24,6 +23,7 @@ import {
   updaterApi,
   processApi,
   webviewWindowApi,
+  eventApi,
   coreApi,
   $langSegmented,
   $viewSeg,
@@ -31,7 +31,6 @@ import {
   $preview,
   $btnCopy,
   $btnDownload,
-  $btnLoadDemo,
   $btnClearAll,
 } from './store.js';
 import {
@@ -159,9 +158,6 @@ import {
   var $btnManageQuick = document.getElementById('btnManageQuick');
   if ($btnManageQuick) $btnManageQuick.addEventListener('click', openQuickManager);
 
-  var $btnCheckUpdate = document.getElementById('btnCheckUpdate');
-  if ($btnCheckUpdate) $btnCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
-
   /* ============================================================
    * 12.0 设置面板：快捷键录制（项1） + 粘贴前等待 ms（项2）
    * ------------------------------------------------------------
@@ -246,6 +242,13 @@ import {
               '<span class="st-delay-unit">毫秒（30–500）</span>' +
             '</div>' +
           '</div>' +
+          '<div class="st-field">' +
+            '<span class="st-label">检查更新</span>' +
+            '<span class="st-desc">向服务器查询是否有新版本，有新版本时会提示下载并安装。</span>' +
+            '<div class="st-update-row">' +
+              '<button type="button" class="st-update-btn" id="stCheckUpdate">' + icon('refresh-cw') + '<span>检查更新</span></button>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
         '<div class="st-foot-hint">改动会立即保存并同步到浮窗。</div>' +
       '</div>';
@@ -280,6 +283,16 @@ import {
       scheduleSave();
       showToast('粘贴等待时长已更新为 ' + v + ' 毫秒');
     });
+
+    var $stCheckUpdate = $stOverlay.querySelector('#stCheckUpdate');
+    if ($stCheckUpdate) {
+      if (updaterApi) {
+        $stCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
+      } else {
+        $stCheckUpdate.disabled = true;
+        $stCheckUpdate.title = '当前环境不支持自动更新（仅桌面应用可用）';
+      }
+    }
   }
 
   function renderSettingsPanel() {
@@ -376,27 +389,76 @@ import {
   if ($btnEditorSettings) $btnEditorSettings.addEventListener('click', openSettingsPanel);
 
   /* ============================================================
-   * 12.1 浮窗开关：显示/隐藏 label 为 'float' 的窗口
+   * 12.1 浮窗 toggle：显示/隐藏 label 为 'float' 的窗口
+   * ------------------------------------------------------------
+   * 按钮做成 toggle，视觉需与浮窗真实可见性保持一致。浮窗可被三处
+   * 切换：本按钮、全局快捷键（Rust 侧 show/hide）、浮窗自身关闭键。
+   * 因此不能只靠本按钮的乐观状态，需要在下列时机回查真实可见性：
+   *   - 点击切换后
+   *   - 主窗口重新获得焦点时（覆盖快捷键切换 / 浮窗自关后用户切回主窗）
+   *   - 浮窗关闭键广播 'composer-float-visibility' 时（无需切焦点即时更新）
    * ============================================================ */
   var $btnFloatWindow = document.getElementById('btnFloatWindow');
+
+  function setFloatActive(active) {
+    if (!$btnFloatWindow) return;
+    $btnFloatWindow.setAttribute('aria-pressed', active ? 'true' : 'false');
+    var text = $btnFloatWindow.querySelector('.float-toggle-text');
+    if (text) text.textContent = active ? '退出浮窗' : '浮窗';
+    var label = active ? '退出浮窗，恢复主窗口' : '进入浮窗模式';
+    $btnFloatWindow.setAttribute('title', label);
+    $btnFloatWindow.setAttribute('aria-label', label);
+  }
+
+  function getFloatWindow() {
+    if (!(webviewWindowApi && webviewWindowApi.WebviewWindow)) return Promise.resolve(null);
+    var floatWin = webviewWindowApi.WebviewWindow.getByLabel
+      ? webviewWindowApi.WebviewWindow.getByLabel('float')
+      : null;
+    return floatWin && typeof floatWin.then === 'function' ? floatWin : Promise.resolve(floatWin);
+  }
+
+  function syncFloatState() {
+    getFloatWindow().then(function (win) {
+      if (!win) return;
+      win.isVisible().then(function (visible) { setFloatActive(!!visible); }).catch(function () {});
+    }).catch(function () {});
+  }
+
   if ($btnFloatWindow) {
     if (webviewWindowApi && webviewWindowApi.WebviewWindow) {
       $btnFloatWindow.addEventListener('click', function () {
-        var floatWin = webviewWindowApi.WebviewWindow.getByLabel
-          ? webviewWindowApi.WebviewWindow.getByLabel('float')
-          : null;
-        var resolved = floatWin && typeof floatWin.then === 'function' ? floatWin : Promise.resolve(floatWin);
-        resolved.then(function (win) {
+        getFloatWindow().then(function (win) {
           if (!win) { showToast('未找到浮窗，请重启应用', true); return; }
           win.isVisible().then(function (visible) {
-            if (visible) win.hide(); else win.show().then(function () { win.setFocus(); });
-          }).catch(function () { win.show(); });
+            if (visible) {
+              win.hide().then(function () { setFloatActive(false); }).catch(function () {});
+            } else {
+              win.show().then(function () { win.setFocus(); setFloatActive(true); }).catch(function () {});
+            }
+          }).catch(function () { win.show().then(function () { setFloatActive(true); }).catch(function () {}); });
         }).catch(function () { showToast('浮窗不可用', true); });
       });
+
+      // 主窗口重新获得焦点时回查（覆盖快捷键切换、浮窗自关后切回主窗）
+      window.addEventListener('focus', syncFloatState);
+      // 浮窗关闭键广播，即时收起激活态
+      if (eventApi && eventApi.listen) {
+        eventApi.listen('composer-float-visibility', function (evt) {
+          if (evt && evt.payload && typeof evt.payload.visible === 'boolean') {
+            setFloatActive(evt.payload.visible);
+          } else {
+            syncFloatState();
+          }
+        }).catch(function () {});
+      }
+      // 初始对齐一次
+      syncFloatState();
     } else {
       // 非 Tauri 环境（浏览器预览）：无浮窗窗口可控制，禁用按钮
       $btnFloatWindow.disabled = true;
-      $btnFloatWindow.title = '浮窗（仅桌面应用可用）';
+      $btnFloatWindow.setAttribute('title', '浮窗（仅桌面应用可用）');
+      $btnFloatWindow.setAttribute('aria-label', '浮窗（仅桌面应用可用）');
     }
   }
 
@@ -409,20 +471,6 @@ import {
       document.documentElement.setAttribute('data-theme', 'dark');
     }
     try { localStorage.setItem('composer-theme', dark ? 'light' : 'dark'); } catch (e) {}
-  });
-
-  $btnLoadDemo.addEventListener('click', function () {
-    // 结构操作（载入模板）：改动前存旧快照。demo 会覆盖两种语言，但
-    // 快照只存当前语言 content——撤销恢复的是当前语言；非当前语言的
-    // 改动只有切语言后才可见，而切语言会清空历史，故只存当前语言即可，
-    // 与“切语言清空历史”的语义一致。
-    if (view !== 'preview') collectText();
-    captureHistory();
-    state.content = demoContent();
-    if (view === 'preview') setView('write');
-    renderAll();
-    scheduleSave();
-    showToast('已载入模板');
   });
 
   $btnClearAll.addEventListener('click', function () {

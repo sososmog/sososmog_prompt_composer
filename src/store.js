@@ -215,7 +215,6 @@ import { renderAll, applyStartupShortcut } from './events.js';
   var $preview = document.getElementById('editorPreview');
   var $btnCopy = document.getElementById('btnCopy');
   var $btnDownload = document.getElementById('btnDownload');
-  var $btnLoadDemo = document.getElementById('btnLoadDemo');
   var $btnClearAll = document.getElementById('btnClearAll');
   var $toast = document.getElementById('toast');
 
@@ -316,7 +315,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     // DOM 引用
     $insertGrid, $snippetWrap, $quickWrap, $langSegmented, $viewSeg,
     $etLabel, $editorStat, $blocks, $preview,
-    $btnCopy, $btnDownload, $btnLoadDemo, $btnClearAll, $toast,
+    $btnCopy, $btnDownload, $btnClearAll, $toast,
     // 工具 / 块模型
     showToast, collectText, insertSnippet,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
