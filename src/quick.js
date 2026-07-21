@@ -464,7 +464,7 @@ import {
     if (h > 0) {
       // box-sizing:border-box 下 height 含边框，而 scrollHeight 不含，
       // 直接用会少算上下边框那几像素、末行被切；补上边框宽度。
-      var cs = getComputedStyle(area);
+      var cs = window.getComputedStyle(area);
       var bw = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
       area.style.height = (h + bw) + 'px';
     }
