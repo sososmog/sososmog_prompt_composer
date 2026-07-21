@@ -186,13 +186,20 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if (v === 'preview') collectText(); // 进预览前把块内容存回
     setViewValue(v);
     renderViewSeg();
+    // 预览态：左编辑块 + 右实时预览并排（.editor-surface 加 is-split 切横向布局）；
+    // 写态：只保留块编辑器占满。两栏都靠 .is-hidden 显隐——注意不能用 HTML 的
+    // hidden 属性，因为 .blocks/.editor-preview 有显式 display，会覆盖 [hidden]。
+    var surface = $blocks.parentNode; // .editor-surface
     if (view === 'preview') {
-      $blocks.hidden = true;
-      $preview.hidden = false;
+      if (surface) surface.classList.add('is-split');
+      $blocks.classList.remove('is-hidden');
+      $preview.classList.remove('is-hidden');
+      renderBlocks(); // 左侧保持可编辑
       renderPreview();
     } else {
-      $preview.hidden = true;
-      $blocks.hidden = false;
+      if (surface) surface.classList.remove('is-split');
+      $preview.classList.add('is-hidden');
+      $blocks.classList.remove('is-hidden');
       renderBlocks();
     }
   }

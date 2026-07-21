@@ -137,7 +137,8 @@ import {
    * 8. 渲染：右栏编辑器 / 预览 / 状态
    * ============================================================ */
   function renderEditor() {
-    if (view !== 'preview') renderBlocks();
+    // 写态与预览态左侧都是可编辑块，两态都渲染块
+    renderBlocks();
     $etLabel.textContent = state.lang === 'zh' ? '中文正文' : 'English 正文';
     refreshStat();
     if (view === 'preview') renderPreview();
@@ -290,6 +291,8 @@ import {
     collectText();
     refreshStat();
     scheduleSave();
+    // 左右并排预览态：编辑左侧块时实时刷新右侧预览
+    if (view === 'preview') renderPreview();
   }
 
   function deleteBlock(card) {
