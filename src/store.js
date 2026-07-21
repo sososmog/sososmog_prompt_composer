@@ -96,8 +96,25 @@ import { renderAll, applyStartupShortcut } from './events.js';
     scheduleSave();
   }
 
+  // 保存状态订阅：设置面板据此显示“保存中… / 已保存”。
+  // status 取值：'saving'（已排期尚未落盘）| 'saved'（已写盘）| 'error'（写盘失败）。
+  var saveListeners = [];
+  function onSaveStatus(fn) {
+    if (typeof fn === 'function') saveListeners.push(fn);
+    return function () {
+      var i = saveListeners.indexOf(fn);
+      if (i >= 0) saveListeners.splice(i, 1);
+    };
+  }
+  function emitSaveStatus(status) {
+    for (var i = 0; i < saveListeners.length; i++) {
+      try { saveListeners[i](status); } catch (e) { /* 监听器自身异常不影响保存 */ }
+    }
+  }
+
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
+    emitSaveStatus('saving');
     saveTimer = setTimeout(persistState, 300);
   }
 
@@ -110,7 +127,8 @@ import { renderAll, applyStartupShortcut } from './events.js';
   }
 
   function persistState() {
-    if (!tauriAvailable()) return;
+    // 非 Tauri（浏览器预览）无盘可写，直接视作“已保存”以免状态字卡在“保存中…”。
+    if (!tauriAvailable()) { emitSaveStatus('saved'); return; }
     var payload = JSON.stringify(state, null, 2);
     ensureAppDataDir().then(function () {
       return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
@@ -118,7 +136,8 @@ import { renderAll, applyStartupShortcut } from './events.js';
       if (eventApi && eventApi.emit && !suppressBroadcast) {
         eventApi.emit('composer-state-changed', state).catch(function () {});
       }
-    }).catch(function (err) { console.warn('持久化失败:', err); });
+      emitSaveStatus('saved');
+    }).catch(function (err) { console.warn('持久化失败:', err); emitSaveStatus('error'); });
   }
 
   /* ---------- 实时双向同步：监听浮窗（或另一端）广播的 state ----------
@@ -318,7 +337,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     // 可变状态
     state, view, setViewValue,
     // 持久化 / 同步
-    scheduleSave, persistState, restoreState,
+    scheduleSave, persistState, restoreState, onSaveStatus,
     isEditingLocally, applyRemoteState, flushPendingRemoteState, setState,
     // 结构级 Undo/Redo
     history, captureHistory, applyContentSnapshot,

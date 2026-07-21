@@ -302,6 +302,10 @@ import {
 
   function openManager(adapter) {
     ensureSnippetManager();
+    // 指针可能被设置面板的内嵌 tab 抢走过，打开 overlay 时先指回 overlay 自己的 DOM，
+    // 否则无参的 renderSnippetManager 会渲染到 tab 容器而非弹窗。
+    $smList = $smOverlay.querySelector('#smList');
+    $smAddBtn = $smOverlay.querySelector('#smAdd');
     SM = adapter;
     $smTitle.textContent = adapter.title;
     $smOverlay.setAttribute('aria-label', adapter.title);
@@ -655,6 +659,8 @@ import {
 
   function openQuickManager() {
     ensureQuickManager();
+    // 同 openManager：指针可能被内嵌 tab 抢走，打开弹窗时先指回 overlay 自己的列表容器。
+    $qmList = $qmOverlay.querySelector('#qmList');
     $qmOverlay.classList.add('show');
     renderQuickManager();
     qmKeyHandler = function (e) { if (e.key === 'Escape') closeQuickManager(); };
@@ -669,7 +675,57 @@ import {
     if (qmKeyHandler) { document.removeEventListener('keydown', qmKeyHandler); qmKeyHandler = null; }
   }
 
+  /* ============================================================
+   * 设置面板内嵌入口：把三个管理器渲染进设置 tab 的容器里，
+   * 复用上面 overlay 版本的同一套 render/编辑逻辑（改动仍即时保存）。
+   * 做法：在 host 内构建与 overlay 相同的 list + add 结构，并把模块级
+   * 指针（$smList/$smAddBtn/SM 或 $qmList）指向这套 DOM，再调对应 render。
+   * overlay 的 open* 会在打开时把指针指回自己，两者不会同时可见，安全。
+   * ============================================================ */
+
+  // 常用句 / 插入模块：内嵌进设置 tab
+  function mountManagerInto(host, adapter) {
+    host.innerHTML =
+      '<div class="sm-hint sm-embed-hint"></div>' +
+      '<div class="sm-list sm-embed-list"></div>' +
+      '<div class="sm-foot">' +
+        '<button type="button" class="sm-add sm-embed-add">' + icon('plus') + ' <span class="sm-add-label"></span></button>' +
+      '</div>';
+    host.querySelector('.sm-embed-hint').textContent = adapter.hint;
+    host.querySelector('.sm-add-label').textContent = adapter.addLabel;
+
+    // 指针指向内嵌 DOM，后续无参重渲染都打到这里
+    $smList = host.querySelector('.sm-embed-list');
+    $smAddBtn = host.querySelector('.sm-embed-add');
+    SM = adapter;
+    $smAddBtn.addEventListener('click', function () { if (SM === adapter) adapter.addCustom(); });
+    renderSnippetManager();
+  }
+  function mountSnippetManagerInto(host) { mountManagerInto(host, snippetAdapter()); }
+  function mountModuleManagerInto(host) { mountManagerInto(host, moduleAdapter()); }
+
+  // 快速段落：内嵌进设置 tab
+  function mountQuickManagerInto(host) {
+    host.innerHTML =
+      '<div class="sm-hint sm-embed-hint">分组即左栏可下拉的 block · 勾选决定是否显示 · 点名称/内容可直接编辑 · 用 ↑↓ 调整顺序</div>' +
+      '<div class="sm-list sm-embed-list" id="qmListEmbed"></div>' +
+      '<div class="sm-foot">' +
+        '<button type="button" class="sm-add sm-embed-add-group">' + icon('plus') + ' <span>新增分组</span></button>' +
+      '</div>';
+    $qmList = host.querySelector('#qmListEmbed');
+    host.querySelector('.sm-embed-add-group').addEventListener('click', function () {
+      var g = { id: newQuickGroupId(), label: { zh: '新分组', en: 'New group' }, hidden: false, items: [] };
+      state.quickGroups.push(g);
+      afterQuickChange();
+      var last = $qmList.querySelector('.qm-group:last-child .sm-tag');
+      if (last) { last.focus(); last.select(); }
+    });
+    renderQuickManager();
+  }
+
   export {
+    // 设置面板内嵌入口
+    mountSnippetManagerInto, mountModuleManagerInto, mountQuickManagerInto,
     // 快速段落（左栏）
     renderQuick,
     // 通用管理浮窗

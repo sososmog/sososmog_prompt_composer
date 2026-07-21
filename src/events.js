@@ -12,6 +12,7 @@ import {
   view,
   setViewValue,
   scheduleSave,
+  onSaveStatus,
   showToast,
   collectText,
   restoreState,
@@ -48,6 +49,9 @@ import {
   openQuickManager,
   renderSnippetManager,
   renderQuickManager,
+  mountSnippetManagerInto,
+  mountModuleManagerInto,
+  mountQuickManagerInto,
   $smOverlay,
   $qmOverlay,
 } from './quick.js';
@@ -328,6 +332,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
             '<button type="button" class="st-nav-item is-active" role="tab" data-tab="general" aria-selected="true">通用</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="shortcut" aria-selected="false">快捷键</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="translate" aria-selected="false">翻译</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="modules" aria-selected="false">插入模块</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="snippets" aria-selected="false">常用句</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="quick" aria-selected="false">快速段落</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="guide" aria-selected="false">引导</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="backup" aria-selected="false">备份</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
@@ -391,6 +398,18 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                   '<p class="st-guide-tip">换服务：先切「提供商」拿到默认值 → 填该服务的 API Key。换模型：只改「模型名」一栏。改动即时保存。</p>' +
                 '</div>' +
               '</details>' +
+            '</section>' +
+            // ---- 插入模块 ----
+            '<section class="st-tab-page st-tab-manage" data-tab="modules" role="tabpanel">' +
+              '<div class="st-manage-host" id="stModulesHost"></div>' +
+            '</section>' +
+            // ---- 常用句 ----
+            '<section class="st-tab-page st-tab-manage" data-tab="snippets" role="tabpanel">' +
+              '<div class="st-manage-host" id="stSnippetsHost"></div>' +
+            '</section>' +
+            // ---- 快速段落 ----
+            '<section class="st-tab-page st-tab-manage" data-tab="quick" role="tabpanel">' +
+              '<div class="st-manage-host" id="stQuickHost"></div>' +
             '</section>' +
             // ---- 引导 ----
             '<section class="st-tab-page" data-tab="guide" role="tabpanel">' +
@@ -476,7 +495,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
             '</section>' +
           '</div>' +
         '</div>' +
-        '<div class="st-foot-hint">改动会立即保存并同步到浮窗。</div>' +
+        '<div class="st-foot-hint" id="stFootHint">改动会立即保存并同步到浮窗。</div>' +
       '</div>';
     document.body.appendChild($stOverlay);
     $stRecorderBox = $stOverlay.querySelector('#stRecorderBox');
@@ -565,6 +584,39 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         $stOpenConfigDir.title = '当前环境不支持打开文件夹（仅桌面应用可用）';
       }
     });
+
+    // 三个管理 tab 的“保存中… / 已自动保存”状态：订阅 store 的保存状态广播。
+    // 面板是单例，只注册一次即可；三处状态字统一联动。
+    bindSaveStatus();
+  }
+
+  /* ---------- 保存状态：复用底部状态栏（仅三个管理 tab 下显示，即时保存的确认反馈） ----------
+   * 底部 #stFootHint 平时是通用说明；停在管理 tab 时改为显示保存状态，让用户在
+   * 编辑长列表时也能在固定的底部看到“保存中… / 已保存”，不必滚到某处。 */
+  var FOOT_HINT_DEFAULT = '改动会立即保存并同步到浮窗。';
+  var SAVE_STATUS_TEXT = { saving: '保存中…', saved: '✓ 已保存', error: '⚠ 保存失败，请重试' };
+  var lastSaveStatus = 'saved';
+
+  function isManageTabActive() {
+    return !!($stOverlay && $stOverlay.querySelector('.st-tab-manage.is-active'));
+  }
+  // 依据当前 tab 刷新底部状态栏：管理 tab 显示保存状态，其它 tab 显示默认说明。
+  function refreshFootHint() {
+    var el = $stOverlay && $stOverlay.querySelector('#stFootHint');
+    if (!el) return;
+    if (isManageTabActive()) {
+      el.textContent = SAVE_STATUS_TEXT[lastSaveStatus] || SAVE_STATUS_TEXT.saved;
+      el.setAttribute('data-status', lastSaveStatus);
+    } else {
+      el.textContent = FOOT_HINT_DEFAULT;
+      el.removeAttribute('data-status');
+    }
+  }
+  function bindSaveStatus() {
+    onSaveStatus(function (status) {
+      lastSaveStatus = status;
+      refreshFootHint(); // 只在管理 tab 下会真正改变底部文案
+    });
   }
 
   /* ---------- 设置分类 tab 切换 ---------- */
@@ -582,8 +634,22 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         pages.forEach(function (p) {
           p.classList.toggle('is-active', p.getAttribute('data-tab') === tab);
         });
+        mountManageTab(tab);
+        refreshFootHint(); // 进/出管理 tab 时切换底部说明 ↔ 保存状态
       });
     });
+  }
+
+  /* ---------- 三个管理 tab：切到时才 mount（渲染会抢 quick.js 的容器指针，
+   * 故按需 mount；overlay 打开时会把指针指回自己） ---------- */
+  function mountManageTab(tab) {
+    if (tab === 'modules') {
+      mountModuleManagerInto($stOverlay.querySelector('#stModulesHost'));
+    } else if (tab === 'snippets') {
+      mountSnippetManagerInto($stOverlay.querySelector('#stSnippetsHost'));
+    } else if (tab === 'quick') {
+      mountQuickManagerInto($stOverlay.querySelector('#stQuickHost'));
+    }
   }
 
   /* ---------- 关于页版本号（Tauri 环境才能拿到，浏览器降级为占位） ---------- */
@@ -607,6 +673,12 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     $stRecorderBox.textContent = state.settings.toggleShortcut;
     $stDelayInput.value = state.settings.pasteDelayMs;
     renderTranslateSettings();
+    // 若当前正停在某个管理 tab 且面板可见，远端同步后重新 mount 以反映最新数据。
+    // 此路径只在非编辑态触发（编辑中 isEditingLocally 会暂缓远端 state 应用），
+    // 故不会打断用户输入。
+    var activeManage = $stOverlay.querySelector('.st-tab-manage.is-active');
+    if (activeManage) mountManageTab(activeManage.getAttribute('data-tab'));
+    refreshFootHint();
   }
 
   /* ---------- 翻译设置：绑定 + 渲染 + 保存 ---------- */
