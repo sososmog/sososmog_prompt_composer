@@ -553,6 +553,9 @@
   var ICON_PATHS = {
     'copy': '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    'upload': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+    'check': '<polyline points="20 6 9 17 4 12"/>',
+    'folder': '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
     'trash-2': '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
     'eraser': '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
     'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
@@ -711,6 +714,407 @@
   }
 
   /* ============================================================
+   * 7. 配置导入导出（纯逻辑，无 DOM / 无 Tauri / 无 localStorage）
+   * ------------------------------------------------------------
+   * 打包 / 校验 / 合并 / 预览摘要 都是纯函数：输入 state + 选项，
+   * 输出普通对象，副作用值（theme / appVersion / now）由 UI 层注入。
+   * 编排（读写文件、弹窗、广播）在 backup.js。
+   *
+   * 导出文件信封结构（schemaVersion=1）：
+   *   { app:'composer', type:'composer-config', schemaVersion, appVersion,
+   *     exportedAt, includes:[section...], containsApiKey, payload:{...} }
+   * payload 按 section 组织：
+   *   materials    —— 素材库（7 字段，见 MATERIAL_FIELDS）
+   *   preferences  —— 偏好（toggleShortcut / pasteDelayMs / translation / theme）
+   *   content      —— 正文双语草稿（{ lang, content:{zh,en} }）
+   * ============================================================ */
+  var EXPORT_SCHEMA_VERSION = 1;
+  var EXPORT_APP_ID = 'composer';
+  var EXPORT_FILE_TYPE = 'composer-config';
+  var EXPORT_SECTIONS = ['materials', 'preferences', 'content'];
+  // 素材库对应的 state 字段（抽取 / 覆盖 / 合并共用这份白名单）
+  var MATERIAL_FIELDS = [
+    'customSnippets', 'builtinPatches', 'snippetOrder',
+    'customModules', 'modulePatches', 'moduleOrder', 'quickGroups'
+  ];
+
+  // 深拷贝：state 全部可 JSON 序列化（与 persistState 一致），用最稳的方式。
+  function deepClone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
+
+  /* ---------- 7.1 导出：从 state 打包成信封对象 ----------
+   * buildExportBundle(state, { sections, appVersion, exportedAt, theme })
+   * - sections：要导出的段数组（materials / preferences / content 的子集）
+   * - appVersion / exportedAt / theme 由 UI 层注入，core 不读环境
+   * - API Key 从不导出：preferences.translation.apiKey 一律置空串
+   */
+  function buildExportBundle(state, opts) {
+    opts = opts || {};
+    var sections = Array.isArray(opts.sections)
+      ? EXPORT_SECTIONS.filter(function (s) { return opts.sections.indexOf(s) !== -1; })
+      : ['materials', 'preferences'];
+    var payload = {};
+
+    if (sections.indexOf('materials') !== -1) {
+      var mat = {};
+      MATERIAL_FIELDS.forEach(function (f) { mat[f] = deepClone(state[f]); });
+      payload.materials = mat;
+    }
+
+    if (sections.indexOf('preferences') !== -1) {
+      var s = state.settings || {};
+      var tr = deepClone(s.translation) || {};
+      tr.apiKey = ''; // 铁律：API Key 永不导出
+      payload.preferences = {
+        toggleShortcut: s.toggleShortcut,
+        pasteDelayMs: s.pasteDelayMs,
+        translation: tr,
+        theme: (typeof opts.theme === 'string') ? opts.theme : null
+      };
+    }
+
+    if (sections.indexOf('content') !== -1) {
+      payload.content = { lang: state.lang, content: deepClone(state.content) };
+    }
+
+    return {
+      app: EXPORT_APP_ID,
+      type: EXPORT_FILE_TYPE,
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      appVersion: (typeof opts.appVersion === 'string' && opts.appVersion) ? opts.appVersion : 'unknown',
+      exportedAt: (typeof opts.exportedAt === 'string' && opts.exportedAt) ? opts.exportedAt : new Date().toISOString(),
+      includes: sections,
+      containsApiKey: false, // 恒 false —— Key 不进文件
+      payload: payload
+    };
+  }
+
+  /* ---------- 7.2 导入：校验信封 ----------
+   * validateImportBundle(raw) -> { ok, code?, bundle? }
+   * code（UI 据此出中文文案）：
+   *   'not-object'  非对象 / null
+   *   'not-composer' 缺 app/type/payload 或 app 不匹配（不是本 app 文件）
+   *   'bad-schema'  schemaVersion 非正整数
+   *   'too-new'     schemaVersion 高于当前（更新版本导出，拒绝）
+   *   'no-sections' payload 里没有任何可导入的段（空文件）
+   * ok 时 bundle 为（必要时迁移后的）信封。
+   */
+  function validateImportBundle(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, code: 'not-object' };
+    if (raw.app !== EXPORT_APP_ID || raw.type !== EXPORT_FILE_TYPE ||
+        !raw.payload || typeof raw.payload !== 'object') {
+      return { ok: false, code: 'not-composer' };
+    }
+    var v = raw.schemaVersion;
+    if (typeof v !== 'number' || !isFinite(v) || v < 1 || Math.floor(v) !== v) {
+      return { ok: false, code: 'bad-schema' };
+    }
+    if (v > EXPORT_SCHEMA_VERSION) return { ok: false, code: 'too-new' };
+
+    var bundle = (v < EXPORT_SCHEMA_VERSION) ? migrateBundle(raw) : raw;
+    // 收敛出真正存在的段（payload 里有、且是已知 section）
+    var present = EXPORT_SECTIONS.filter(function (sec) {
+      return bundle.payload[sec] && typeof bundle.payload[sec] === 'object';
+    });
+    if (present.length === 0) return { ok: false, code: 'no-sections' };
+    bundle.includes = present;
+    return { ok: true, bundle: bundle };
+  }
+
+  // 低版本信封 → 当前版本的迁移。当前只有 v1，占位恒等；
+  // 将来引入 v2 时在这里按 bundle.schemaVersion 加迁移分支。
+  function migrateBundle(bundle) { return bundle; }
+
+  /* ---------- 7.3 判重与改名辅助 ----------
+   * 自定义素材的“同名”判定：模块 / 快速段落分组看 label（zh|en），
+   * 常用句看 tag。id 是本机时间戳生成、跨机不撞，不能用来判重。
+   */
+  function moduleKey(m) {
+    var l = (m && m.label) || {};
+    return (l.zh || '') + ' ' + (l.en || '');
+  }
+  function snippetKey(sn) { return (sn && sn.tag) || ''; }
+  function groupKey(g) {
+    var l = (g && g.label) || {};
+    return (l.zh || '') + ' ' + (l.en || '');
+  }
+
+  /* ---------- 7.4 合并 ----------
+   * mergeState(state, bundle, { mode, conflict, sections }) -> 新 state（未 normalize）
+   * - mode：'merge'（默认，并入）| 'replace'（整段替换）
+   * - conflict：'rename'（默认，保留两份）| 'skip'（保留本机）| 'overwrite'（用导入的）
+   * - sections：只应用这些段（默认取 bundle.includes ∩ 用户勾选）
+   * 调用方拿到结果后必须再走 normalizeState 收尾（order 补齐 / 去脏值）。
+   */
+  function mergeState(state, bundle, options) {
+    options = options || {};
+    var mode = options.mode === 'replace' ? 'replace' : 'merge';
+    var conflict = (options.conflict === 'skip' || options.conflict === 'overwrite') ? options.conflict : 'rename';
+    var payload = (bundle && bundle.payload) || {};
+    var avail = Array.isArray(bundle && bundle.includes) ? bundle.includes : EXPORT_SECTIONS;
+    var sections = Array.isArray(options.sections)
+      ? avail.filter(function (s) { return options.sections.indexOf(s) !== -1; })
+      : avail;
+
+    var next = deepClone(state);
+
+    if (sections.indexOf('materials') !== -1 && payload.materials) {
+      if (mode === 'replace') {
+        MATERIAL_FIELDS.forEach(function (f) {
+          if (payload.materials[f] !== undefined) next[f] = deepClone(payload.materials[f]);
+        });
+      } else {
+        mergeMaterials(next, payload.materials, conflict);
+      }
+    }
+
+    if (sections.indexOf('preferences') !== -1 && payload.preferences) {
+      mergePreferences(next, payload.preferences, mode);
+    }
+
+    if (sections.indexOf('content') !== -1 && payload.content) {
+      // 合并模式默认保留本机正文（不覆盖当次草稿）；覆盖模式才采用导入正文。
+      if (mode === 'replace') {
+        var c = payload.content;
+        if (c.content && typeof c.content === 'object') next.content = deepClone(c.content);
+        if (c.lang === 'en' || c.lang === 'zh') next.lang = c.lang;
+      }
+    }
+
+    return next;
+  }
+
+  // 素材库合并：自定义项按名称判重走三策略，patches 按内置 id 合并。
+  //
+  // 判重键 vs 显示名分离：常用句判重键就是 tag（改名即改 tag）；模块 / 分组的
+  // 判重键是 zh+en 复合，但改名只动 zh（更自然），故每类各传一套“取键 / 取基名 /
+  // 写名”回调，避免在通用函数里塞 label 特判。
+  function mergeMaterials(next, mat, conflict) {
+    // --- 自定义常用句（按 tag 判重，改名改 tag）---
+    if (Array.isArray(mat.customSnippets)) {
+      next.customSnippets = mergeCustomList(
+        Array.isArray(next.customSnippets) ? next.customSnippets : [],
+        mat.customSnippets, conflict, newSnippetId, next.snippetOrder,
+        {
+          key: snippetKey,
+          baseName: function (it) { return it.tag || ''; },
+          setName: function (it, name) { it.tag = name; }
+        }
+      );
+    }
+    // --- 自定义模块（按 label 判重，改名只改 label.zh）---
+    if (Array.isArray(mat.customModules)) {
+      next.customModules = mergeCustomList(
+        Array.isArray(next.customModules) ? next.customModules : [],
+        mat.customModules, conflict, newModuleId, next.moduleOrder,
+        {
+          key: moduleKey,
+          baseName: function (it) { return (it.label && (it.label.zh || it.label.en)) || ''; },
+          setName: function (it, name) { it.label = { zh: name, en: (it.label && it.label.en) || '' }; }
+        }
+      );
+    }
+    // --- 快速段落分组（一级按 label 判重，同名整组走策略，新组内 items 全新 id）---
+    if (Array.isArray(mat.quickGroups)) {
+      next.quickGroups = mergeQuickGroups(
+        Array.isArray(next.quickGroups) ? next.quickGroups : [],
+        mat.quickGroups, conflict
+      );
+    }
+    // --- 内置 patch（按固定 id 合并；合并模式下同名保留本机，仅补本机没有的）---
+    if (mat.builtinPatches && typeof mat.builtinPatches === 'object') {
+      next.builtinPatches = mergePatches(next.builtinPatches, mat.builtinPatches);
+    }
+    if (mat.modulePatches && typeof mat.modulePatches === 'object') {
+      next.modulePatches = mergePatches(next.modulePatches, mat.modulePatches);
+    }
+    // order 交给 normalizeState 收尾补齐 / 去重，这里不手动重排。
+  }
+
+  // 通用：把 incoming 自定义项按名称判重并入 existing。
+  // conflict：skip / overwrite / rename；genId：新 id 生成器；order：对应 order 数组
+  //（追加新 id 到末尾，overwrite 保留旧 id 不动 order）。
+  // ops：{ key(取判重键) / baseName(取用于改名的基名) / setName(写回改名) }。
+  function mergeCustomList(existing, incoming, conflict, genId, order, ops) {
+    var out = existing.map(function (x) { return deepClone(x); });
+    var keySet = {};   // 判重键集合
+    var byKey = {};    // 判重键 -> out 里的项（overwrite 用）
+    out.forEach(function (x) { var k = ops.key(x); keySet[k] = true; byKey[k] = x; });
+    if (!Array.isArray(order)) order = null;
+
+    incoming.forEach(function (raw) {
+      if (!raw || typeof raw !== 'object') return;
+      var item = deepClone(raw);
+      var exists = keySet[ops.key(item)];
+
+      if (exists && conflict === 'skip') return;
+
+      if (exists && conflict === 'overwrite') {
+        // 覆盖：保留本机旧 id（避免 order / patch 引用断裂），只替换内容字段
+        var target = byKey[ops.key(item)];
+        var keepId = target.id;
+        Object.keys(item).forEach(function (f) { if (f !== 'id') target[f] = item[f]; });
+        target.id = keepId;
+        return;
+      }
+
+      // rename 且冲突：在基名上找不冲突的新名写回
+      if (exists && conflict === 'rename') {
+        ops.setName(item, dedupeUniqueName(ops.baseName(item), item, ops.key, keySet));
+      }
+      // 无冲突 或 已改名：新 id 并入
+      item.id = genId();
+      item.builtin = false;
+      out.push(item);
+      var nk = ops.key(item);
+      keySet[nk] = true; byKey[nk] = item;
+      if (order) order.push(item.id);
+    });
+
+    return out;
+  }
+
+  // 在 base 名上寻找一个改名后判重键不冲突的名字（先 '原名 (导入)'，再递增）。
+  // 通过临时改名 probe 项、复算其 key 来判冲突，兼容常用句 / 模块 / 分组三种 key 形态。
+  function dedupeUniqueName(base, probeItem, getKey, keySet) {
+    base = base == null ? '' : String(base);
+    var candidates = [base, base + ' (导入)'];
+    for (var i = 2; i < 1000; i++) candidates.push(base + ' (导入 ' + i + ')');
+    var probe = deepClone(probeItem);
+    for (var j = 0; j < candidates.length; j++) {
+      // 用与 setName 一致的方式写入候选名再取 key
+      if (probe.label) probe.label = { zh: candidates[j], en: (probeItem.label && probeItem.label.en) || '' };
+      else probe.tag = candidates[j];
+      if (!keySet[getKey(probe)]) return candidates[j];
+    }
+    return base + ' (导入 ' + Date.now() + ')';
+  }
+
+  // 快速段落分组合并（一级按 label 判重）。同名分组：skip 保留本机；
+  // overwrite 用导入组替换（内容全新 id）；rename 改组名后并存。新组内 items 全部重新生成 id。
+  function mergeQuickGroups(existing, incoming, conflict) {
+    var out = existing.map(function (g) { return deepClone(g); });
+    var nameSet = {};
+    var byName = {};
+    out.forEach(function (g) { var k = groupKey(g); nameSet[k] = true; byName[k] = g; });
+
+    function freshGroup(raw, labelOverride) {
+      var g = deepClone(raw);
+      g.id = newQuickGroupId();
+      g.hidden = g.hidden === true;
+      if (labelOverride) g.label = labelOverride;
+      g.items = (Array.isArray(g.items) ? g.items : []).map(function (it) {
+        var item = deepClone(it);
+        item.id = newQuickItemId();
+        return item;
+      });
+      return g;
+    }
+
+    incoming.forEach(function (raw) {
+      if (!raw || typeof raw !== 'object') return;
+      var key = groupKey(raw);
+      var exists = nameSet[key];
+      if (exists && conflict === 'skip') return;
+      if (exists && conflict === 'overwrite') {
+        var idx = out.indexOf(byName[key]);
+        var keepId = byName[key].id;
+        var replaced = freshGroup(raw);
+        replaced.id = keepId; // 保留本机组 id
+        out[idx] = replaced;
+        byName[key] = replaced;
+        return;
+      }
+      if (exists && conflict === 'rename') {
+        var baseZh = (raw.label && (raw.label.zh || raw.label.en)) || '';
+        var newZh = dedupeUniqueName(baseZh, { label: { zh: baseZh, en: (raw.label && raw.label.en) || '' } }, groupKey, nameSet);
+        var g = freshGroup(raw, { zh: newZh, en: (raw.label && raw.label.en) || '' });
+        out.push(g);
+        var nk = groupKey(g); nameSet[nk] = true; byName[nk] = g;
+        return;
+      }
+      // 无冲突：直接并入
+      var ng = freshGroup(raw);
+      out.push(ng);
+      var k2 = groupKey(ng); nameSet[k2] = true; byName[k2] = ng;
+    });
+
+    return out;
+  }
+
+  // 内置 patch 合并：以本机为准，仅补入本机没有的 id（同名保留本机个性化）。
+  function mergePatches(local, incoming) {
+    var out = (local && typeof local === 'object') ? deepClone(local) : {};
+    Object.keys(incoming).forEach(function (id) {
+      if (out[id] === undefined && incoming[id] && typeof incoming[id] === 'object') {
+        out[id] = deepClone(incoming[id]);
+      }
+    });
+    return out;
+  }
+
+  // 偏好合并：标量字段导入值存在则采用；apiKey 永远保留本机（导入文件本就无 Key）。
+  function mergePreferences(next, prefs, mode) {
+    var s = next.settings || (next.settings = {});
+    if (typeof prefs.toggleShortcut === 'string' && prefs.toggleShortcut.trim() !== '') {
+      s.toggleShortcut = prefs.toggleShortcut;
+    }
+    if (typeof prefs.pasteDelayMs === 'number' && isFinite(prefs.pasteDelayMs)) {
+      s.pasteDelayMs = prefs.pasteDelayMs;
+    }
+    if (prefs.translation && typeof prefs.translation === 'object') {
+      var localKey = (s.translation && s.translation.apiKey) || '';
+      var tr = deepClone(prefs.translation);
+      tr.apiKey = localKey; // 铁律：导入不改本机 Key
+      s.translation = tr;
+    }
+    // theme 不在 state（localStorage），由 UI 层从 payload 单独应用。
+    // onboarding / lang 合并模式保留本机；lang 覆盖模式由 content 段处理，这里不动。
+    if (mode === 'replace') { /* 覆盖模式偏好即上面整替，无额外差异 */ }
+  }
+
+  /* ---------- 7.5 导入预览摘要 ----------
+   * summarizeImport(state, bundle, { mode, conflict, sections }) -> 计数与冲突
+   * 只统计不改 state，供预览弹窗渲染中文清单。
+   */
+  function summarizeImport(state, bundle, options) {
+    options = options || {};
+    var payload = (bundle && bundle.payload) || {};
+    var avail = Array.isArray(bundle && bundle.includes) ? bundle.includes : EXPORT_SECTIONS;
+    var sections = Array.isArray(options.sections)
+      ? avail.filter(function (s) { return options.sections.indexOf(s) !== -1; })
+      : avail;
+
+    var out = { sections: sections, materials: null, preferences: null, content: null };
+
+    if (sections.indexOf('materials') !== -1 && payload.materials) {
+      var mat = payload.materials;
+      out.materials = {
+        modules: countIncoming(mat.customModules, state.customModules, moduleKey),
+        snippets: countIncoming(mat.customSnippets, state.customSnippets, snippetKey),
+        quickGroups: countIncoming(mat.quickGroups, state.quickGroups, groupKey)
+      };
+    }
+    if (sections.indexOf('preferences') !== -1 && payload.preferences) {
+      out.preferences = { includesApiKey: false, keptLocalApiKey: true };
+    }
+    if (sections.indexOf('content') !== -1 && payload.content) {
+      var c = payload.content.content || {};
+      out.content = { zh: (c.zh || '').length, en: (c.en || '').length };
+    }
+    return out;
+  }
+
+  // 统计一段自定义列表里 incoming 的条数与其中同名冲突数。
+  function countIncoming(incoming, existing, getKey) {
+    var inc = Array.isArray(incoming) ? incoming : [];
+    var have = {};
+    (Array.isArray(existing) ? existing : []).forEach(function (x) { have[getKey(x)] = true; });
+    var conflicts = 0;
+    inc.forEach(function (x) { if (x && have[getKey(x)]) conflicts++; });
+    return { incoming: inc.length, conflicts: conflicts };
+  }
+
+  /* ============================================================
    * 导出（ES module）
    * ============================================================ */
   export {
@@ -750,4 +1154,14 @@
     highlightInline,
     highlightMarkdown,
     createHistory,
+    // 配置导入导出（纯逻辑）
+    EXPORT_SCHEMA_VERSION,
+    EXPORT_APP_ID,
+    EXPORT_FILE_TYPE,
+    EXPORT_SECTIONS,
+    MATERIAL_FIELDS,
+    buildExportBundle,
+    validateImportBundle,
+    mergeState,
+    summarizeImport,
   };

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Composer 默认权限：核心窗口能力 + 应用数据目录文件读写 + 保存对话框 + 剪贴板写入",
+  "description": "Composer 默认权限：核心窗口能力 + 应用数据目录文件读写 + 用户目录文件读写（配置导入导出）+ 保存/打开对话框 + 剪贴板写入",
   "windows": ["main", "float"],
   "permissions": [
     "core:default",
@@ -14,7 +14,13 @@
     "core:window:allow-start-dragging",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$APPDATA/composer-state.json" }]
+      "allow": [
+        { "path": "$APPDATA/composer-state.json" },
+        { "path": "$HOME/**/*" },
+        { "path": "$DESKTOP/**/*" },
+        { "path": "$DOCUMENT/**/*" },
+        { "path": "$DOWNLOAD/**/*" }
+      ]
     },
     {
       "identifier": "fs:allow-write-text-file",
@@ -35,6 +41,9 @@
       "allow": [{ "path": "$APPDATA" }]
     },
     "dialog:allow-save",
+    "dialog:allow-open",
+    "opener:allow-reveal-item-in-dir",
+    "opener:allow-open-path",
     "clipboard-manager:allow-write-text",
     "updater:default",
     "process:allow-restart",

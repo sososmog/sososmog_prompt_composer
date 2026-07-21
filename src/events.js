@@ -57,6 +57,7 @@ import {
   replayTour,
   resetHints,
 } from './guide.js';
+import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } from './backup.js';
 
   /* ============================================================
    * 9. 语言 / 视图切换
@@ -328,6 +329,7 @@ import {
             '<button type="button" class="st-nav-item" role="tab" data-tab="shortcut" aria-selected="false">快捷键</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="translate" aria-selected="false">翻译</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="guide" aria-selected="false">引导</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="backup" aria-selected="false">备份</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
           '</nav>' +
           '<div class="st-body">' +
@@ -430,6 +432,31 @@ import {
                 '</div>' +
               '</div>' +
             '</section>' +
+            // ---- 备份（导入导出）----
+            '<section class="st-tab-page" data-tab="backup" role="tabpanel">' +
+              '<div class="st-field">' +
+                '<span class="st-label">导出配置</span>' +
+                '<span class="st-desc">把素材库、偏好设置等导出成一个文件，用于备份或分享给他人。导出文件不含 API Key，可放心分享。</span>' +
+                '<div class="st-update-row">' +
+                  '<button type="button" class="st-update-btn" id="stExport">' + icon('upload') + '<span>导出为文件…</span></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">导入配置</span>' +
+                '<span class="st-desc">从配置文件恢复或并入内容。导入前会预览将导入哪些项，可选择合并或覆盖；导入不会清空本机已填的 API Key。</span>' +
+                '<div class="st-update-row">' +
+                  '<button type="button" class="st-update-btn" id="stImport">' + icon('download') + '<span>从文件导入…</span></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">配置文件位置</span>' +
+                '<span class="st-desc">你的所有数据都存在下面这个本地文件里。应用更新不会影响它；想手动备份可直接复制这个文件。</span>' +
+                '<code class="st-path" id="stConfigPath">—</code>' +
+                '<div class="st-update-row">' +
+                  '<button type="button" class="st-update-btn" id="stOpenConfigDir">' + icon('folder') + '<span>打开所在文件夹</span></button>' +
+                '</div>' +
+              '</div>' +
+            '</section>' +
             // ---- 关于 ----
             '<section class="st-tab-page" data-tab="about" role="tabpanel">' +
               '<div class="st-about">' +
@@ -515,6 +542,29 @@ import {
         showToast('功能小提示已重置，下次接近相应功能时会再出现');
       });
     }
+
+    // 备份 tab：导入 / 导出。先关设置面板，导入导出弹窗才不会被它盖住。
+    var $stExport = $stOverlay.querySelector('#stExport');
+    if ($stExport) {
+      $stExport.addEventListener('click', function () { closeSettingsPanel(); openExportFlow(); });
+    }
+    var $stImport = $stOverlay.querySelector('#stImport');
+    if ($stImport) {
+      $stImport.addEventListener('click', function () { closeSettingsPanel(); openImportFlow(); });
+    }
+    var $stOpenConfigDir = $stOverlay.querySelector('#stOpenConfigDir');
+    if ($stOpenConfigDir) {
+      $stOpenConfigDir.addEventListener('click', openConfigFolder);
+    }
+    // 异步填入配置文件真实路径；非 Tauri 环境保持占位并禁用打开按钮
+    var $stConfigPath = $stOverlay.querySelector('#stConfigPath');
+    getConfigFilePath().then(function (p) {
+      if ($stConfigPath) $stConfigPath.textContent = p || '（仅桌面应用可用）';
+      if (!p && $stOpenConfigDir) {
+        $stOpenConfigDir.disabled = true;
+        $stOpenConfigDir.title = '当前环境不支持打开文件夹（仅桌面应用可用）';
+      }
+    });
   }
 
   /* ---------- 设置分类 tab 切换 ---------- */
