@@ -12,7 +12,20 @@ describe('normalizeState', () => {
     expect(s.snippetOrder).toEqual(BUILTIN_SNIPPETS.map((b) => b.id));
     expect(s.moduleOrder).toEqual(INSERT_MODULES.map((m) => m.id));
     expect(s.quickGroups.length).toBe(3);
-    expect(s.settings).toEqual({ toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60 });
+    expect(s.settings).toEqual(defaultState().settings);
+  });
+
+  it('settings.translation 脏值被归一化（未知 provider → custom）', () => {
+    const s = normalizeState({ settings: { translation: { provider: 'zzz', apiKey: 'k', model: ' m ' } } });
+    expect(s.settings.translation.provider).toBe('custom');
+    expect(s.settings.translation.apiKey).toBe('k');
+    expect(s.settings.translation.model).toBe('m');
+  });
+
+  it('缺失 translation 时补默认（Gemini）', () => {
+    const s = normalizeState({ settings: { toggleShortcut: 'Ctrl+Alt+X' } });
+    expect(s.settings.translation.provider).toBe('gemini');
+    expect(s.settings.translation.protocol).toBe('gemini');
   });
 
   it('lang 非 en 一律归一为 zh', () => {
