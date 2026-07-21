@@ -51,6 +51,12 @@ import {
   $smOverlay,
   $qmOverlay,
 } from './quick.js';
+import {
+  maybeStartTourOnBoot,
+  maybeShowHint,
+  replayTour,
+  resetHints,
+} from './guide.js';
 
   /* ============================================================
    * 9. 语言 / 视图切换
@@ -67,6 +73,8 @@ import {
     history.reset();
     renderAll();
     scheduleSave();
+    // 第一次切换语言：说明中英文是两份独立正文、互不覆盖（最反直觉的点）
+    maybeShowHint('langBilingual');
   }
   function toggleLang() { setLang(state.lang === 'zh' ? 'en' : 'zh'); }
 
@@ -114,6 +122,10 @@ import {
   function doTranslate() {
     if (isTranslating) return;
     var cfg = state.settings && state.settings.translation;
+
+    // 第一次点翻译：先弹提示解释“需要先配 API Key”，读完再由用户自行操作，
+    // 避免首次点击就被 toast + 自动弹设置面板同时打断却不明所以。只在这一次短路。
+    if (maybeShowHint('translateKey')) return;
 
     // 未配置 key：友好提示并打开设置面板，不报错崩溃
     if (!cfg || !cfg.apiKey || !cfg.apiKey.trim()) {
@@ -315,6 +327,7 @@ import {
             '<button type="button" class="st-nav-item is-active" role="tab" data-tab="general" aria-selected="true">通用</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="shortcut" aria-selected="false">快捷键</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="translate" aria-selected="false">翻译</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="guide" aria-selected="false">引导</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
           '</nav>' +
           '<div class="st-body">' +
@@ -376,6 +389,46 @@ import {
                   '<p class="st-guide-tip">换服务：先切「提供商」拿到默认值 → 填该服务的 API Key。换模型：只改「模型名」一栏。改动即时保存。</p>' +
                 '</div>' +
               '</details>' +
+            '</section>' +
+            // ---- 引导 ----
+            '<section class="st-tab-page" data-tab="guide" role="tabpanel">' +
+              '<div class="st-field">' +
+                '<span class="st-label">功能速览</span>' +
+                '<div class="st-guide-block">' +
+                  '<ul class="st-guide-list">' +
+                    '<li>① 从左侧「插入模块 / 常用句 / 快速段落」点选，内容进入右侧正文。</li>' +
+                    '<li>② 正文按 ## 标题切成卡片，逐张编辑，拖动手柄或 Alt+↑↓ 排序。</li>' +
+                    '<li>③ 编辑 / 预览随时切换，改好后一键复制或下载 .md。</li>' +
+                    '<li>· 中英文各存一份，独立保存互不覆盖；一键翻译需先在「翻译」里配 Key。</li>' +
+                    '<li>· 浮窗始终置顶，全局快捷键呼出，可「点击即粘贴」到别的程序。</li>' +
+                  '</ul>' +
+                '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">快捷键一览</span>' +
+                '<dl class="st-guide-kbd">' +
+                  '<dt>Alt+↑ / Alt+↓</dt><dd>上/下移动当前块</dd>' +
+                  '<dt>Ctrl+C</dt><dd>复制正文（无选区、不在输入框时）</dd>' +
+                  '<dt>Ctrl+S</dt><dd>下载 .md</dd>' +
+                  '<dt>Ctrl+L</dt><dd>切换中/英文</dd>' +
+                  '<dt>Ctrl+P</dt><dd>切换编辑 / 预览</dd>' +
+                  '<dt id="stGuideToggleKey">Ctrl+Alt+C</dt><dd>全局呼出 / 收起浮窗</dd>' +
+                '</dl>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">重新观看引导</span>' +
+                '<span class="st-desc">再走一遍首次启动的最短路径引导。第一次不小心跳过了，随时可以从这里重看。</span>' +
+                '<div class="st-guide-block">' +
+                  '<button type="button" class="st-update-btn st-guide-replay" id="stReplayTour">' + icon('rotate-ccw') + '<span>重新观看引导</span></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">重置功能小提示</span>' +
+                '<span class="st-desc">让首次切换语言、打开浮窗、点翻译时的那些小提示重新出现一次。</span>' +
+                '<div class="st-guide-block">' +
+                  '<button type="button" class="st-update-btn st-guide-replay" id="stResetHints">' + icon('rotate-ccw') + '<span>重置功能小提示</span></button>' +
+                '</div>' +
+              '</div>' +
             '</section>' +
             // ---- 关于 ----
             '<section class="st-tab-page" data-tab="about" role="tabpanel">' +
@@ -441,6 +494,26 @@ import {
         $stCheckUpdate.disabled = true;
         $stCheckUpdate.title = '当前环境不支持自动更新（仅桌面应用可用）';
       }
+    }
+
+    // 引导 tab：快捷键一览里的“呼出浮窗”键显示用户当前配置值
+    var $stToggleKey = $stOverlay.querySelector('#stGuideToggleKey');
+    if ($stToggleKey && state.settings && state.settings.toggleShortcut) {
+      $stToggleKey.textContent = state.settings.toggleShortcut;
+    }
+    var $stReplayTour = $stOverlay.querySelector('#stReplayTour');
+    if ($stReplayTour) {
+      $stReplayTour.addEventListener('click', function () {
+        closeSettingsPanel();   // 先关设置面板，引导才不会被它盖住
+        replayTour();
+      });
+    }
+    var $stResetHints = $stOverlay.querySelector('#stResetHints');
+    if ($stResetHints) {
+      $stResetHints.addEventListener('click', function () {
+        resetHints();
+        showToast('功能小提示已重置，下次接近相应功能时会再出现');
+      });
     }
   }
 
@@ -676,6 +749,8 @@ import {
   if ($btnFloatWindow) {
     if (webviewWindowApi && webviewWindowApi.WebviewWindow) {
       $btnFloatWindow.addEventListener('click', function () {
+        // 第一次进入浮窗：说明全局快捷键与“点击即粘贴”
+        maybeShowHint('floatWindow');
         getFloatWindow().then(function (win) {
           if (!win) { showToast('未找到浮窗，请重启应用', true); return; }
           win.isVisible().then(function (visible) {
@@ -822,7 +897,11 @@ import {
     if ($stOverlay && $stOverlay.classList.contains('show')) renderSettingsPanel();
   }
 
-  restoreState();
+  // 状态恢复 + 首次 renderAll 完成后，按需自动弹出新手引导
+  // （此时演示数据卡片等 DOM 已渲染，引导高亮定位才准确）。
+  Promise.resolve(restoreState()).then(function () {
+    maybeStartTourOnBoot();
+  });
   setTimeout(function () { checkForUpdate(false); }, 3000);
 
   export {
