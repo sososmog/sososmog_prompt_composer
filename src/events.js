@@ -310,50 +310,90 @@ import {
           '<span class="sm-title">设置</span>' +
           '<button type="button" class="sm-close" aria-label="关闭">' + icon('x') + '</button>' +
         '</div>' +
-        '<div class="st-body">' +
-          '<div class="st-field">' +
-            '<span class="st-label">呼出浮窗快捷键</span>' +
-            '<span class="st-desc">点击输入框后按下新的组合键（至少一个 Ctrl/Alt/Shift/Super + 一个主键），松开自动保存。</span>' +
-            '<div class="st-recorder">' +
-              '<div class="st-recorder-box" id="stRecorderBox" tabindex="0" role="button" aria-label="点击录制快捷键"></div>' +
-              '<button type="button" class="st-recorder-clear" id="stRecorderReset" title="恢复默认（Ctrl+Alt+C）" aria-label="恢复默认快捷键">' + icon('rotate-ccw') + '</button>' +
-            '</div>' +
-          '</div>' +
-          '<div class="st-field">' +
-            '<span class="st-label">粘贴前等待</span>' +
-            '<span class="st-desc">自动粘贴前等待焦点切换到目标窗口的时长，切换较慢的电脑可以调大一些。</span>' +
-            '<div class="st-delay-row">' +
-              '<input type="number" class="st-delay-input" id="stDelayInput" min="30" max="500" step="10" />' +
-              '<span class="st-delay-unit">毫秒（30–500）</span>' +
-            '</div>' +
-          '</div>' +
-          '<div class="st-field st-translate">' +
-            '<span class="st-label">翻译（LLM）</span>' +
-            '<span class="st-desc">配置一键翻译（⇄）使用的大模型。API Key 保存在本地配置文件，不会硬编码进程序。默认 Google Gemini，免费层翻译质量好。</span>' +
-            '<div class="st-tr-grid">' +
-              '<label class="st-tr-row"><span class="st-tr-k">提供商</span>' +
-                '<select class="st-tr-input" id="stTrProvider">' +
-                  TRANSLATE_PROVIDERS.map(function (p) { return '<option value="' + p.id + '">' + p.label + '</option>'; }).join('') +
-                '</select>' +
-              '</label>' +
-              '<label class="st-tr-row"><span class="st-tr-k">API Key</span>' +
-                '<input type="password" class="st-tr-input" id="stTrKey" placeholder="粘贴你的 API Key" autocomplete="off" spellcheck="false" />' +
-              '</label>' +
-              '<label class="st-tr-row"><span class="st-tr-k">模型名</span>' +
-                '<input type="text" class="st-tr-input" id="stTrModel" placeholder="如 gemini-2.5-flash" spellcheck="false" />' +
-              '</label>' +
-              '<label class="st-tr-row"><span class="st-tr-k">baseURL</span>' +
-                '<input type="text" class="st-tr-input" id="stTrBase" placeholder="接口地址" spellcheck="false" />' +
-              '</label>' +
-              '<label class="st-tr-check"><input type="checkbox" id="stTrOverwrite" /><span>覆盖已有译文（关闭则目标已有内容时先询问）</span></label>' +
-            '</div>' +
-          '</div>' +
-          '<div class="st-field">' +
-            '<span class="st-label">检查更新</span>' +
-            '<span class="st-desc">向服务器查询是否有新版本，有新版本时会提示下载并安装。</span>' +
-            '<div class="st-update-row">' +
-              '<button type="button" class="st-update-btn" id="stCheckUpdate">' + icon('refresh-cw') + '<span>检查更新</span></button>' +
-            '</div>' +
+        '<div class="st-layout">' +
+          '<nav class="st-nav" role="tablist" aria-label="设置分类">' +
+            '<button type="button" class="st-nav-item is-active" role="tab" data-tab="general" aria-selected="true">通用</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="shortcut" aria-selected="false">快捷键</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="translate" aria-selected="false">翻译</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
+          '</nav>' +
+          '<div class="st-body">' +
+            // ---- 通用 ----
+            '<section class="st-tab-page is-active" data-tab="general" role="tabpanel">' +
+              '<div class="st-field">' +
+                '<span class="st-label">粘贴前等待</span>' +
+                '<span class="st-desc">自动粘贴前等待焦点切换到目标窗口的时长，切换较慢的电脑可以调大一些。</span>' +
+                '<div class="st-delay-row">' +
+                  '<input type="number" class="st-delay-input" id="stDelayInput" min="30" max="500" step="10" />' +
+                  '<span class="st-delay-unit">毫秒（30–500）</span>' +
+                '</div>' +
+              '</div>' +
+            '</section>' +
+            // ---- 快捷键 ----
+            '<section class="st-tab-page" data-tab="shortcut" role="tabpanel">' +
+              '<div class="st-field">' +
+                '<span class="st-label">呼出浮窗快捷键</span>' +
+                '<span class="st-desc">点击输入框后按下新的组合键（至少一个 Ctrl/Alt/Shift/Super + 一个主键），松开自动保存。</span>' +
+                '<div class="st-recorder">' +
+                  '<div class="st-recorder-box" id="stRecorderBox" tabindex="0" role="button" aria-label="点击录制快捷键"></div>' +
+                  '<button type="button" class="st-recorder-clear" id="stRecorderReset" title="恢复默认（Ctrl+Alt+C）" aria-label="恢复默认快捷键">' + icon('rotate-ccw') + '</button>' +
+                '</div>' +
+              '</div>' +
+            '</section>' +
+            // ---- 翻译 ----
+            '<section class="st-tab-page" data-tab="translate" role="tabpanel">' +
+              '<div class="st-field st-translate">' +
+                '<span class="st-label">翻译（LLM）</span>' +
+                '<span class="st-desc">配置一键翻译使用的大模型。API Key 保存在本地配置文件。默认 Google Gemini。</span>' +
+                '<div class="st-tr-grid">' +
+                  '<label class="st-tr-row"><span class="st-tr-k">提供商</span>' +
+                    '<select class="st-tr-input" id="stTrProvider">' +
+                      TRANSLATE_PROVIDERS.map(function (p) { return '<option value="' + p.id + '">' + p.label + '</option>'; }).join('') +
+                    '</select>' +
+                  '</label>' +
+                  '<label class="st-tr-row"><span class="st-tr-k">API Key</span>' +
+                    '<input type="password" class="st-tr-input" id="stTrKey" placeholder="粘贴你的 API Key" autocomplete="off" spellcheck="false" />' +
+                  '</label>' +
+                  '<label class="st-tr-row"><span class="st-tr-k">模型名</span>' +
+                    '<input type="text" class="st-tr-input" id="stTrModel" placeholder="如 gemini-2.5-flash" spellcheck="false" />' +
+                  '</label>' +
+                  '<label class="st-tr-row"><span class="st-tr-k">baseURL</span>' +
+                    '<input type="text" class="st-tr-input" id="stTrBase" placeholder="接口地址" spellcheck="false" />' +
+                  '</label>' +
+                  '<label class="st-tr-check"><input type="checkbox" id="stTrOverwrite" /><span>覆盖已有译文（关闭则目标已有内容时先询问）</span></label>' +
+                '</div>' +
+              '</div>' +
+              '<details class="st-guide">' +
+                '<summary>怎么填这些值？怎么换模型？</summary>' +
+                '<div class="st-guide-body">' +
+                  '<p><strong>提供商</strong>：选一个大模型服务。选择后会自动带出该服务的默认 baseURL 和一个推荐模型，通常你只需再填 API Key。' +
+                    '选「自定义（OpenAI 兼容）」则 baseURL 和模型名都留空由你手填，适合自建或其它兼容 OpenAI 接口的服务。</p>' +
+                  '<p><strong>API Key</strong>：到所选服务的官网注册后生成，粘进来即可。它只存在本地配置文件，不会写死进程序、也不会上传。' +
+                    'Gemini 到 aistudio.google.com、GLM 到 open.bigmodel.cn、Groq 到 console.groq.com、OpenRouter 到 openrouter.ai 各自的 API Keys 页面获取。</p>' +
+                  '<p><strong>模型名</strong>：想换模型时，把这里改成该服务支持的模型 ID 即可（如 Gemini 的 <code>gemini-2.5-pro</code>、GLM 的 <code>glm-4-plus</code>）。' +
+                    '模型 ID 以对应服务文档里写的为准，填错会在翻译时报错。</p>' +
+                  '<p><strong>baseURL</strong>：接口地址，一般用切换提供商时自动带出的默认值即可，不用改。只有用自定义/代理/中转服务时才需要改。</p>' +
+                  '<p class="st-guide-tip">换服务：先切「提供商」拿到默认值 → 填该服务的 API Key。换模型：只改「模型名」一栏。改动即时保存。</p>' +
+                '</div>' +
+              '</details>' +
+            '</section>' +
+            // ---- 关于 ----
+            '<section class="st-tab-page" data-tab="about" role="tabpanel">' +
+              '<div class="st-about">' +
+                '<div class="st-about-app">' +
+                  '<span class="st-about-name">Composer</span>' +
+                  '<span class="st-about-ver" id="stAboutVer">—</span>' +
+                '</div>' +
+                '<p class="st-about-desc">提示词构建工具。</p>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">检查更新</span>' +
+                '<span class="st-desc">向服务器查询是否有新版本，有新版本时会提示下载并安装。</span>' +
+                '<div class="st-update-row">' +
+                  '<button type="button" class="st-update-btn" id="stCheckUpdate">' + icon('refresh-cw') + '<span>检查更新</span></button>' +
+                '</div>' +
+              '</div>' +
+            '</section>' +
           '</div>' +
         '</div>' +
         '<div class="st-foot-hint">改动会立即保存并同步到浮窗。</div>' +
@@ -362,6 +402,8 @@ import {
     $stRecorderBox = $stOverlay.querySelector('#stRecorderBox');
     $stDelayInput = $stOverlay.querySelector('#stDelayInput');
     bindTranslateSettings();
+    bindSettingsTabs();
+    loadAboutVersion();
 
     $stOverlay.addEventListener('mousedown', function (e) {
       if (e.target === $stOverlay) closeSettingsPanel();
@@ -400,6 +442,41 @@ import {
         $stCheckUpdate.title = '当前环境不支持自动更新（仅桌面应用可用）';
       }
     }
+  }
+
+  /* ---------- 设置分类 tab 切换 ---------- */
+  function bindSettingsTabs() {
+    var navItems = $stOverlay.querySelectorAll('.st-nav-item');
+    var pages = $stOverlay.querySelectorAll('.st-tab-page');
+    navItems.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = btn.getAttribute('data-tab');
+        navItems.forEach(function (b) {
+          var on = b === btn;
+          b.classList.toggle('is-active', on);
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        pages.forEach(function (p) {
+          p.classList.toggle('is-active', p.getAttribute('data-tab') === tab);
+        });
+      });
+    });
+  }
+
+  /* ---------- 关于页版本号（Tauri 环境才能拿到，浏览器降级为占位） ---------- */
+  function loadAboutVersion() {
+    var el = $stOverlay && $stOverlay.querySelector('#stAboutVer');
+    if (!el) return;
+    var appApi = window.__TAURI__ && window.__TAURI__.app;
+    if (!appApi || typeof appApi.getVersion !== 'function') {
+      el.textContent = '开发预览';
+      return;
+    }
+    appApi.getVersion().then(function (v) {
+      el.textContent = 'v' + v;
+    }).catch(function () {
+      el.textContent = '—';
+    });
   }
 
   function renderSettingsPanel() {
