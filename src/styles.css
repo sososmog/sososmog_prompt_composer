@@ -643,12 +643,30 @@
   }
   .seg-mini button[aria-pressed="true"] { background:var(--surface-hi); color:var(--amber); }
 
-  /* 预览层（只读渲染）— 与编辑框互斥显示 */
+  /* 预览层（只读渲染）。默认与编辑框上下堆叠；预览态下 .editor-surface 加
+     .is-split 切成左右并排（左编辑块 / 右预览）。 */
   .editor-preview {
     flex:1; width:100%; min-height:0; overflow-y:auto;
     padding:22px 26px;
     font-family:var(--font-read); font-size:15px; line-height:1.8; color:var(--text-soft);
     white-space:pre-wrap; word-break:break-word;
+  }
+  /* 用 .is-hidden 而非 HTML hidden 属性：.blocks/.editor-preview 有显式 display，
+     会覆盖 [hidden] 的 display:none，导致隐藏失效（原上下布局 bug 的根因）。 */
+  .editor-surface .is-hidden { display:none !important; }
+  /* 左右并排：用 Grid —— 工具栏跨满顶行，其下编辑块与预览各占一列。
+     行高 minmax(0,1fr) 是关键：把两栏高度钳在容器内，使各自 overflow-y:auto
+     独立滚动，而不是被内容撑高、整个 surface 溢出（flex-wrap 方案的坑）。 */
+  .editor-surface.is-split {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    grid-template-rows:auto minmax(0, 1fr);
+  }
+  .editor-surface.is-split > .editor-toolbar { grid-column:1 / -1; }
+  .editor-surface.is-split > .blocks { width:auto; min-width:0; min-height:0; }
+  .editor-surface.is-split > .editor-preview {
+    width:auto; min-width:0; min-height:0;
+    border-left:1px solid var(--line-soft);
   }
   .editor-preview .pv-h { color:var(--amber); font-weight:600; }
   .editor-preview-empty { color:var(--faint); }
