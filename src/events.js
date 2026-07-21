@@ -344,7 +344,7 @@ import {
             '<section class="st-tab-page" data-tab="translate" role="tabpanel">' +
               '<div class="st-field st-translate">' +
                 '<span class="st-label">翻译（LLM）</span>' +
-                '<span class="st-desc">配置一键翻译（⇄）使用的大模型。API Key 保存在本地配置文件，不会硬编码进程序。默认 Google Gemini，免费层翻译质量好。</span>' +
+                '<span class="st-desc">配置一键翻译使用的大模型。API Key 保存在本地配置文件。默认 Google Gemini。</span>' +
                 '<div class="st-tr-grid">' +
                   '<label class="st-tr-row"><span class="st-tr-k">提供商</span>' +
                     '<select class="st-tr-input" id="stTrProvider">' +
@@ -363,6 +363,19 @@ import {
                   '<label class="st-tr-check"><input type="checkbox" id="stTrOverwrite" /><span>覆盖已有译文（关闭则目标已有内容时先询问）</span></label>' +
                 '</div>' +
               '</div>' +
+              '<details class="st-guide">' +
+                '<summary>怎么填这些值？怎么换模型？</summary>' +
+                '<div class="st-guide-body">' +
+                  '<p><strong>提供商</strong>：选一个大模型服务。选择后会自动带出该服务的默认 baseURL 和一个推荐模型，通常你只需再填 API Key。' +
+                    '选「自定义（OpenAI 兼容）」则 baseURL 和模型名都留空由你手填，适合自建或其它兼容 OpenAI 接口的服务。</p>' +
+                  '<p><strong>API Key</strong>：到所选服务的官网注册后生成，粘进来即可。它只存在本地配置文件，不会写死进程序、也不会上传。' +
+                    'Gemini 到 aistudio.google.com、GLM 到 open.bigmodel.cn、Groq 到 console.groq.com、OpenRouter 到 openrouter.ai 各自的 API Keys 页面获取。</p>' +
+                  '<p><strong>模型名</strong>：想换模型时，把这里改成该服务支持的模型 ID 即可（如 Gemini 的 <code>gemini-2.5-pro</code>、GLM 的 <code>glm-4-plus</code>）。' +
+                    '模型 ID 以对应服务文档里写的为准，填错会在翻译时报错。</p>' +
+                  '<p><strong>baseURL</strong>：接口地址，一般用切换提供商时自动带出的默认值即可，不用改。只有用自定义/代理/中转服务时才需要改。</p>' +
+                  '<p class="st-guide-tip">换服务：先切「提供商」拿到默认值 → 填该服务的 API Key。换模型：只改「模型名」一栏。改动即时保存。</p>' +
+                '</div>' +
+              '</details>' +
             '</section>' +
             // ---- 关于 ----
             '<section class="st-tab-page" data-tab="about" role="tabpanel">' +
