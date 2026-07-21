@@ -44,6 +44,10 @@
     "dialog:allow-open",
     "opener:allow-reveal-item-in-dir",
     "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://github.com/*" }]
+    },
     "clipboard-manager:allow-write-text",
     "updater:default",
     "process:allow-restart",
