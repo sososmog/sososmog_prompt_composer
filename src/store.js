@@ -149,6 +149,14 @@ import { renderAll, applyStartupShortcut } from './events.js';
     suppressBroadcast = false;
   }
 
+  // 本地主动整体替换内存 state（如配置导入）。与 applyRemoteState 的区别：
+  // 不置 suppressBroadcast——导入是本窗口发起的变更，落盘后应正常
+  // emit('composer-state-changed') 把新 state 广播给浮窗。调用方拿到后需自行
+  // scheduleSave()（触发写盘+广播）和 renderAll()（本窗口重渲染）。
+  function setState(nextRaw) {
+    state = normalizeState(nextRaw);
+  }
+
   function flushPendingRemoteState() {
     if (pendingRemoteState && !isEditingLocally()) {
       var payload = pendingRemoteState;
@@ -311,7 +319,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     state, view, setViewValue,
     // 持久化 / 同步
     scheduleSave, persistState, restoreState,
-    isEditingLocally, applyRemoteState, flushPendingRemoteState,
+    isEditingLocally, applyRemoteState, flushPendingRemoteState, setState,
     // 结构级 Undo/Redo
     history, captureHistory, applyContentSnapshot,
     // DOM 引用
