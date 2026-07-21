@@ -78,6 +78,7 @@ import {
       pill.setAttribute('role', 'listitem');
       pill.title = '插入到光标处';
       pill.innerHTML = '<span class="ip-plus">+</span><span>' + escapeHtml(mod.label[lang] || mod.label.zh || mod.label.en) + '</span>';
+      preserveBlockFocus(pill);
       pill.addEventListener('click', function () { insertSnippet(mod.text[lang] || mod.text.zh || mod.text.en); });
       $insertGrid.appendChild(pill);
     });

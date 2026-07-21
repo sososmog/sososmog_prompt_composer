@@ -62,6 +62,13 @@ import { renderAll, applyStartupShortcut } from './events.js';
   var view = 'write'; // 'write' | 'preview'
   var saveTimer = null;
   var suppressBroadcast = false; // 收到浮窗广播触发的本地更新，不再二次广播（防回声循环）
+  // Tauri 的 emit 会把事件回送给发送方自己。本窗口不该被自己刚保存的广播
+  // 反过来打断（尤其正在编辑时会暂存进 pendingRemoteState，失焦时 flush 触发
+  // 全量 renderAll，恰好打断“插入模块后紧接着的第二次插入”）。记住最近若干条
+  // 自己广播出去的 payload 序列化，listen 收到内容命中的即判为自我回声、跳过。
+  // 用队列而非单值：回声到达时机不定，两次连续保存会让单值被后者覆盖、漏过滤。
+  var recentBroadcasts = [];
+  var RECENT_BROADCAST_MAX = 6;
 
   /* ============================================================
    * 2.1 结构级 Undo/Redo：历史栈实例 + 捕获/恢复接口
@@ -132,6 +139,9 @@ import { renderAll, applyStartupShortcut } from './events.js';
       return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
     }).then(function () {
       if (eventApi && eventApi.emit && !suppressBroadcast) {
+        // 记录本次广播指纹，供 listen 端滤掉自我回声
+        recentBroadcasts.push(payload);
+        if (recentBroadcasts.length > RECENT_BROADCAST_MAX) recentBroadcasts.shift();
         eventApi.emit('composer-state-changed', state).catch(function () {});
       }
       emitSaveStatus('saved');
@@ -182,10 +192,21 @@ import { renderAll, applyStartupShortcut } from './events.js';
     }
   }
 
+  // 主动丢弃暂存的远端 state（本地正在发起编辑时调用）。
+  function discardPendingRemoteState() { pendingRemoteState = null; }
+
   if (eventApi && eventApi.listen) {
     eventApi.listen('composer-state-changed', function (evt) {
       var payload = evt && evt.payload;
       if (!payload || typeof payload !== 'object') return;
+      // 过滤自我回声：命中本窗口近期广播过的任一指纹即忽略（是自己发的，本地
+      // state 已经是它，无需再 apply，更不能在编辑中暂存后打断后续操作）。
+      var fp = JSON.stringify(payload, null, 2);
+      var hitIdx = recentBroadcasts.indexOf(fp);
+      if (hitIdx !== -1) {
+        recentBroadcasts.splice(hitIdx, 1); // 消费掉，避免误吃后续同内容的真实更新
+        return;
+      }
       if (isEditingLocally()) {
         // 正在编辑：暂存最新一份，待失焦后应用（后到的覆盖先到的，只保留最新）
         pendingRemoteState = payload;
@@ -290,6 +311,12 @@ import { renderAll, applyStartupShortcut } from './events.js';
 
   // 在当前聚焦块的光标处插入片段；无聚焦块则新建一个块（追加到末尾）。
   function insertSnippet(snippet) {
+    // 用户正在主动插入内容：丢弃任何尚未 apply 的远端 state（自我回声或浮窗的
+    // 旧更新都已过时）。否则失焦时 flushPendingRemoteState 会用它 renderAll，
+    // 覆盖掉这次插入——表现为“插了却跳走、像没插入、要再点一次”。插入后本窗口
+    // 自己会 scheduleSave 广播最新态，浮窗照常同步，方向正确。
+    discardPendingRemoteState();
+
     var active = document.activeElement;
     var isBlockArea = active && active.classList && active.classList.contains('block-textarea');
     var isModuleTemplate = snippet.slice(0, 2) === '##';
