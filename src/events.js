@@ -5,7 +5,8 @@
  * 主窗口最上层：装配各按钮/全局事件，import 其余模块的能力。
  * 文件末尾执行启动逻辑（restoreState + 延迟检查更新）。
  * ============================================================ */
-import { icon } from './core.js';
+import { icon, TRANSLATE_PROVIDERS, TRANSLATE_PROVIDER_BY_ID, normalizeTranslateSettings } from './core.js';
+import { translateCurrentContent } from './translate.js';
 import {
   state,
   view,
@@ -70,14 +71,98 @@ import {
   function toggleLang() { setLang(state.lang === 'zh' ? 'en' : 'zh'); }
 
   function renderLangSeg() {
-    $langSegmented.querySelectorAll('button').forEach(function (b) {
+    $langSegmented.querySelectorAll('button[data-lang]').forEach(function (b) {
       b.setAttribute('aria-pressed', b.dataset.lang === state.lang ? 'true' : 'false');
     });
+    updateTranslateDir();
   }
   $langSegmented.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-lang]');
     if (b) setLang(b.dataset.lang);
   });
+
+  /* ============================================================
+   * 9.1 一键翻译（⇄）：把当前语言正文翻译到另一种语言
+   * ------------------------------------------------------------
+   * 方向 = 源语言 state.lang → 目标语言（另一种）。悬停提示当前方向；
+   * 切换语言后方向随之翻转（renderLangSeg 里调 updateTranslateDir）。
+   * 翻译中 ⇄ 进入加载/禁用态；完成后自动切到目标语言看结果，短暂提示。
+   * ============================================================ */
+  var $btnTranslate = document.getElementById('btnTranslate');
+  var isTranslating = false;
+
+  function langLabel(code) { return code === 'zh' ? '中文' : 'English'; }
+
+  function updateTranslateDir() {
+    if (!$btnTranslate) return;
+    var src = state.lang;
+    var tgt = src === 'zh' ? 'en' : 'zh';
+    var dir = '翻译 ' + langLabel(src) + ' → ' + langLabel(tgt);
+    $btnTranslate.title = isTranslating ? '翻译中…' : dir;
+    $btnTranslate.setAttribute('aria-label', isTranslating ? '翻译中' : (dir + '（一键翻译）'));
+  }
+
+  function setTranslating(on) {
+    isTranslating = on;
+    if ($btnTranslate) {
+      $btnTranslate.classList.toggle('loading', on);
+      $btnTranslate.disabled = on;
+    }
+    updateTranslateDir();
+  }
+
+  function doTranslate() {
+    if (isTranslating) return;
+    var cfg = state.settings && state.settings.translation;
+
+    // 未配置 key：友好提示并打开设置面板，不报错崩溃
+    if (!cfg || !cfg.apiKey || !cfg.apiKey.trim()) {
+      showToast('请先在设置里填写翻译 API Key', true);
+      openSettingsPanel();
+      return;
+    }
+
+    var src = state.lang;
+    var target = src === 'zh' ? 'en' : 'zh';
+
+    // 覆盖确认：目标已有内容且用户关闭了“覆盖已有译文”时，逐次征询
+    if (view !== 'preview') collectText();
+    var targetHasContent = (state.content[target] || '').trim() !== '';
+    if (targetHasContent && cfg.overwrite === false) {
+      var ok = window.confirm('目标语言（' + langLabel(target) + '）已有内容，是否覆盖为新的译文？');
+      if (!ok) return;
+    }
+
+    setTranslating(true);
+    showToast('翻译中…');
+
+    translateCurrentContent().then(function (res) {
+      setTranslating(false);
+      if (!res || !res.ok) {
+        var reason = res && res.reason;
+        if (reason === 'need-key') { showToast('请先在设置里填写翻译 API Key', true); openSettingsPanel(); return; }
+        if (reason === 'empty') { showToast('当前正文为空，没有可翻译的内容'); return; }
+        showToast('翻译失败：' + (reason || '未知错误'), true);
+        return;
+      }
+      // 成功：自动切到目标语言看结果
+      setLang(res.target);
+      if (res.partial) {
+        showToast('已翻译到 ' + langLabel(res.target) + '（部分内容未对齐，请检查）', true);
+      } else {
+        showToast('已翻译到 ' + langLabel(res.target));
+      }
+    }).catch(function (err) {
+      setTranslating(false);
+      var msg = (err && err.message) ? err.message : String(err);
+      showToast('翻译失败：' + msg, true);
+    });
+  }
+
+  if ($btnTranslate) {
+    $btnTranslate.addEventListener('click', doTranslate);
+    updateTranslateDir();
+  }
 
   function setView(v) {
     if (view === v) return;
@@ -242,6 +327,27 @@ import {
               '<span class="st-delay-unit">毫秒（30–500）</span>' +
             '</div>' +
           '</div>' +
+          '<div class="st-field st-translate">' +
+            '<span class="st-label">翻译（LLM）</span>' +
+            '<span class="st-desc">配置一键翻译（⇄）使用的大模型。API Key 保存在本地配置文件，不会硬编码进程序。默认 Google Gemini，免费层翻译质量好。</span>' +
+            '<div class="st-tr-grid">' +
+              '<label class="st-tr-row"><span class="st-tr-k">提供商</span>' +
+                '<select class="st-tr-input" id="stTrProvider">' +
+                  TRANSLATE_PROVIDERS.map(function (p) { return '<option value="' + p.id + '">' + p.label + '</option>'; }).join('') +
+                '</select>' +
+              '</label>' +
+              '<label class="st-tr-row"><span class="st-tr-k">API Key</span>' +
+                '<input type="password" class="st-tr-input" id="stTrKey" placeholder="粘贴你的 API Key" autocomplete="off" spellcheck="false" />' +
+              '</label>' +
+              '<label class="st-tr-row"><span class="st-tr-k">模型名</span>' +
+                '<input type="text" class="st-tr-input" id="stTrModel" placeholder="如 gemini-2.5-flash" spellcheck="false" />' +
+              '</label>' +
+              '<label class="st-tr-row"><span class="st-tr-k">baseURL</span>' +
+                '<input type="text" class="st-tr-input" id="stTrBase" placeholder="接口地址" spellcheck="false" />' +
+              '</label>' +
+              '<label class="st-tr-check"><input type="checkbox" id="stTrOverwrite" /><span>覆盖已有译文（关闭则目标已有内容时先询问）</span></label>' +
+            '</div>' +
+          '</div>' +
           '<div class="st-field">' +
             '<span class="st-label">检查更新</span>' +
             '<span class="st-desc">向服务器查询是否有新版本，有新版本时会提示下载并安装。</span>' +
@@ -255,6 +361,7 @@ import {
     document.body.appendChild($stOverlay);
     $stRecorderBox = $stOverlay.querySelector('#stRecorderBox');
     $stDelayInput = $stOverlay.querySelector('#stDelayInput');
+    bindTranslateSettings();
 
     $stOverlay.addEventListener('mousedown', function (e) {
       if (e.target === $stOverlay) closeSettingsPanel();
@@ -299,6 +406,70 @@ import {
     if (!$stOverlay || isRecordingShortcut) return;
     $stRecorderBox.textContent = state.settings.toggleShortcut;
     $stDelayInput.value = state.settings.pasteDelayMs;
+    renderTranslateSettings();
+  }
+
+  /* ---------- 翻译设置：绑定 + 渲染 + 保存 ---------- */
+  var $trProvider = null, $trKey = null, $trModel = null, $trBase = null, $trOverwrite = null;
+
+  function bindTranslateSettings() {
+    $trProvider = $stOverlay.querySelector('#stTrProvider');
+    $trKey = $stOverlay.querySelector('#stTrKey');
+    $trModel = $stOverlay.querySelector('#stTrModel');
+    $trBase = $stOverlay.querySelector('#stTrBase');
+    $trOverwrite = $stOverlay.querySelector('#stTrOverwrite');
+
+    // 选预设：自动填入该预设的 protocol / baseUrl / model（key 与 overwrite 保留用户已填）。
+    // 选“自定义”时不覆盖用户已填的 baseUrl/model，只切 protocol 为 openai。
+    $trProvider.addEventListener('change', function () {
+      var id = $trProvider.value;
+      var preset = TRANSLATE_PROVIDER_BY_ID[id];
+      var tr = state.settings.translation;
+      tr.provider = id;
+      if (preset) {
+        tr.protocol = preset.protocol;
+        if (id !== 'custom') {
+          tr.baseUrl = preset.baseUrl;
+          tr.model = preset.model;
+        }
+      }
+      saveTranslateSettings();
+      renderTranslateSettings();
+    });
+
+    $trKey.addEventListener('change', function () {
+      state.settings.translation.apiKey = $trKey.value.trim();
+      saveTranslateSettings();
+    });
+    $trModel.addEventListener('change', function () {
+      state.settings.translation.model = $trModel.value.trim();
+      saveTranslateSettings();
+    });
+    $trBase.addEventListener('change', function () {
+      state.settings.translation.baseUrl = $trBase.value.trim();
+      saveTranslateSettings();
+    });
+    $trOverwrite.addEventListener('change', function () {
+      state.settings.translation.overwrite = $trOverwrite.checked;
+      saveTranslateSettings();
+    });
+  }
+
+  function renderTranslateSettings() {
+    if (!$trProvider) return;
+    var tr = state.settings.translation || normalizeTranslateSettings(null);
+    $trProvider.value = TRANSLATE_PROVIDER_BY_ID[tr.provider] ? tr.provider : 'custom';
+    $trKey.value = tr.apiKey || '';
+    $trModel.value = tr.model || '';
+    $trBase.value = tr.baseUrl || '';
+    $trOverwrite.checked = tr.overwrite !== false;
+  }
+
+  // 归一化后保存，防止脏值进持久化文件；不打断 UI（防抖保存 + 同步浮窗）。
+  function saveTranslateSettings() {
+    state.settings.translation = normalizeTranslateSettings(state.settings.translation);
+    scheduleSave();
+    updateTranslateDir();
   }
 
   function startRecordingShortcut() {

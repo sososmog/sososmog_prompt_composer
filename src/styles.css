@@ -413,6 +413,21 @@
   .st-update-btn:hover { border-color:var(--amber-deep); color:var(--amber-hi); background:var(--surface); }
   .st-update-btn:disabled { opacity:0.5; cursor:not-allowed; }
   .st-update-btn svg { width:15px; height:15px; }
+  /* 翻译（LLM）配置区 */
+  .st-tr-grid { display:flex; flex-direction:column; gap:10px; }
+  .st-tr-row { display:flex; align-items:center; gap:10px; }
+  .st-tr-k { flex:none; width:64px; font-size:12px; color:var(--muted); }
+  .st-tr-input {
+    flex:1; min-width:0; height:36px; border-radius:var(--radius-sm);
+    border:1px solid var(--line-hi); background:var(--surface-inset); color:var(--text);
+    font-size:12.5px; padding:0 10px;
+  }
+  select.st-tr-input { cursor:pointer; }
+  [data-theme="dark"] .st-tr-input { color-scheme:dark; }
+  .st-tr-input:focus { border-color:var(--amber-deep); outline:none; }
+  .st-tr-check { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-soft); cursor:pointer; }
+  .st-tr-check input { flex:none; width:15px; height:15px; cursor:pointer; accent-color:var(--amber-deep); }
+
   .st-foot-hint { padding:2px 20px 16px; font-size:11px; color:var(--faint); }
 
   .btn-ghost-rail {
@@ -490,6 +505,25 @@
     background:var(--seg-active-bg);
     color:var(--seg-active-fg); font-weight:600; box-shadow:var(--seg-active-shadow);
   }
+
+  /* 三段式语言控件中间的一键翻译（⇄）按钮 */
+  .lang-translate {
+    position:relative;
+    display:inline-flex; align-items:center; justify-content:center;
+    padding:6px 12px !important; border-radius:999px;
+    color:var(--muted);
+  }
+  .lang-translate:hover { color:var(--amber-hi); background:var(--surface); }
+  .lang-translate:disabled { cursor:progress; }
+  .lang-translate .lang-translate-ico { width:16px; height:16px; display:block; transition:opacity 0.14s ease; }
+  .lang-translate .lang-translate-spin {
+    position:absolute; width:15px; height:15px; border-radius:50%;
+    border:2px solid var(--line-hi); border-top-color:var(--amber-hi);
+    opacity:0; animation:lang-spin 0.7s linear infinite;
+  }
+  .lang-translate.loading .lang-translate-ico { opacity:0; }
+  .lang-translate.loading .lang-translate-spin { opacity:1; }
+  @keyframes lang-spin { to { transform:rotate(360deg); } }
 
   /* 编辑区主体：占满剩余高度 */
   .editor-main { flex:1; display:flex; flex-direction:column; min-height:0; padding:0 28px 20px; }
