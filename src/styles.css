@@ -506,6 +506,9 @@
     color:var(--seg-active-fg); font-weight:600; box-shadow:var(--seg-active-shadow);
   }
 
+  /* 三段式语言控件：左右两段语言按钮等宽（中英文字宽不同，强制对齐） */
+  .segmented.has-translate button[data-lang] { text-align:center; min-width:76px; }
+
   /* 三段式语言控件中间的一键翻译（⇄）按钮 */
   .lang-translate {
     position:relative;
