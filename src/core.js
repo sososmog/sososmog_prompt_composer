@@ -1,18 +1,15 @@
 /* ============================================================
  * core.js —— 纯逻辑层（无 DOM 依赖）
  * ------------------------------------------------------------
- * 从 index.html 抽离出来的预设数据 / 纯函数，挂到全局命名空间
- * window.Composer 下。普通 <script> 加载，不用 ES module，
- * 因此没有 import/export，index.html 主 IIFE 直接读取
- * window.Composer.xxx 使用。
+ * 从 index.html 抽离出来的预设数据 / 纯函数。作为 ES module，
+ * 通过文件末尾的 export 暴露；index.html / float.html 以
+ * <script type="module"> import，测试直接 import。
  *
  * 铁律：这里的内容必须保持"纯"——不引用 document、不引用任何
- * DOM 变量、不触发渲染。任何需要这些的逻辑都应留在 index.html。
+ * DOM 变量、不触发渲染。任何需要这些的逻辑都应留在 UI 层。
  * ============================================================ */
-(function () {
-  'use strict';
 
-  /* ============================================================
+/* ============================================================
    * 1. 预设：可插入的模块片段 / 常用句 / 示例正文
    * ============================================================ */
   var INSERT_MODULES = [
@@ -460,35 +457,75 @@
   }
 
   /* ============================================================
-   * 挂载到全局命名空间
+   * 6.1 结构级 Undo/Redo 历史栈（纯逻辑，无 DOM）
+   * ------------------------------------------------------------
+   * 只负责快照字符串的入栈/出栈/裁剪，不知道 state、不碰 DOM。
+   * 一个快照 = 某次结构操作发生前的 state.content[lang] 字符串。
+   * 捕获/恢复/重渲染的时机由 UI 层（store/render/events）驱动。
+   *
+   * 语言切换语义：见 UI 层——切语言时整体 reset() 清空两栈，避免
+   * 跨语言的快照写回当前语言导致内容串味。
    * ============================================================ */
-  window.Composer = window.Composer || {};
-  window.Composer.INSERT_MODULES = INSERT_MODULES;
-  window.Composer.MODULE_BY_ID = MODULE_BY_ID;
-  window.Composer.BUILTIN_SNIPPETS = BUILTIN_SNIPPETS;
-  window.Composer.BUILTIN_BY_ID = BUILTIN_BY_ID;
-  window.Composer.demoContent = demoContent;
-  window.Composer.defaultState = defaultState;
-  window.Composer.defaultQuickGroups = defaultQuickGroups;
-  window.Composer.newSnippetId = newSnippetId;
-  window.Composer.newModuleId = newModuleId;
-  window.Composer.newQuickGroupId = newQuickGroupId;
-  window.Composer.newQuickItemId = newQuickItemId;
-  window.Composer.modulesToText = modulesToText;
-  window.Composer.normalizeState = normalizeState;
-  window.Composer.estimateTokens = estimateTokens;
-  window.Composer.parseBlocks = parseBlocks;
-  window.Composer.patchBuiltinSnippet = patchBuiltinSnippet;
-  window.Composer.patchBuiltinModule = patchBuiltinModule;
-  window.Composer.escapeHtml = escapeHtml;
-  window.Composer.ICON_PATHS = ICON_PATHS;
-  window.Composer.icon = icon;
-  window.Composer.hlEscape = hlEscape;
-  window.Composer.highlightInline = highlightInline;
-  window.Composer.highlightMarkdown = highlightMarkdown;
+  function createHistory(limit) {
+    var cap = (typeof limit === 'number' && limit > 0) ? limit : 50;
+    var undoStack = [];
+    var redoStack = [];
 
-  // Node/Vitest 环境下暴露 CommonJS 导出，浏览器端 module 未定义不受影响
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = window.Composer;
+    return {
+      // 结构操作“即将改变 content 之前”调用：推入旧快照并清空 redo。
+      // 标准编辑器语义：撤销后又做新操作，被撤销的分支不能再重做。
+      push: function (snapshot) {
+        undoStack.push(snapshot);
+        if (undoStack.length > cap) undoStack.shift(); // 超上限丢最旧
+        redoStack.length = 0;
+      },
+      // 撤销：把“当前内容”存进 redo，弹出并返回上一个快照。空栈返回 null。
+      undo: function (current) {
+        if (undoStack.length === 0) return null;
+        redoStack.push(current);
+        if (redoStack.length > cap) redoStack.shift();
+        return undoStack.pop();
+      },
+      // 重做：把“当前内容”存回 undo，弹出并返回下一个快照。空栈返回 null。
+      redo: function (current) {
+        if (redoStack.length === 0) return null;
+        undoStack.push(current);
+        if (undoStack.length > cap) undoStack.shift();
+        return redoStack.pop();
+      },
+      canUndo: function () { return undoStack.length > 0; },
+      canRedo: function () { return redoStack.length > 0; },
+      // 清空两栈（如切换语言时）。
+      reset: function () { undoStack.length = 0; redoStack.length = 0; }
+    };
   }
-})();
+
+  /* ============================================================
+   * 导出（ES module）
+   * ============================================================ */
+  export {
+    INSERT_MODULES,
+    MODULE_BY_ID,
+    BUILTIN_SNIPPETS,
+    BUILTIN_BY_ID,
+    demoContent,
+    defaultState,
+    defaultQuickGroups,
+    newSnippetId,
+    newModuleId,
+    newQuickGroupId,
+    newQuickItemId,
+    modulesToText,
+    normalizeState,
+    estimateTokens,
+    parseBlocks,
+    patchBuiltinSnippet,
+    patchBuiltinModule,
+    escapeHtml,
+    ICON_PATHS,
+    icon,
+    hlEscape,
+    highlightInline,
+    highlightMarkdown,
+    createHistory,
+  };
