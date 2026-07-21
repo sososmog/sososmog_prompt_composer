@@ -399,8 +399,20 @@
     font-family:var(--font-mono); font-size:13px; text-align:center;
     padding:0 8px;
   }
+  [data-theme="dark"] .st-delay-input { color-scheme:dark; }
   .st-delay-input:focus { border-color:var(--amber-deep); outline:none; }
   .st-delay-unit { font-size:12px; color:var(--muted); }
+  .st-update-row { display:flex; }
+  .st-update-btn {
+    display:inline-flex; align-items:center; gap:8px;
+    height:36px; padding:0 16px; border-radius:var(--radius-sm);
+    border:1px solid var(--line-hi); background:var(--surface-inset); color:var(--text);
+    font-size:12.5px; font-weight:600; cursor:pointer;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+  }
+  .st-update-btn:hover { border-color:var(--amber-deep); color:var(--amber-hi); background:var(--surface); }
+  .st-update-btn:disabled { opacity:0.5; cursor:not-allowed; }
+  .st-update-btn svg { width:15px; height:15px; }
   .st-foot-hint { padding:2px 20px 16px; font-size:11px; color:var(--faint); }
 
   .btn-ghost-rail {
@@ -446,14 +458,27 @@
   .editor-title { font-family:var(--font-display); font-weight:600; font-size:22px; color:var(--text); letter-spacing:-0.01em; }
   .editor-sub { font-size:12px; color:var(--muted); font-family:var(--font-mono); }
 
-  .editor-settings-btn {
-    flex:none; width:44px; height:44px; border-radius:var(--radius-sm);
+  /* 浮窗 toggle 胶囊按钮：图标 + 文字，激活态用主题强调色。
+     与右上角系统窗口控制键拉开距离由 margin-right 保证。 */
+  .float-toggle {
+    flex:none; display:inline-flex; align-items:center; gap:8px;
+    height:40px; padding:0 16px; margin-right:12px; border-radius:999px;
     border:1px solid var(--line); background:var(--surface); color:var(--text-soft);
-    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap; user-select:none;
     transition:background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
   }
-  .editor-settings-btn:hover { background:var(--surface-hi); border-color:var(--line-hi); color:var(--text); }
-  .editor-settings-btn svg { width:22px; height:22px; }
+  .float-toggle:hover { background:var(--surface-hi); border-color:var(--amber-deep); color:var(--text); }
+  .float-toggle:disabled { opacity:0.5; cursor:not-allowed; }
+  .float-toggle .float-toggle-ico { display:inline-flex; align-items:center; justify-content:center; }
+  .float-toggle .float-toggle-ico svg { width:18px; height:18px; }
+  .float-toggle .ico-exit { display:none; }
+  /* 激活态（正处于浮窗模式）：强调色描边 + 柔和底色，图标/文字切换为“退出浮窗” */
+  .float-toggle[aria-pressed="true"] {
+    border-color:var(--amber); background:var(--amber-soft); color:var(--amber);
+  }
+  .float-toggle[aria-pressed="true"]:hover { border-color:var(--amber-hi); color:var(--amber-hi); }
+  .float-toggle[aria-pressed="true"] .ico-enter { display:none; }
+  .float-toggle[aria-pressed="true"] .ico-exit { display:inline; }
 
   .segmented { display:inline-flex; background:var(--surface-inset); border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; flex:none; }
   .segmented button {
@@ -612,11 +637,24 @@
 
   /* 底部：只有输出动作 */
   .editor-foot { display:flex; align-items:center; gap:12px; padding:16px 28px 20px; flex:none; }
-  .foot-hint { font-size:11.5px; color:var(--faint); margin-right:auto; }
+  /* 快捷键提示单行显示，放不下时省略号截断，绝不换行挤成多行；
+     窗口过窄时（下方 @media）整条隐藏，优先保住右侧操作按钮的整洁。 */
+  .foot-hint {
+    font-size:11.5px; color:var(--faint); margin-right:auto;
+    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    /* kbd 是 inline 元素，带边框/padding 后比纯文字行盒高，
+       overflow:hidden 会按行盒裁掉它的下缘 —— 用足够的行高容纳 kbd。 */
+    line-height:24px;
+  }
   .foot-hint kbd {
     font-family:var(--font-mono); font-size:10.5px;
     background:var(--surface-hi); border:1px solid var(--line-hi); border-bottom-width:2px;
     border-radius:5px; padding:1px 6px; color:var(--text-soft);
+  }
+  @media (max-width: 1180px) {
+    /* 隐藏提示后，靠第一个操作按钮的 margin-left 把整组按钮推到右侧 */
+    .foot-hint { display:none; }
+    .editor-foot #btnClearAll { margin-left:auto; }
   }
   .btn {
     display:inline-flex; align-items:center; justify-content:center; gap:7px;

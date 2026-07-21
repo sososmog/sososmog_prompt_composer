@@ -548,7 +548,12 @@ import {
 
   $closeBtn.addEventListener('click', function () {
     if (currentWin && currentWin.hide) {
-      currentWin.hide().catch(function () {});
+      currentWin.hide().then(function () {
+        // 通知主窗口 toggle 按钮即时收起激活态，无需等到主窗口重新获得焦点
+        if (eventApi && eventApi.emit) {
+          eventApi.emit('composer-float-visibility', { visible: false }).catch(function () {});
+        }
+      }).catch(function () {});
     }
   });
 
