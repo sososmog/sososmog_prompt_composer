@@ -23,6 +23,7 @@ import {
   ICON_PATHS,
   icon,
   parseBlocks,
+  createHistory,
 } from './core.js';
 import {
   renderBlocks,
@@ -63,6 +64,37 @@ import { renderAll, applyStartupShortcut } from './events.js';
   var view = 'write'; // 'write' | 'preview'
   var saveTimer = null;
   var suppressBroadcast = false; // 收到浮窗广播触发的本地更新，不再二次广播（防回声循环）
+
+  /* ============================================================
+   * 2.1 结构级 Undo/Redo：历史栈实例 + 捕获/恢复接口
+   * ------------------------------------------------------------
+   * 栈只存在运行时内存（core.js 的 createHistory），不进 state、
+   * 不进 persistState，重启即清空。捕获时机：每个结构操作“即将改变
+   * state.content 之前”调 captureHistory()。撤销/重做走 doUndo/doRedo
+   * （在 events.js 里接快捷键），恢复内容后由 applyContentSnapshot
+   * 重渲染块视图并防抖保存。
+   *
+   * 语言切换语义：setLang 时调 history.reset() 清空两栈——快照只存
+   * 当前语言单串，跨语言复用会把别的语言的快照写回当前语言导致串味，
+   * 故切语言前先把“切换本身”入栈、切换后清空历史（详见 events.js）。
+   * ============================================================ */
+  var history = createHistory(50);
+
+  // 结构操作前：把“改动前”的当前语言 content 推入撤销栈。
+  // 正常结构操作只改当前语言，存单语言即可；若将来某操作会改到非当前
+  // 语言的内容，需另行捕获对应语言的快照（目前没有这类操作）。
+  function captureHistory() {
+    history.push(state.content[state.lang] || '');
+  }
+
+  // 撤销/重做后：用快照整体替换当前语言 content，重渲染块视图并防抖保存。
+  // 走的是与其它结构操作一致的重渲染路径（由调用方传入 rerender 回调，
+  // 避免 store 反向依赖 render/events 造成的调用时序问题）。
+  function applyContentSnapshot(snapshot, rerender) {
+    state.content[state.lang] = snapshot;
+    if (typeof rerender === 'function') rerender();
+    scheduleSave();
+  }
 
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
@@ -252,6 +284,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     } else {
       // 模块模板，或未聚焦任何块：作为新块追加
       var text = collectText();
+      captureHistory(); // 结构操作（新建块）：改动前存旧快照
       var joined = text ? (text + '\n\n' + snippet) : snippet;
       state.content[state.lang] = joined;
       renderBlocks();
@@ -278,6 +311,8 @@ import { renderAll, applyStartupShortcut } from './events.js';
     // 持久化 / 同步
     scheduleSave, persistState, restoreState,
     isEditingLocally, applyRemoteState, flushPendingRemoteState,
+    // 结构级 Undo/Redo
+    history, captureHistory, applyContentSnapshot,
     // DOM 引用
     $insertGrid, $snippetWrap, $quickWrap, $langSegmented, $viewSeg,
     $etLabel, $editorStat, $blocks, $preview,

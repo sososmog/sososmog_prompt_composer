@@ -19,6 +19,8 @@ import {
   scheduleSave,
   collectText,
   insertSnippet,
+  captureHistory,
+  history,
   $insertGrid,
   $snippetWrap,
   $etLabel,
@@ -170,6 +172,7 @@ import {
     add.innerHTML = '<span style="font-family:var(--font-mono);color:var(--amber)">+</span> 新建块';
     add.addEventListener('click', function () {
       var text = collectText();
+      captureHistory(); // 结构操作（新建块）：改动前存旧快照
       state.content[state.lang] = text ? (text + '\n\n## ') : '## ';
       renderBlocks();
       markLastBlockAsNew();
@@ -290,6 +293,10 @@ import {
     var area = card.querySelector('.block-textarea');
     // 有内容时二次确认，空块直接删
     if (area && area.value.trim() && !window.confirm('删除这个块？')) return;
+    // 结构操作（删块）：先把当前 DOM（含待删块）收回 state 再入栈，
+    // 保证快照是删除前的完整内容，撤销能原样恢复该块。
+    collectText();
+    captureHistory();
     card.remove();
     collectText();
     refreshStat();
@@ -303,6 +310,9 @@ import {
     var i = cards.indexOf(card);
     var j = i + delta;
     if (j < 0 || j >= cards.length) return;
+    // 结构操作（移动块）：越界不动，故先判边界再入栈，避免记入空操作。
+    collectText();
+    captureHistory();
     var focused = document.activeElement === card.querySelector('.block-textarea');
     if (delta < 0) $blocks.insertBefore(card, cards[j]);
     else $blocks.insertBefore(cards[j], card);
@@ -351,6 +361,11 @@ import {
   function startBlockDrag(card, ev) {
     dragBlock = card;
     document.body.style.userSelect = 'none';
+
+    // 结构操作（拖拽排序）：记下拖拽前的完整内容，松手时若顺序真的
+    // 变了才入栈；原地放回不产生历史，避免记入空操作。
+    collectText();
+    var contentBeforeDrag = state.content[state.lang] || '';
 
     // 给每个块打一个稳定 id 供 FLIP 匹配
     Array.prototype.slice.call($blocks.querySelectorAll('.block')).forEach(function (c, i) {
@@ -435,6 +450,10 @@ import {
       }
 
       collectText();
+      // 顺序真的变化了才补记历史（快照为拖拽前内容）
+      if ((state.content[state.lang] || '') !== contentBeforeDrag) {
+        history.push(contentBeforeDrag);
+      }
       scheduleSave();
       cleanupListeners();
       dragBlock = null;

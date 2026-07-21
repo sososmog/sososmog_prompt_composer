@@ -15,6 +15,9 @@ import {
   collectText,
   restoreState,
   demoContent,
+  history,
+  captureHistory,
+  applyContentSnapshot,
   fsApi,
   dialogApi,
   clipboardApi,
@@ -57,6 +60,11 @@ import {
     // 切换前把当前编辑内容存回（仅编辑模式下 DOM 才是最新）
     if (view !== 'preview') collectText();
     state.lang = lang;
+    // 语言切换：清空撤销/重做两栈。快照只存单语言 content 字符串，
+    // 既不含 lang 也无法跨语言写回，跨语言复用会导致内容串味；清空是
+    // 最简单且绝不串味的选择。代价：切语言无法撤回、切换前后各自的
+    // 历史都不保留——撤销/重做严格限定在“当前语言的本次编辑会话”内。
+    history.reset();
     renderAll();
     scheduleSave();
   }
@@ -404,6 +412,12 @@ import {
   });
 
   $btnLoadDemo.addEventListener('click', function () {
+    // 结构操作（载入模板）：改动前存旧快照。demo 会覆盖两种语言，但
+    // 快照只存当前语言 content——撤销恢复的是当前语言；非当前语言的
+    // 改动只有切语言后才可见，而切语言会清空历史，故只存当前语言即可，
+    // 与“切语言清空历史”的语义一致。
+    if (view !== 'preview') collectText();
+    captureHistory();
     state.content = demoContent();
     if (view === 'preview') setView('write');
     renderAll();
@@ -413,6 +427,7 @@ import {
 
   $btnClearAll.addEventListener('click', function () {
     if (!(state.content[state.lang] || '').trim()) { showToast('当前语言正文已经是空的'); return; }
+    captureHistory(); // 结构操作（清空正文）：改动前存旧快照
     state.content[state.lang] = '';
     if (view === 'preview') setView('write');
     renderAll();
@@ -421,11 +436,44 @@ import {
   });
 
   /* ============================================================
+   * 10.1 结构级 Undo / Redo
+   * ------------------------------------------------------------
+   * 撤销：当前 content 推入 redo 栈，弹出上一个快照恢复；重做对称。
+   * 恢复后走 renderAll 完整重渲染（含块视图 / 预览 / token 统计），
+   * 不另写渲染路径。栈空时给一个轻 toast 提示，不阻断。
+   * ============================================================ */
+  function doUndo() {
+    if (view !== 'preview') collectText(); // 恢复前把 DOM 里未收回的编辑并入当前 content
+    var snapshot = history.undo(state.content[state.lang] || '');
+    if (snapshot === null) { showToast('没有可撤销的操作'); return; }
+    applyContentSnapshot(snapshot, renderAll);
+  }
+  function doRedo() {
+    if (view !== 'preview') collectText();
+    var snapshot = history.redo(state.content[state.lang] || '');
+    if (snapshot === null) { showToast('没有可重做的操作'); return; }
+    applyContentSnapshot(snapshot, renderAll);
+  }
+
+  /* ============================================================
    * 11. 快捷键
    * ============================================================ */
   document.addEventListener('keydown', function (e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     var key = e.key.toLowerCase();
+    // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z：结构级撤销/重做。
+    // 边界（约束第 1、7 条）：焦点在块内 textarea 时，Ctrl+Z 交给浏览器
+    // 做原生的块内逐字撤销，不被全局处理抢走。Ctrl+Y / Ctrl+Shift+Z（重做）
+    // 浏览器对 textarea 也有原生行为，同样让位。判断依据：activeElement 是
+    // 块内 .block-textarea。其它输入框（管理浮窗里的 INPUT/TEXTAREA）里同理
+    // 让位原生撤销，不触发结构级历史。
+    if (key === 'z' || key === 'y') {
+      var ae = document.activeElement;
+      var inEditable = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable === true);
+      if (inEditable) return; // 让位浏览器原生撤销/重做（块内逐字编辑）
+      if (key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
+      if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); doRedo(); return; }
+    }
     if (key === 'l') { e.preventDefault(); toggleLang(); }
     else if (key === 's') { e.preventDefault(); doDownload(); }
     else if (key === 'p') { e.preventDefault(); toggleView(); }
@@ -489,5 +537,6 @@ import {
     ensureSettingsPanel, renderSettingsPanel, startRecordingShortcut,
     applyToggleShortcut, applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
     checkForUpdate, renderAll,
+    doUndo, doRedo,
     $stOverlay,
   };

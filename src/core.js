@@ -457,6 +457,50 @@
   }
 
   /* ============================================================
+   * 6.1 结构级 Undo/Redo 历史栈（纯逻辑，无 DOM）
+   * ------------------------------------------------------------
+   * 只负责快照字符串的入栈/出栈/裁剪，不知道 state、不碰 DOM。
+   * 一个快照 = 某次结构操作发生前的 state.content[lang] 字符串。
+   * 捕获/恢复/重渲染的时机由 UI 层（store/render/events）驱动。
+   *
+   * 语言切换语义：见 UI 层——切语言时整体 reset() 清空两栈，避免
+   * 跨语言的快照写回当前语言导致内容串味。
+   * ============================================================ */
+  function createHistory(limit) {
+    var cap = (typeof limit === 'number' && limit > 0) ? limit : 50;
+    var undoStack = [];
+    var redoStack = [];
+
+    return {
+      // 结构操作“即将改变 content 之前”调用：推入旧快照并清空 redo。
+      // 标准编辑器语义：撤销后又做新操作，被撤销的分支不能再重做。
+      push: function (snapshot) {
+        undoStack.push(snapshot);
+        if (undoStack.length > cap) undoStack.shift(); // 超上限丢最旧
+        redoStack.length = 0;
+      },
+      // 撤销：把“当前内容”存进 redo，弹出并返回上一个快照。空栈返回 null。
+      undo: function (current) {
+        if (undoStack.length === 0) return null;
+        redoStack.push(current);
+        if (redoStack.length > cap) redoStack.shift();
+        return undoStack.pop();
+      },
+      // 重做：把“当前内容”存回 undo，弹出并返回下一个快照。空栈返回 null。
+      redo: function (current) {
+        if (redoStack.length === 0) return null;
+        undoStack.push(current);
+        if (undoStack.length > cap) undoStack.shift();
+        return redoStack.pop();
+      },
+      canUndo: function () { return undoStack.length > 0; },
+      canRedo: function () { return redoStack.length > 0; },
+      // 清空两栈（如切换语言时）。
+      reset: function () { undoStack.length = 0; redoStack.length = 0; }
+    };
+  }
+
+  /* ============================================================
    * 导出（ES module）
    * ============================================================ */
   export {
@@ -483,4 +527,5 @@
     hlEscape,
     highlightInline,
     highlightMarkdown,
+    createHistory,
   };
