@@ -437,6 +437,12 @@ import {
       $smList.appendChild(row);
       autosizeSm(text);
     });
+
+    // 同 renderQuickManager：首帧布局未就绪时 scrollHeight 读到 0，下一帧补算。
+    requestAnimationFrame(function () {
+      if (!$smList) return;
+      $smList.querySelectorAll('.sm-text').forEach(autosizeSm);
+    });
   }
 
   function mkOpBtn(iconName, title, disabled) {
@@ -452,7 +458,16 @@ import {
 
   function autosizeSm(area) {
     area.style.height = 'auto';
-    area.style.height = (area.scrollHeight) + 'px';
+    var h = area.scrollHeight;
+    // 容器尚未完成布局时 scrollHeight 可能为 0，此时别把 height 固定成 0px
+    // 导致内容被裁切；保留 auto，交给渲染末尾的 rAF 补算。
+    if (h > 0) {
+      // box-sizing:border-box 下 height 含边框，而 scrollHeight 不含，
+      // 直接用会少算上下边框那几像素、末行被切；补上边框宽度。
+      var cs = getComputedStyle(area);
+      var bw = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+      area.style.height = (h + bw) + 'px';
+    }
   }
 
   /* ---------- 快速段落管理浮窗（两级嵌套：分组 → 段落） ---------- */
@@ -593,7 +608,7 @@ import {
         var txArea = document.createElement('textarea');
         txArea.className = 'sm-text';
         txArea.value = item.text[lang] || '';
-        txArea.rows = 2;
+        txArea.rows = 1; // 高度由 autosizeSm 撑开，rows=2 会让单行内容也占两行
         txArea.placeholder = lang === 'zh' ? '插入的中文文本（以 ## 开头会作为新块追加）' : 'Inserted English text';
         txArea.addEventListener('input', function () { item.text[lang] = txArea.value; autosizeSm(txArea); scheduleSave(); renderQuick(); });
         body.appendChild(labInput);
@@ -628,6 +643,13 @@ import {
       wrap.appendChild(addItem);
 
       $qmList.appendChild(wrap);
+    });
+
+    // 首次渲染时容器可能尚未完成布局，textarea 的 scrollHeight 读到 0，
+    // 高度撑不开导致多行内容被裁切；下一帧布局就绪后统一补算一次。
+    requestAnimationFrame(function () {
+      if (!$qmList) return;
+      $qmList.querySelectorAll('.sm-text').forEach(autosizeSm);
     });
   }
 
