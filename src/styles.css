@@ -811,9 +811,11 @@
    * 新手引导（guide.js）—— 遮罩镂空 + 气泡（第一层）与轻提示（第二层）
    * z-index 1100，高于设置面板遮罩(1000) 与 toast(999)。
    * ============================================================ */
-  .gd-root { position:fixed; inset:0; z-index:1100; animation:gdFade 0.18s ease both; }
-  /* 四块遮罩围出中间镂空高亮区；镂空区不被覆盖，可正常点击穿透 */
-  .gd-mask { position:fixed; background:rgba(15,15,15,0.52); }
+  /* 容器本身不拦截点击（pointer-events:none），否则会盖住镂空高亮区、
+   * 让里面的真实元素点不到；只有四块遮罩与气泡按钮各自重新开启点击。 */
+  .gd-root { position:fixed; inset:0; z-index:1100; pointer-events:none; animation:gdFade 0.18s ease both; }
+  /* 四块遮罩围出中间镂空高亮区；镂空区不被覆盖，可正常点击穿透到下面的真实元素 */
+  .gd-mask { position:fixed; background:rgba(15,15,15,0.52); pointer-events:auto; }
   [data-theme="dark"] .gd-mask { background:rgba(0,0,0,0.62); }
   .gd-ring {
     position:fixed; border-radius:var(--radius);
@@ -821,7 +823,7 @@
     pointer-events:none; transition:left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;
   }
   .gd-bubble {
-    position:fixed; width:min(320px, calc(100vw - 24px));
+    position:fixed; pointer-events:auto; width:min(320px, calc(100vw - 24px));
     background:var(--bg-editor); border:1px solid var(--line-hi);
     border-radius:var(--radius); box-shadow:var(--shadow-toast);
     padding:14px 16px 12px; box-sizing:border-box;
