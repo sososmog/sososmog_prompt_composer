@@ -1,6 +1,6 @@
 # Composer · 模块化提示词构建工具
 
-一个用 **Tauri 2.x** 构建的跨平台桌面应用，用于「像搭积木一样」组装 AI 提示词。前端为原生 HTML/CSS/JS（无框架、无打包器），核心状态与业务逻辑抽离进独立的 `core.js`，供主窗口与浮窗共用；Rust 侧除应用壳外，还实现了全局热键、窗口记忆、自动粘贴到外部窗口等桌面能力，可打包为 macOS / Windows / Linux 桌面程序，并支持应用内自动更新。
+一个用 **Tauri 2.x** 构建的跨平台桌面应用，用于「像搭积木一样」组装 AI 提示词。前端为原生 HTML/CSS/JS（无框架、无打包器，原生 ESM 分模块），纯逻辑抽离进 `core.js`，运行时按 store（状态）/ render（渲染）/ quick（浮窗）/ events（装配入口）分层，供主窗口与浮窗共用；Rust 侧除应用壳外，还实现了全局热键、窗口记忆、自动粘贴到外部窗口等桌面能力，可打包为 macOS / Windows / Linux 桌面程序，并支持应用内自动更新。
 
 ## 功能一览
 
@@ -12,6 +12,9 @@
 - 右栏检视：变量填写、中英双语 Token 估算对比卡、编译预览（标题/正文/变量三处可直接点击内联编辑）
 - 常用句：每个模块下方内置常用句，可一键插入光标处，支持自定义增删
 - **快速段落**：独立功能区，支持自定义分组（两级结构：分组 → 段落），下拉展开后点击即可插入预设文本，可通过管理面板增删分组/段落、调整顺序
+- **一键翻译**：把当前语言正文按块整体翻译到另一种语言并写回对应槽位。内置 Google Gemini / GLM 智谱 / Groq / OpenRouter 以及「自定义（OpenAI 兼容）」端点，可在设置面板选择服务商、填 API Key 与模型；请求经 Tauri `http` 插件直发（绕开浏览器 CORS，Key 只留在应用侧），代码块会被遮罩不参与翻译，失败时不改动任何已有内容
+- **配置导入导出**：把素材库 / 变量 / 设置等打包为 `.json` 备份文件，导入时可预览摘要并按名称判重合并。**API Key 从不导出，导入也永不清空本机 Key**
+- **新手引导**：首次启动的最短路径高亮遮罩引导（含一步真实交互），以及初次接近某功能时的锚定轻提示；是否看过的标记随状态落盘
 - 复制到系统剪贴板、导出 `.md`（系统保存对话框）
 - 本地持久化：所有状态存到应用数据目录，重开应用自动恢复
 - 应用内自动更新：启动时检查 GitHub Release，发现新版本可一键下载安装并重启
@@ -103,9 +106,9 @@ sudo apt install -y \
 npm install
 ```
 
-前端 JS 依赖：`@tauri-apps/api`、`plugin-fs`、`plugin-dialog`、`plugin-clipboard-manager`、`plugin-updater`、`plugin-process`。
+前端 JS 依赖：`@tauri-apps/api`、`plugin-fs`、`plugin-dialog`、`plugin-clipboard-manager`、`plugin-updater`、`plugin-process`、`plugin-opener`；开发依赖含 `@tauri-apps/cli`、`vitest`（+ `@vitest/coverage-v8` / `jsdom`）与 `eslint`。
 
-Rust 侧依赖（`tauri`、文件系统/对话框/剪贴板/更新器/进程/全局热键/窗口状态记忆等插件，以及 Windows 下的 `windows-sys`、macOS 下的 `objc2` 系列、跨平台的按键模拟库 `enigo`）会在首次 `dev` / `build` 时由 Cargo 自动拉取，无需手动安装。
+Rust 侧依赖（`tauri`、文件系统/对话框/剪贴板/更新器/进程/全局热键/窗口状态记忆/`http` 等插件，以及 Windows 下的 `windows-sys`、macOS 下的 `objc2` 系列、跨平台的按键模拟库 `enigo`）会在首次 `dev` / `build` 时由 Cargo 自动拉取，无需手动安装。其中「一键翻译」的网络请求走 `tauri-plugin-http`，前端通过 `window.__TAURI__.http.fetch` 调用，无对应 JS 包依赖。
 
 ---
 
@@ -116,10 +119,20 @@ npm run tauri dev
 ```
 
 - 启动主窗口（标题 Composer，默认 1200×800，最小 900×600）。
-- 前端为纯静态文件，核心逻辑在 [src/core.js](src/core.js)，主窗口 UI 在 [src/index.html](src/index.html)，浮窗 UI 在 [src/float.html](src/float.html)；修改后刷新对应窗口即可看到变化。
+- 前端为纯静态文件、原生 ESM 分模块：纯逻辑在 [src/core.js](src/core.js)，主窗口按 [src/store.js](src/store.js)（状态/持久化）→ [src/render.js](src/render.js)（渲染）→ [src/quick.js](src/quick.js)（浮窗/管理面板）→ [src/events.js](src/events.js)（装配入口）分层，另有 [src/backup.js](src/backup.js)（导入导出）、[src/translate.js](src/translate.js)（一键翻译）、[src/guide.js](src/guide.js)（新手引导）与 [src/styles.css](src/styles.css)；主窗口 UI 在 [src/index.html](src/index.html)，浮窗 UI 在 [src/float.html](src/float.html)。修改后刷新对应窗口即可看到变化。
 - 按下 `Ctrl+Alt+C`（或在设置面板中自定义后的快捷键）可呼出/隐藏浮窗；浮窗默认不可见，不会随应用启动自动弹出。
 
-> 也可以直接用浏览器打开 `src/index.html` 预览主窗口界面（此时无 Tauri 环境，持久化/系统剪贴板/保存对话框/浮窗热键等能力会自动降级为浏览器行为或空操作，UI 仍可正常操作）。
+> 也可以直接用浏览器打开 `src/index.html` 预览主窗口界面（此时无 Tauri 环境，持久化/系统剪贴板/保存对话框/浮窗热键/一键翻译等能力会自动降级为浏览器行为或空操作，UI 仍可正常操作）。
+
+### 测试与静态检查
+
+纯逻辑层用 [Vitest](https://vitest.dev/) 覆盖（jsdom 环境），用例位于 [src/__tests__/](src/__tests__/)：
+
+```bash
+npm test          # vitest run，跑一遍全部用例
+npm run test:cov  # 附带 v8 覆盖率
+npm run lint      # eslint 全量检查
+```
 
 ---
 
@@ -166,15 +179,24 @@ npm run tauri icon path/to/your-icon.png
 │   └── workflows/
 │       └── release.yml       # 推送 v* tag 自动构建全平台产物 + 创建 Draft Release
 ├── src/
-│   ├── core.js                # 纯逻辑层：状态定义/持久化/默认数据，挂在 window.Composer 上，主窗口与浮窗共用
-│   ├── index.html              # 主窗口 UI：模块库/装配区/检视栏/快速段落/设置面板
-│   └── float.html              # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、自动粘贴开关
+│   ├── core.js                # 纯逻辑层（无 DOM）：预设数据/持久化归一化/token 估算/翻译请求构造 等纯函数，主窗口与浮窗、测试共用
+│   ├── store.js               # 运行时状态 + 持久化 + 双向同步 + 基础 DOM/工具（主窗口最底层）
+│   ├── render.js              # 左栏模块库 / 右栏编辑器渲染 + 块拖拽
+│   ├── quick.js               # 快速段落 + 通用管理浮窗（常用句/插入模块）+ 快速段落管理
+│   ├── events.js              # 语言/视图切换、输出、设置面板、浮窗开关、快捷键、检查更新、汇总渲染 renderAll、启动引导（装配入口）
+│   ├── backup.js              # 配置导入导出（打包/校验/合并的编排 + 弹窗 UI）
+│   ├── translate.js           # 一键翻译编排层（收集待翻块 → http 请求 → 解析写回）
+│   ├── guide.js               # 新手引导：首启动高亮遮罩引导 + 上下文轻提示
+│   ├── styles.css             # 主窗口样式
+│   ├── index.html             # 主窗口 UI：模块库/装配区/检视栏/快速段落/设置面板
+│   ├── float.html             # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、自动粘贴开关
+│   └── __tests__/             # Vitest 用例（纯逻辑层）
 └── src-tauri/
-    ├── Cargo.toml             # Rust 依赖（tauri + fs/dialog/clipboard/updater/process/global-shortcut/window-state 插件 + enigo 等）
+    ├── Cargo.toml             # Rust 依赖（tauri + fs/dialog/clipboard/updater/process/global-shortcut/window-state/http 插件 + enigo 等）
     ├── build.rs
     ├── tauri.conf.json        # 主窗口 + 浮窗定义、打包、updater 端点与公钥等配置
     ├── capabilities/
-    │   └── default.json       # 插件权限声明（fs / dialog / clipboard / updater / process，作用于 main + float 两个窗口）
+    │   └── default.json       # 插件权限声明（fs / dialog / clipboard / updater / process / opener / http，作用于 main + float 两个窗口）
     ├── icons/                 # 应用图标（发布前用 `tauri icon` 替换）
     └── src/
         ├── lib.rs             # 注册插件、全局热键、窗口状态记忆；实现 paste_to_active_window / set_toggle_shortcut 两个自定义命令
@@ -200,3 +222,5 @@ npm run tauri icon path/to/your-icon.png
 - **`Ctrl+Alt+C` 呼不出浮窗** → 该快捷键可能已被其他程序全局占用；可在设置面板改绑其他组合，注册失败会自动回滚到上一个可用热键并提示原因。
 - **浮窗自动粘贴不生效 / 报错「没有可粘贴的目标窗口」「目标窗口已关闭」** → 需先切到目标软件再呼出浮窗完成一次前台切换采样；macOS 还需额外在辅助功能中授权，且该平台实现尚未真机验证。
 - **应用内检测不到新版本** → 确认对应 tag 已推送并且 CI 已成功跑完（会生成 `latest.json` 并附加到 Release），本地网络能访问 GitHub。
+- **一键翻译报错 / 无响应** → 先在设置面板选好服务商并填写有效 API Key 与模型；请求走 `http` 插件，需能访问对应端点域名（见 `capabilities/default.json` 的 `http` 白名单）；失败会自动重试一次，仍失败则不改动已有内容。
+- **导入配置后 API Key 丢了 / 想同步 Key** → 属预期：导出永不包含 API Key、导入也永不清空本机 Key，Key 需在目标机器上手动重填。
