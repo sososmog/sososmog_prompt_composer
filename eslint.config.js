@@ -34,6 +34,7 @@ export default [
         Blob: 'readonly',
         URL: 'readonly',
         AbortController: 'readonly',
+        Event: 'readonly',
       },
     },
     rules: {
