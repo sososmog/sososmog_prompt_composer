@@ -337,7 +337,6 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         '<div class="st-layout">' +
           '<nav class="st-nav" role="tablist" aria-label="设置分类">' +
             '<button type="button" class="st-nav-item is-active" role="tab" data-tab="general" aria-selected="true">通用</button>' +
-            '<button type="button" class="st-nav-item" role="tab" data-tab="shortcut" aria-selected="false">快捷键</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="translate" aria-selected="false">翻译</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="modules" aria-selected="false">插入模块</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="snippets" aria-selected="false">常用句</button>' +
@@ -347,7 +346,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
             '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
           '</nav>' +
           '<div class="st-body">' +
-            // ---- 通用 ----
+            // ---- 通用（含粘贴前等待 + 呼出浮窗快捷键） ----
             '<section class="st-tab-page is-active" data-tab="general" role="tabpanel">' +
               '<div class="st-field">' +
                 '<span class="st-label">粘贴前等待</span>' +
@@ -357,9 +356,6 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                   '<span class="st-delay-unit">毫秒（30–500）</span>' +
                 '</div>' +
               '</div>' +
-            '</section>' +
-            // ---- 快捷键 ----
-            '<section class="st-tab-page" data-tab="shortcut" role="tabpanel">' +
               '<div class="st-field">' +
                 '<span class="st-label">呼出浮窗快捷键</span>' +
                 '<span class="st-desc">点击输入框后按下新的组合键（至少一个 Ctrl/Alt/Shift/Super + 一个主键），松开自动保存。</span>' +
@@ -490,7 +486,11 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                   '<span class="st-about-name">Composer</span>' +
                   '<span class="st-about-ver" id="stAboutVer">—</span>' +
                 '</div>' +
-                '<p class="st-about-desc">提示词构建工具。</p>' +
+                '<div class="st-about-links">' +
+                  '<a class="st-about-link" id="stAboutRepo" href="https://github.com/sososmog/sososmog_prompt_composer" target="_blank" rel="noopener noreferrer">' +
+                    icon('github') + '<span>sososmog/sososmog_prompt_composer</span>' +
+                  '</a>' +
+                '</div>' +
               '</div>' +
               '<div class="st-field">' +
                 '<span class="st-label">检查更新</span>' +
@@ -510,6 +510,19 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     bindTranslateSettings();
     bindSettingsTabs();
     loadAboutVersion();
+
+    // 关于页仓库链接：Tauri 环境用 opener 在系统浏览器打开（webview 里普通
+    // <a target=_blank> 不保证外开）；非 Tauri（浏览器预览）保持 <a> 默认行为。
+    var repoLink = $stOverlay.querySelector('#stAboutRepo');
+    if (repoLink) {
+      var opener = window.__TAURI__ && window.__TAURI__.opener;
+      if (opener && typeof opener.openUrl === 'function') {
+        repoLink.addEventListener('click', function (e) {
+          e.preventDefault();
+          opener.openUrl(repoLink.href).catch(function () {});
+        });
+      }
+    }
 
     $stOverlay.addEventListener('mousedown', function (e) {
       if (e.target === $stOverlay) closeSettingsPanel();

@@ -506,7 +506,14 @@
   .st-about-app { display:flex; align-items:baseline; gap:10px; }
   .st-about-name { font-size:16px; font-weight:700; color:var(--text); }
   .st-about-ver { font-size:12px; font-family:var(--font-mono); color:var(--muted); }
-  .st-about-desc { margin:0; font-size:12px; color:var(--muted); line-height:1.5; }
+  .st-about-links { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+  .st-about-link {
+    display:inline-flex; align-items:center; gap:7px; width:fit-content;
+    font-size:12.5px; color:var(--muted); text-decoration:none;
+    transition:color 0.14s ease;
+  }
+  .st-about-link svg { width:15px; height:15px; flex:none; }
+  .st-about-link:hover { color:var(--amber); }
 
   .st-foot-hint { flex:none; padding:8px 20px 16px; font-size:11px; color:var(--faint); border-top:1px solid var(--line-soft); transition:color 0.14s ease; }
   /* 管理 tab 下，底部状态栏复用来显示保存状态 */
