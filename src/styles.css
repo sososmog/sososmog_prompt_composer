@@ -388,6 +388,14 @@
   .st-tab-page { display:none; flex-direction:column; gap:20px; }
   .st-tab-page.is-active { display:flex; }
   .st-field { display:flex; flex-direction:column; gap:8px; }
+
+  /* ---- 管理类 tab（插入模块 / 常用句 / 快速段落）内嵌复用管理器 ---- */
+  .st-tab-manage { gap:0; }
+  /* 内嵌复用 quick.js 的 .sm-hint/.sm-list/.sm-foot，但外层已由 .st-body 负责
+   * 滚动与左右内边距，这里抵消其自带的横向 padding，避免双重缩进。 */
+  .st-manage-host .sm-hint { padding-left:0; padding-right:0; padding-top:0; }
+  .st-manage-host .sm-list { padding-left:0; padding-right:0; overflow:visible; flex:none; }
+  .st-manage-host .sm-foot { padding-left:0; padding-right:0; padding-bottom:8px; }
   .st-label { font-size:12.5px; font-weight:600; color:var(--text); }
   .st-desc { font-size:11.5px; color:var(--muted); line-height:1.5; }
   .st-path {
@@ -500,7 +508,11 @@
   .st-about-ver { font-size:12px; font-family:var(--font-mono); color:var(--muted); }
   .st-about-desc { margin:0; font-size:12px; color:var(--muted); line-height:1.5; }
 
-  .st-foot-hint { flex:none; padding:8px 20px 16px; font-size:11px; color:var(--faint); border-top:1px solid var(--line-soft); }
+  .st-foot-hint { flex:none; padding:8px 20px 16px; font-size:11px; color:var(--faint); border-top:1px solid var(--line-soft); transition:color 0.14s ease; }
+  /* 管理 tab 下，底部状态栏复用来显示保存状态 */
+  .st-foot-hint[data-status="saving"] { color:var(--muted); }
+  .st-foot-hint[data-status="saved"] { color:#4dab9a; }
+  .st-foot-hint[data-status="error"] { color:var(--danger, #eb5757); }
 
   .btn-ghost-rail {
     display:inline-flex; align-items:center; gap:6px;

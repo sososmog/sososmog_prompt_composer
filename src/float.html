@@ -168,6 +168,45 @@
   }
   .fw-empty-hint { color:var(--faint); font-size:11px; padding:2px 0; }
 
+  /* 快速段落：可折叠分组 block（同时只展开一个） */
+  .fw-quick-wrap { display:flex; flex-direction:column; gap:5px; }
+  .fw-quick-block {
+    border:1px solid var(--line); border-radius:var(--radius-sm);
+    background:var(--surface); overflow:hidden;
+  }
+  .fw-qb-head {
+    width:100%; display:flex; align-items:center; gap:6px;
+    padding:5px 9px; border:none; background:transparent; color:var(--text-soft);
+    cursor:pointer; text-align:left; font-size:11.5px;
+    transition:background 0.12s ease, color 0.12s ease;
+  }
+  .fw-qb-head:hover { background:var(--amber-soft); color:var(--amber-hi); }
+  .fw-qb-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fw-qb-count {
+    flex:none; font-family:var(--font-mono); font-size:10px; color:var(--faint);
+    background:var(--surface-inset); border-radius:999px; padding:1px 6px;
+  }
+  .fw-qb-caret { flex:none; display:flex; color:var(--faint); transition:transform 0.16s ease; }
+  .fw-qb-caret svg { width:13px; height:13px; }
+  .fw-quick-block.open .fw-qb-caret { transform:rotate(180deg); }
+  .fw-qb-list {
+    display:flex; flex-direction:column; gap:3px;
+    padding:2px 6px 7px; border-top:1px solid var(--line);
+  }
+  .fw-qb-item {
+    display:flex; flex-direction:column; gap:1px;
+    border:1px solid var(--line); border-radius:6px; background:var(--surface-inset);
+    padding:5px 8px; cursor:pointer; text-align:left; color:var(--text-soft);
+    transition:border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+  }
+  .fw-qb-item:hover { border-color:var(--amber-deep); background:var(--amber-soft); color:var(--amber-hi); }
+  .fw-qb-item-label { font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fw-qb-item-preview {
+    font-size:10px; color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .fw-qb-item:hover .fw-qb-item-preview { color:var(--amber); }
+  .fw-qb-empty { color:var(--faint); font-size:10.5px; padding:3px 2px; }
+
   /* 轻提示 toast */
   .fw-toast {
     position:absolute; left:50%; bottom:10px; transform:translateX(-50%) translateY(6px);
@@ -220,6 +259,10 @@
           <div class="fw-section-title">常用句</div>
           <div class="fw-pill-wrap" id="fwSnippetWrap"></div>
         </div>
+        <div>
+          <div class="fw-section-title">快速段落</div>
+          <div class="fw-quick-wrap" id="fwQuickWrap"></div>
+        </div>
       </div>
     </div>
 
@@ -266,6 +309,7 @@ import {
 
   var $textarea = document.getElementById('fwTextarea');
   var $editorLabel = document.getElementById('fwEditorLabel');
+  var $quickWrap = document.getElementById('fwQuickWrap');
   var $moduleWrap = document.getElementById('fwModuleWrap');
   var $snippetWrap = document.getElementById('fwSnippetWrap');
   var $copyBtn = document.getElementById('fwCopyBtn');
@@ -444,7 +488,9 @@ import {
     $autoPasteToggle.addEventListener('change', function () {
       autoPasteEnabled = $autoPasteToggle.checked;
       try { window.localStorage.setItem(AUTOPASTE_STORAGE_KEY, autoPasteEnabled ? '1' : '0'); } catch (e) { /* 存不了就算了，不影响当次使用 */ }
-      renderModuleGrid(); // 刷新“插入模块”pill 的提示文案（复制 / 复制并粘贴）
+      // 刷新 pill 的提示文案（复制 / 复制并粘贴）
+      renderModuleGrid();
+      renderQuickGroups();
     });
   }
 
@@ -532,8 +578,92 @@ import {
     });
   }
 
+  /* ============================================================
+   * 渲染：快速段落（可折叠分组，同时只展开一个）
+   * 点击段落沿用 pill 的复制/自动粘贴范式，与插入模块/常用句一致。
+   * ============================================================ */
+  var CHEVRON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+  var openQuickGroupId = null; // 当前展开的分组 id
+
+  function renderQuickGroups() {
+    if (!$quickWrap) return;
+    var lang = state.lang;
+    $quickWrap.innerHTML = '';
+
+    var visible = state.quickGroups.filter(function (g) { return !g.hidden; });
+    if (visible.length === 0) {
+      $quickWrap.innerHTML = '<span class="fw-empty-hint">暂无快速段落</span>';
+      return;
+    }
+    // 展开的分组若已不可见/被删，收起
+    if (openQuickGroupId && !visible.some(function (g) { return g.id === openQuickGroupId; })) {
+      openQuickGroupId = null;
+    }
+
+    visible.forEach(function (group) {
+      var isOpen = group.id === openQuickGroupId;
+      var block = document.createElement('div');
+      block.className = 'fw-quick-block' + (isOpen ? ' open' : '');
+
+      var head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'fw-qb-head';
+      head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      var name = group.label[lang] || group.label.zh || group.label.en || '未命名分组';
+      head.innerHTML =
+        '<span class="fw-qb-name"></span>' +
+        '<span class="fw-qb-count">' + group.items.length + '</span>' +
+        '<span class="fw-qb-caret">' + CHEVRON_SVG + '</span>';
+      head.querySelector('.fw-qb-name').textContent = name;
+      head.title = name;
+      head.addEventListener('click', function () {
+        openQuickGroupId = isOpen ? null : group.id;
+        renderQuickGroups();
+      });
+      block.appendChild(head);
+
+      if (isOpen) {
+        var list = document.createElement('div');
+        list.className = 'fw-qb-list';
+        if (group.items.length === 0) {
+          var empty = document.createElement('div');
+          empty.className = 'fw-qb-empty';
+          empty.textContent = '该分组还没有段落。';
+          list.appendChild(empty);
+        } else {
+          group.items.forEach(function (item) {
+            var text = item.text[lang] || item.text.zh || item.text.en || '';
+            var itemLabel = item.label[lang] || item.label.zh || item.label.en || '（未命名段落）';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'fw-qb-item';
+            btn.title = isAutoPasteOn() ? '点击复制并粘贴到外部窗口' : '点击复制到剪贴板';
+            var lb = document.createElement('span');
+            lb.className = 'fw-qb-item-label';
+            lb.textContent = itemLabel;
+            var pv = document.createElement('span');
+            pv.className = 'fw-qb-item-preview';
+            pv.textContent = text.replace(/\s+/g, ' ').trim();
+            btn.appendChild(lb);
+            btn.appendChild(pv);
+            btn.addEventListener('click', function () {
+              if (!text) { showToast('该段落还没有内容'); return; }
+              copyToClipboard(text, '已复制「' + itemLabel + '」', '已粘贴「' + itemLabel + '」');
+            });
+            list.appendChild(btn);
+          });
+        }
+        block.appendChild(list);
+      }
+      $quickWrap.appendChild(block);
+    });
+  }
+
   function renderAll() {
     renderEditor();
+    renderQuickGroups();
     renderModuleGrid();
     renderSnippetGrid();
   }
