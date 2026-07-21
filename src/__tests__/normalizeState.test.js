@@ -179,4 +179,25 @@ describe('normalizeState', () => {
     expect(normalizeState({ settings: { toggleShortcut: 123 } }).settings.toggleShortcut).toBe('Ctrl+Alt+C');
     expect(normalizeState({ settings: { toggleShortcut: 'Ctrl+Shift+X' } }).settings.toggleShortcut).toBe('Ctrl+Shift+X');
   });
+
+  it('老存档无 onboarding 字段时补默认（tourDone:false, hintsSeen:{}）', () => {
+    const s = normalizeState({ settings: { toggleShortcut: 'Ctrl+Alt+X' } });
+    expect(s.settings.onboarding).toEqual({ tourDone: false, hintsSeen: {} });
+  });
+
+  it('onboarding.tourDone 为 true 时保留；脏值一律回退 false', () => {
+    expect(normalizeState({ settings: { onboarding: { tourDone: true } } }).settings.onboarding.tourDone).toBe(true);
+    expect(normalizeState({ settings: { onboarding: { tourDone: 1 } } }).settings.onboarding.tourDone).toBe(false);
+    expect(normalizeState({ settings: { onboarding: { tourDone: 'yes' } } }).settings.onboarding.tourDone).toBe(false);
+    expect(normalizeState({ settings: { onboarding: 'nope' } }).settings.onboarding.tourDone).toBe(false);
+  });
+
+  it('onboarding.hintsSeen 只保留白名单 key 的 true 值', () => {
+    const s = normalizeState({
+      settings: { onboarding: { hintsSeen: { langBilingual: true, floatWindow: false, translateKey: true, evil: true } } }
+    });
+    expect(s.settings.onboarding.hintsSeen).toEqual({ langBilingual: true, translateKey: true });
+    expect(s.settings.onboarding.hintsSeen).not.toHaveProperty('evil');
+    expect(s.settings.onboarding.hintsSeen).not.toHaveProperty('floatWindow');
+  });
 });

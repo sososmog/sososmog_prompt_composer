@@ -807,6 +807,86 @@
 
   .blocks, .editor-preview { animation:viewFadeIn 0.16s ease both; }
 
+  /* ============================================================
+   * 新手引导（guide.js）—— 遮罩镂空 + 气泡（第一层）与轻提示（第二层）
+   * z-index 1100，高于设置面板遮罩(1000) 与 toast(999)。
+   * ============================================================ */
+  .gd-root { position:fixed; inset:0; z-index:1100; animation:gdFade 0.18s ease both; }
+  /* 四块遮罩围出中间镂空高亮区；镂空区不被覆盖，可正常点击穿透 */
+  .gd-mask { position:fixed; background:rgba(15,15,15,0.52); }
+  [data-theme="dark"] .gd-mask { background:rgba(0,0,0,0.62); }
+  .gd-ring {
+    position:fixed; border-radius:var(--radius);
+    box-shadow:0 0 0 2px var(--amber), 0 0 0 6px var(--amber-glow);
+    pointer-events:none; transition:left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;
+  }
+  .gd-bubble {
+    position:fixed; width:min(320px, calc(100vw - 24px));
+    background:var(--bg-editor); border:1px solid var(--line-hi);
+    border-radius:var(--radius); box-shadow:var(--shadow-toast);
+    padding:14px 16px 12px; box-sizing:border-box;
+    animation:gdPop 0.18s cubic-bezier(0.2,0,0,1) both;
+  }
+  .gd-step { font-family:var(--font-mono); font-size:11px; color:var(--amber); letter-spacing:0.04em; margin-bottom:5px; }
+  .gd-title { font-size:15px; font-weight:600; color:var(--text); margin-bottom:5px; }
+  .gd-body { font-size:12.5px; line-height:1.6; color:var(--text-soft); }
+  .gd-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:14px; }
+  .gd-nav { display:flex; gap:8px; margin-left:auto; }
+  .gd-bubble button {
+    font-family:var(--font-sans); font-size:12.5px; cursor:pointer;
+    border-radius:var(--radius-sm); padding:6px 13px; line-height:1;
+    border:1px solid var(--line-hi); background:var(--surface); color:var(--text-soft);
+    transition:background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .gd-bubble button:hover { background:var(--surface-hi); color:var(--text); }
+  .gd-skip { border-color:transparent !important; background:transparent !important; color:var(--muted) !important; padding-left:2px !important; }
+  .gd-skip:hover { color:var(--text-soft) !important; }
+  .gd-next {
+    border-color:var(--amber) !important; background:var(--amber) !important;
+    color:#fff !important; font-weight:600;
+  }
+  .gd-next:hover { background:var(--amber-hi) !important; border-color:var(--amber-hi) !important; color:#fff !important; }
+
+  /* 气泡/提示的指向箭头 */
+  .gd-arrow { position:absolute; width:12px; height:12px; background:inherit; transform:rotate(45deg); display:none; }
+  .gd-arrow-up { top:-6px; border-left:1px solid var(--line-hi); border-top:1px solid var(--line-hi); }
+  .gd-arrow-down { bottom:-6px; border-right:1px solid var(--line-hi); border-bottom:1px solid var(--line-hi); }
+
+  /* 第二层：上下文轻提示（无遮罩） */
+  .gd-hint {
+    position:fixed; z-index:1100; width:min(300px, calc(100vw - 24px));
+    background:var(--bg-editor); border:1px solid var(--line-hi);
+    border-radius:var(--radius); box-shadow:var(--shadow-toast);
+    padding:12px 14px 11px 15px; box-sizing:border-box;
+    border-left:3px solid var(--amber);
+    animation:gdPop 0.18s cubic-bezier(0.2,0,0,1) both;
+  }
+  .gd-hint-title { font-size:13px; font-weight:600; color:var(--text); margin-bottom:4px; padding-right:18px; }
+  .gd-hint-body { font-size:12px; line-height:1.6; color:var(--text-soft); }
+  .gd-hint-close {
+    position:absolute; top:7px; right:8px; width:20px; height:20px;
+    border:none; background:transparent; color:var(--muted); cursor:pointer;
+    font-size:17px; line-height:1; border-radius:5px; padding:0;
+  }
+  .gd-hint-close:hover { background:var(--surface); color:var(--text); }
+
+  /* 设置页“引导”tab 内容 */
+  .st-guide-block { margin-bottom:18px; }
+  .st-guide-block:last-child { margin-bottom:0; }
+  .st-guide-h { font-size:12px; font-weight:600; color:var(--text); margin:0 0 8px; }
+  .st-guide-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .st-guide-list li { font-size:12.5px; line-height:1.55; color:var(--text-soft); }
+  .st-guide-kbd {
+    display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0;
+    font-size:12.5px; color:var(--text-soft);
+  }
+  .st-guide-kbd dt { font-family:var(--font-mono); font-size:11.5px; color:var(--text); white-space:nowrap; }
+  .st-guide-kbd dd { margin:0; }
+  .st-guide-replay { align-self:flex-start; }
+
+  @keyframes gdFade { from { opacity:0; } to { opacity:1; } }
+  @keyframes gdPop { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+
   @media (max-width: 860px) {
     body { grid-template-columns:1fr; grid-auto-rows:auto; height:auto; min-height:100vh; overflow:auto; }
     .rail, .editor { overflow:visible; }

@@ -175,9 +175,11 @@ import { renderAll, applyStartupShortcut } from './events.js';
     });
   }
 
+  // 返回 Promise，state 就绪并首次 renderAll 完成后 resolve；
+  // events.js 据此在正确时机触发新手引导（此时演示数据卡片已渲染）。
   function restoreState() {
-    if (!tauriAvailable()) { renderAll(); return; }
-    fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
+    if (!tauriAvailable()) { renderAll(); return Promise.resolve(); }
+    return fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
       .then(function (exists) {
         if (!exists) throw new Error('no-state-file');
         return fsApi.readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
