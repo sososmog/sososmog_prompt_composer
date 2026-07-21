@@ -29,8 +29,6 @@ import {
   renderBlocks,
   markLastBlockAsNew,
   refreshStat,
-  autosize,
-  onBlocksChanged,
 } from './render.js';
 import { renderAll, applyStartupShortcut } from './events.js';
 
@@ -307,8 +305,12 @@ import { renderAll, applyStartupShortcut } from './events.js';
       var caret = before.length + insertText.length;
       el.focus();
       el.setSelectionRange(caret, caret);
-      autosize(el);
-      onBlocksChanged();
+      // 直接改 textarea.value 不会触发 input 事件，而块的高亮 overlay / 自适应
+      // 高度 / 内容回写都挂在 input handler 上（见 render.js buildBlockCard）。
+      // 派发一次 input 让那套逻辑跑起来，否则新插入文字因 overlay 未重画而“隐形”
+      // （透明 textarea 上没上色，仅选中态可见）。
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      scrollBlockIntoView(el);
     } else {
       // 模块模板，或未聚焦任何块：作为新块追加
       var text = collectText();
@@ -323,7 +325,40 @@ import { renderAll, applyStartupShortcut } from './events.js';
       var areas = $blocks.querySelectorAll('.block-textarea');
       var last = areas[areas.length - 1];
       if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
+      scrollBlockIntoView(last);
     }
+  }
+
+  // 把某个块 textarea 所在的块卡片滚进视口。
+  // 延到下一帧再滚：此前刚发生 focus()/setSelectionRange()（浏览器可能已
+  // 自行滚过一次）、autosize 改块高、新块入场动画改布局——若同步滚，读到的
+  // 是尚未稳定的旧布局，视觉上像“没生效”。rAF 后布局落定，再显式滚动。
+  // block:'nearest'：已完整可见就不动，被裁到视口外才平滑滚出，避免乱跳。
+  function scrollBlockIntoView(area) {
+    if (!area || typeof area.closest !== 'function') return;
+    var card = area.closest('.block') || area;
+    if (typeof card.scrollIntoView !== 'function') return;
+    var raf = (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame : function (fn) { return setTimeout(fn, 0); };
+    raf(function () {
+      card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }
+
+  // 给「点击后要往当前编辑块插入内容」的触发元素（左栏常用句 pill、快速段落
+  // 按钮等）挂上防夺焦：mousedown 默认行为会把焦点从块 textarea 移到被点元素，
+  // 导致 insertSnippet 里 document.activeElement 不再是块、短句被迫走“新建块”
+  // 而非“插到光标处”。在 mousedown 阶段 preventDefault 即可保住原焦点，
+  // 同时不影响 click 事件照常触发。仅当原焦点确实在某个块 textarea 时才拦，
+  // 避免影响其它正常点击聚焦。
+  function preserveBlockFocus(el) {
+    if (!el || typeof el.addEventListener !== 'function') return;
+    el.addEventListener('mousedown', function (e) {
+      var a = document.activeElement;
+      if (a && a.classList && a.classList.contains('block-textarea')) {
+        e.preventDefault();
+      }
+    });
   }
 
   // view 是可变的模块级绑定；跨模块（events.js）需要修改时走此 setter，
@@ -346,7 +381,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     $etLabel, $editorStat, $blocks, $preview,
     $btnCopy, $btnDownload, $btnClearAll, $toast,
     // 工具 / 块模型
-    showToast, collectText, insertSnippet,
+    showToast, collectText, insertSnippet, preserveBlockFocus,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
     INSERT_MODULES, MODULE_BY_ID, BUILTIN_SNIPPETS, BUILTIN_BY_ID,
     demoContent, defaultState, newSnippetId, newModuleId,

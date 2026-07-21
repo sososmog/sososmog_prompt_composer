@@ -19,6 +19,7 @@ import {
   scheduleSave,
   collectText,
   insertSnippet,
+  preserveBlockFocus,
   captureHistory,
   history,
   $insertGrid,
@@ -124,6 +125,7 @@ import {
       var t = document.createElement('span');
       t.textContent = snip.tag;
       pill.appendChild(t);
+      preserveBlockFocus(pill);
       pill.addEventListener('click', function () {
         insertSnippet(snip[lang] || snip.zh || snip.en);
       });

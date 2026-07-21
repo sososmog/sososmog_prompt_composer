@@ -21,6 +21,7 @@ import {
   scheduleSave,
   showToast,
   insertSnippet,
+  preserveBlockFocus,
   $quickWrap,
 } from './store.js';
 import {
@@ -97,6 +98,7 @@ import {
             pv.textContent = text.replace(/\s+/g, ' ').trim();
             btn.appendChild(lb);
             btn.appendChild(pv);
+            preserveBlockFocus(btn);
             btn.addEventListener('click', function () {
               if (!text) { showToast('该段落还没有内容'); return; }
               insertSnippet(text);
