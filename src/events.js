@@ -337,7 +337,6 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         '<div class="st-layout">' +
           '<nav class="st-nav" role="tablist" aria-label="设置分类">' +
             '<button type="button" class="st-nav-item is-active" role="tab" data-tab="general" aria-selected="true">通用</button>' +
-            '<button type="button" class="st-nav-item" role="tab" data-tab="shortcut" aria-selected="false">快捷键</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="translate" aria-selected="false">翻译</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="modules" aria-selected="false">插入模块</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="snippets" aria-selected="false">常用句</button>' +
@@ -347,7 +346,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
             '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
           '</nav>' +
           '<div class="st-body">' +
-            // ---- 通用 ----
+            // ---- 通用（含粘贴前等待 + 呼出浮窗快捷键） ----
             '<section class="st-tab-page is-active" data-tab="general" role="tabpanel">' +
               '<div class="st-field">' +
                 '<span class="st-label">粘贴前等待</span>' +
@@ -357,9 +356,6 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                   '<span class="st-delay-unit">毫秒（30–500）</span>' +
                 '</div>' +
               '</div>' +
-            '</section>' +
-            // ---- 快捷键 ----
-            '<section class="st-tab-page" data-tab="shortcut" role="tabpanel">' +
               '<div class="st-field">' +
                 '<span class="st-label">呼出浮窗快捷键</span>' +
                 '<span class="st-desc">点击输入框后按下新的组合键（至少一个 Ctrl/Alt/Shift/Super + 一个主键），松开自动保存。</span>' +
