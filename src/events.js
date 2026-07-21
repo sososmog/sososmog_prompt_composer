@@ -420,6 +420,12 @@ import {
                 '<span class="st-desc">再走一遍首次启动的最短路径引导。第一次不小心跳过了，随时可以从这里重看。</span>' +
                 '<div class="st-guide-block">' +
                   '<button type="button" class="st-update-btn st-guide-replay" id="stReplayTour">' + icon('rotate-ccw') + '<span>重新观看引导</span></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">重置功能小提示</span>' +
+                '<span class="st-desc">让首次切换语言、打开浮窗、点翻译时的那些小提示重新出现一次。</span>' +
+                '<div class="st-guide-block">' +
                   '<button type="button" class="st-update-btn st-guide-replay" id="stResetHints">' + icon('rotate-ccw') + '<span>重置功能小提示</span></button>' +
                 '</div>' +
               '</div>' +
