@@ -842,7 +842,7 @@
     padding:11px 20px; border-radius:999px; font-size:13px;
     display:flex; align-items:center; gap:8px;
     opacity:0; pointer-events:none; transition:opacity 0.2s ease, transform 0.2s ease;
-    z-index:999; box-shadow:var(--shadow-toast);
+    z-index:1200; box-shadow:var(--shadow-toast);
   }
   .toast::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ok); flex:none; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); animation:toastSlideIn 0.22s cubic-bezier(0.2,0,0,1); }
@@ -852,7 +852,7 @@
 
   /* ============================================================
    * 新手引导（guide.js）—— 遮罩镂空 + 气泡（第一层）与轻提示（第二层）
-   * z-index 1100，高于设置面板遮罩(1000) 与 toast(999)。
+   * z-index 1100，高于设置面板遮罩(1000)；toast(1200) 最高，任何弹层之上都可见。
    * ============================================================ */
   /* 容器本身不拦截点击（pointer-events:none），否则会盖住镂空高亮区、
    * 让里面的真实元素点不到；只有四块遮罩与气泡按钮各自重新开启点击。 */
