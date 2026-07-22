@@ -15,6 +15,7 @@ import {
   onSaveStatus,
   showToast,
   collectText,
+  commitLearningFromText,
   restoreState,
   history,
   captureHistory,
@@ -221,6 +222,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   function doCopy() {
     if (view !== 'preview') collectText();
     var text = state.content[state.lang] || '';
+    commitLearningFromText(text); // v0.2：完整用过一句，喂给行内补全自学习
     var langName = state.lang === 'zh' ? '中文' : 'English';
     if (clipboardApi && clipboardApi.writeText) {
       clipboardApi.writeText(text).then(function () { showToast('已复制' + langName + '提示词'); }).catch(function () { fallbackCopy(text, langName); });
@@ -237,6 +239,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   function doDownload() {
     if (view !== 'preview') collectText();
     var text = state.content[state.lang] || '';
+    commitLearningFromText(text); // v0.2：完整用过一句，喂给行内补全自学习
     var defaultName = state.lang === 'zh' ? 'prompt-zh.md' : 'prompt-en.md';
     var langName = state.lang === 'zh' ? '中文' : 'English';
     if (dialogApi && dialogApi.save && fsApi && fsApi.writeTextFile) {

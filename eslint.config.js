@@ -17,7 +17,7 @@ export default [
   {
     // 浏览器端主窗口模块：<script type="module"> 加载，ESM，可用浏览器全局。
     // store/render/quick/events 四个拆分文件共享此配置。
-    files: ['src/store.js', 'src/render.js', 'src/quick.js', 'src/events.js', 'src/translate.js', 'src/guide.js', 'src/backup.js'],
+    files: ['src/store.js', 'src/render.js', 'src/quick.js', 'src/events.js', 'src/translate.js', 'src/guide.js', 'src/backup.js', 'src/completion.js'],
     languageOptions: {
       ecmaVersion: 2021,
       sourceType: 'module',

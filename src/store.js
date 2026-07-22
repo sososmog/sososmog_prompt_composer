@@ -24,6 +24,8 @@ import {
   icon,
   parseBlocks,
   createHistory,
+  learn,
+  learnedSnippets,
 } from './core.js';
 import {
   renderBlocks,
@@ -392,6 +394,70 @@ import { renderAll, applyStartupShortcut } from './events.js';
   // 避免 ESM 里从外部直接给 import 的绑定赋值（不被允许）。
   function setViewValue(v) { view = v; }
 
+  /* ============================================================
+   * 2.5 行内补全：候选池合成 + 学习数据读写（供 completion.js 注入）
+   * ------------------------------------------------------------
+   * 把三处素材（快速段落 / 常用句含内置+自定义 / 已提炼 learned 片段）
+   * 按当前语言摊平成 [{ key, text, source }] 候选池。key 带语言前缀
+   * （learnKey 同款：'zh'/'en' +  + 文本），与学习数据的 key 一致，
+   * 保证 shown/accepted/bigram 能正确对上号。
+   * ============================================================ */
+  function completionPool() {
+    var lang = state.lang;
+    var pfx = (lang === 'en' ? 'en' : 'zh') + '';
+    var seen = {};
+    var pool = [];
+    function add(text, source) {
+      if (typeof text !== 'string') return;
+      var t = text;
+      if (t.trim() === '') return;
+      var key = pfx + t;
+      if (seen[key]) return;
+      seen[key] = true;
+      pool.push({ key: key, text: t, source: source });
+    }
+    // 快速段落
+    (state.quickGroups || []).forEach(function (g) {
+      (g.items || []).forEach(function (it) {
+        var tx = it.text || {};
+        add(tx[lang] || tx.zh || tx.en, 'preset');
+      });
+    });
+    // 常用句：内置（含 patch 后的当前值）+ 自定义
+    BUILTIN_SNIPPETS.forEach(function (b) {
+      var p = (state.builtinPatches && state.builtinPatches[b.id]) || {};
+      if (p.hidden) return;
+      add((p[lang] !== undefined ? p[lang] : b[lang]) || b.zh || b.en, 'preset');
+    });
+    (state.customSnippets || []).forEach(function (c) {
+      if (c.hidden) return;
+      add(c[lang] || c.zh || c.en, 'preset');
+    });
+    // 自学习提炼出的 learned 片段
+    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned'); });
+    return pool;
+  }
+
+  // 给 completion.js 用的依赖对象：读候选池 / 读写学习数据 / 读当前语言 /
+  // 复用 render 的高亮重绘（由调用方在 render.js 里注入，避免 store→render 循环）。
+  function makeCompletionDeps(renderHighlight) {
+    return {
+      getPool: completionPool,
+      getLearning: function () { return state.learning; },
+      onLearn: function (next) { state.learning = next; scheduleSave(); },
+      getLang: function () { return state.lang; },
+      renderHighlight: renderHighlight
+    };
+  }
+
+  // 用户“完整用过一句”（复制/下载正文）时喂给学习引擎，累计 rawCounts、
+  // 达阈值自动提炼。由 events.js 的 doCopy/doDownload 调用。
+  function commitLearningFromText(text) {
+    var lines = String(text == null ? '' : text).split('\n');
+    state.learning = learn('commit', { lang: state.lang, lines: lines }, state.learning);
+    scheduleSave();
+  }
+
   export {
     // Tauri 句柄与环境
     TAURI, fsApi, dialogApi, clipboardApi, updaterApi, processApi,
@@ -409,6 +475,8 @@ import { renderAll, applyStartupShortcut } from './events.js';
     $btnCopy, $btnDownload, $btnClearAll, $toast,
     // 工具 / 块模型
     showToast, collectText, insertSnippet, preserveBlockFocus,
+    // 行内补全（v0.2）
+    completionPool, makeCompletionDeps, commitLearningFromText,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
     INSERT_MODULES, MODULE_BY_ID, BUILTIN_SNIPPETS, BUILTIN_BY_ID,
     demoContent, defaultState, newSnippetId, newModuleId,

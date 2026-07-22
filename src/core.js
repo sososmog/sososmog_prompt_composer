@@ -186,8 +186,234 @@
         pasteDelayMs: 60,
         translation: defaultTranslateSettings(),       // 翻译：LLM 提供商配置
         onboarding: defaultOnboarding()                // 新手引导：是否已完成/各上下文提示是否看过
-      }
+      },
+      learning: defaultLearning()                      // v0.2：行内补全的本地自学习数据
     };
+  }
+
+  /* ============================================================
+   * 2.0 行内补全：本地自学习数据（v0.2）
+   * ------------------------------------------------------------
+   * 三张表（全本地、进 composer-state.json，不联网、不导出）：
+   *   snippets  key -> { shown, accepted, lastUsedAt, source }
+   *             候选被展示/采纳的计数，接受率是排序主信号。
+   *   bigrams   prefixKey -> { candKey: count }
+   *             “打了某前缀词之后采纳了哪条候选”，让同一前缀按语境分推。
+   *   rawCounts rawKey -> { text, count, lang }
+   *             用户完整提交过的整行文本及频次，够阈值自动提炼成 learned 片段。
+   * key 一律带语言前缀（如 'zh文本'），中英文各学各的、互不污染。
+   * ============================================================ */
+
+  // 可调参数：打分权重 / 新片段乐观初始接受率 / 新近度半衰期 / 自提炼阈值。
+  var LEARN_W_ACCEPT = 0.5;      // 接受率权重
+  var LEARN_W_BIGRAM = 0.3;      // 上下文（bigram）关联度权重
+  var LEARN_W_RECENCY = 0.2;     // 时间新近度权重
+  var LEARN_OPTIMISTIC = 0.4;    // 无历史新片段的乐观初始接受率（否则新东西永远排不上）
+  var LEARN_JITTER = 0.02;       // 探索用的微小随机扰动幅度
+  var LEARN_RECENCY_HALFLIFE_MS = 14 * 24 * 60 * 60 * 1000; // 新近度半衰期 14 天
+  var LEARN_PROMOTE_THRESHOLD = 3; // 原始整行重复达到此次数，提炼成 learned 片段
+  var LEARN_VERSION = 1;
+
+  // key：用不可打印分隔符拼语言，避免与正文内容碰撞。
+  function learnKey(lang, text) {
+    return (lang === 'en' ? 'en' : 'zh') + '' + String(text == null ? '' : text);
+  }
+
+  function defaultLearning() {
+    return { version: LEARN_VERSION, snippets: {}, bigrams: {}, rawCounts: {} };
+  }
+
+  // 归一化：任何脏值都回退到合法结构，version 不符直接重置（学习数据可再学，无需硬迁移）。
+  function normalizeLearning(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaultLearning();
+    if (raw.version !== LEARN_VERSION) return defaultLearning();
+    var out = defaultLearning();
+
+    if (raw.snippets && typeof raw.snippets === 'object') {
+      Object.keys(raw.snippets).forEach(function (k) {
+        var r = raw.snippets[k];
+        if (!r || typeof r !== 'object') return;
+        out.snippets[k] = {
+          shown: numOr(r.shown, 0),
+          accepted: numOr(r.accepted, 0),
+          lastUsedAt: numOr(r.lastUsedAt, 0),
+          source: r.source === 'learned' ? 'learned' : 'preset'
+        };
+      });
+    }
+    if (raw.bigrams && typeof raw.bigrams === 'object') {
+      Object.keys(raw.bigrams).forEach(function (pk) {
+        var m = raw.bigrams[pk];
+        if (!m || typeof m !== 'object') return;
+        var clean = {};
+        Object.keys(m).forEach(function (ck) {
+          var n = numOr(m[ck], 0);
+          if (n > 0) clean[ck] = n;
+        });
+        if (Object.keys(clean).length) out.bigrams[pk] = clean;
+      });
+    }
+    if (raw.rawCounts && typeof raw.rawCounts === 'object') {
+      Object.keys(raw.rawCounts).forEach(function (rk) {
+        var r = raw.rawCounts[rk];
+        if (!r || typeof r !== 'object' || typeof r.text !== 'string') return;
+        out.rawCounts[rk] = {
+          text: r.text,
+          count: numOr(r.count, 0),
+          lang: r.lang === 'en' ? 'en' : 'zh'
+        };
+      });
+    }
+    return out;
+  }
+
+  function numOr(v, dflt) {
+    return (typeof v === 'number' && isFinite(v)) ? v : dflt;
+  }
+
+  /* ============================================================
+   * 2.0.1 补全引擎：四个纯函数（无 DOM，供 Vitest 覆盖）
+   * ============================================================ */
+
+  // 从候选池筛出“能接上当前行尾输入”的项。
+  // inputTail：当前行光标前、最后一个词（或整行尾）；pool：[{ key, text, source }]。
+  // v0.2 用前缀匹配（候选去掉首尾空白后以 inputTail 开头），且候选要比输入长（有内容可补）。
+  function getCandidates(inputTail, pool) {
+    var tail = String(inputTail == null ? '' : inputTail);
+    if (tail.trim() === '') return [];
+    if (!Array.isArray(pool)) return [];
+    var out = [];
+    for (var i = 0; i < pool.length; i++) {
+      var c = pool[i];
+      if (!c || typeof c.text !== 'string') continue;
+      var cand = c.text.replace(/^\s+/, '');
+      if (cand.length <= tail.length) continue;
+      if (cand.slice(0, tail.length) === tail) {
+        out.push({ key: c.key, text: c.text, source: c.source || 'preset', remainder: cand.slice(tail.length) });
+      }
+    }
+    return out;
+  }
+
+  // 给单个候选打分：接受率 / bigram 上下文 / 新近度 加权 + 微小扰动。
+  // prefixWord：inputTail 之前那个词（上下文键），用于 bigram 关联。
+  function scoreCandidate(candKey, prefixKey, learning, now, rand) {
+    var L = learning || defaultLearning();
+    now = numOr(now, Date.now());
+    var rec = L.snippets[candKey];
+
+    // 接受率：无历史给乐观初始值，否则 accepted/shown。
+    var acceptRate;
+    if (!rec || rec.shown === 0) acceptRate = LEARN_OPTIMISTIC;
+    else acceptRate = rec.accepted / rec.shown;
+
+    // 上下文关联度：该前缀下这条候选被采纳的占比。
+    var bigram = 0;
+    if (prefixKey && L.bigrams[prefixKey]) {
+      var m = L.bigrams[prefixKey];
+      var total = 0;
+      Object.keys(m).forEach(function (k) { total += m[k]; });
+      if (total > 0) bigram = (m[candKey] || 0) / total;
+    }
+
+    // 新近度：按半衰期指数衰减，越近越接近 1。
+    var recency = 0;
+    if (rec && rec.lastUsedAt > 0) {
+      var age = Math.max(0, now - rec.lastUsedAt);
+      recency = Math.pow(0.5, age / LEARN_RECENCY_HALFLIFE_MS);
+    }
+
+    var jitter = LEARN_JITTER * (typeof rand === 'function' ? rand() : Math.random());
+    return LEARN_W_ACCEPT * acceptRate + LEARN_W_BIGRAM * bigram + LEARN_W_RECENCY * recency + jitter;
+  }
+
+  // 对候选按分数降序排序，返回带 score 的新数组（不改入参）。
+  function rankCandidates(candidates, prefixKey, learning, now, rand) {
+    if (!Array.isArray(candidates)) return [];
+    return candidates
+      .map(function (c) {
+        return { key: c.key, text: c.text, source: c.source, remainder: c.remainder,
+                 score: scoreCandidate(c.key, prefixKey, learning, now, rand) };
+      })
+      .sort(function (a, b) { return b.score - a.score; });
+  }
+
+  // 纯更新学习数据：输入旧 learning，返回新 learning（深拷贝改动部分，不改入参）。
+  // action='shown' payload={candKey}
+  // action='accepted' payload={candKey, prefixKey}
+  // action='commit'   payload={lang, lines:[...]}，逐行累计 rawCounts，够阈值提炼 learned 片段
+  function learn(action, payload, learning, now) {
+    var L = normalizeLearning(learning);   // 顺带兜底，保证输出结构干净
+    now = numOr(now, Date.now());
+    payload = payload || {};
+
+    if (action === 'shown') {
+      var sk = payload.candKey;
+      if (sk) {
+        var s = L.snippets[sk] || { shown: 0, accepted: 0, lastUsedAt: 0, source: 'preset' };
+        s.shown += 1;
+        L.snippets[sk] = s;
+      }
+    } else if (action === 'accepted') {
+      var ak = payload.candKey;
+      if (ak) {
+        var a = L.snippets[ak] || { shown: 0, accepted: 0, lastUsedAt: 0, source: 'preset' };
+        a.accepted += 1;
+        if (a.shown < a.accepted) a.shown = a.accepted; // 防御：采纳不该超过展示
+        a.lastUsedAt = now;
+        L.snippets[ak] = a;
+        if (payload.prefixKey) {
+          var pk = payload.prefixKey;
+          var bm = L.bigrams[pk] || {};
+          bm[ak] = (bm[ak] || 0) + 1;
+          L.bigrams[pk] = bm;
+        }
+      }
+    } else if (action === 'commit') {
+      var lang = payload.lang === 'en' ? 'en' : 'zh';
+      var lines = Array.isArray(payload.lines) ? payload.lines : [];
+      lines.forEach(function (raw) {
+        var text = String(raw == null ? '' : raw).trim();
+        if (text.length < 4) return;           // 太短的行不学，避免噪声
+        var rk = learnKey(lang, text);
+        var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang };
+        r.count += 1;
+        L.rawCounts[rk] = r;
+        // 达阈值：提炼成 learned 片段（用同一 key，进候选池与预设平起平坐）
+        if (r.count >= LEARN_PROMOTE_THRESHOLD && !L.snippets[rk]) {
+          L.snippets[rk] = { shown: 0, accepted: 0, lastUsedAt: now, source: 'learned' };
+        }
+      });
+    }
+    return L;
+  }
+
+  // 判断光标（在 textBeforeCaret 末尾处）是否处于 Markdown 代码区，
+  // 处于代码区时补全应关闭，避免拿自然语言片段去补代码。
+  //   - 围栏 ```：数光标前出现的 ``` 次数，奇数说明当前在未闭合的围栏块内。
+  //   - 行内 `：只看光标所在当前行，本行内未闭合的反引号也算代码区。
+  function isInCodeContext(textBeforeCaret) {
+    var t = String(textBeforeCaret == null ? '' : textBeforeCaret);
+    var fences = t.match(/```/g);
+    if (fences && fences.length % 2 === 1) return true;
+    var lineStart = t.lastIndexOf('\n') + 1;
+    var curLine = t.slice(lineStart);
+    var ticks = curLine.match(/`/g);
+    if (ticks && ticks.length % 2 === 1) return true;
+    return false;
+  }
+
+  // 收集所有已提炼的 learned 片段文本（供 UI 合成候选池时取用）。
+  function learnedSnippets(learning, lang) {
+    var L = normalizeLearning(learning);
+    var want = lang === 'en' ? 'en' : 'zh';
+    var out = [];
+    Object.keys(L.snippets).forEach(function (k) {
+      if (L.snippets[k].source !== 'learned') return;
+      var r = L.rawCounts[k];
+      if (r && r.lang === want) out.push({ key: k, text: r.text, source: 'learned' });
+    });
+    return out;
   }
 
   var snippetSeq = 0;
@@ -382,6 +608,8 @@
         }
       }
     }
+
+    s.learning = normalizeLearning(raw.learning);   // v0.2：行内补全自学习数据兜底/迁移
 
     return s;
   }
@@ -1155,6 +1383,16 @@
     MODULE_BY_ID,
     BUILTIN_SNIPPETS,
     BUILTIN_BY_ID,
+    // v0.2 行内补全：自学习引擎（纯逻辑）
+    defaultLearning,
+    normalizeLearning,
+    learnKey,
+    getCandidates,
+    scoreCandidate,
+    rankCandidates,
+    learn,
+    learnedSnippets,
+    isInCodeContext,
     TRANSLATE_PROVIDERS,
     TRANSLATE_PROVIDER_BY_ID,
     defaultTranslateSettings,

@@ -756,6 +756,9 @@
   .hl-overlay .hl-quote { color:var(--muted); font-style:italic; }
   .hl-overlay .hl-link-text { color:var(--amber-hi); }
   .hl-overlay .hl-link-url { color:var(--muted); }
+  /* 行内补全 ghost text（v0.2）：追加在高亮 overlay 末尾的灰字预览。
+   * 处于 overlay 内故自动继承相同 font/line-height，接在正文与光标之后。 */
+  .hl-overlay .cmp-ghost { color:var(--faint); opacity:.75; }
 
   .block-textarea {
     position:relative; z-index:1;
