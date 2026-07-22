@@ -28,7 +28,9 @@ import {
   $editorStat,
   $blocks,
   $preview,
+  makeCompletionDeps,
 } from './store.js';
+import { attachCompletion } from './completion.js';
 
   /* ============================================================
    * 7. 渲染：左栏
@@ -260,6 +262,10 @@ import {
         moveBlock(card, e.key === 'ArrowUp' ? -1 : 1);
       }
     });
+
+    // 行内补全（v0.2）：把 ghost text 补全挂到这个块。补全层的 keydown 在此
+    // 之后注册，Tab/→/Esc 在有 ghost 时才拦截，不影响上面的 Alt+↑/↓ 移块。
+    attachCompletion(area, overlay, makeCompletionDeps(renderHighlight));
 
     wrap.appendChild(overlay);
     wrap.appendChild(area);
