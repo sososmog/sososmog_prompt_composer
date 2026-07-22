@@ -51,7 +51,7 @@ describe('buildExportBundle', () => {
     expect(b.payload.preferences.translation.apiKey).toBe('');
     expect(b.containsApiKey).toBe(false);
     // 其它翻译字段仍导出
-    expect(b.payload.preferences.translation.provider).toBe('gemini');
+    expect(b.payload.preferences.translation.provider).toBe('glm');
     expect(b.payload.preferences.toggleShortcut).toBe('Ctrl+Alt+Z');
   });
 

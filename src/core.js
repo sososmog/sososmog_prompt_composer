@@ -14,36 +14,36 @@
    * ============================================================ */
   var INSERT_MODULES = [
     { id: 'm_role', label: { zh: '角色', en: 'Role' },
-      text: { zh: '## 角色\n你是……，擅长……。', en: '## Role\nYou are …, skilled in ….' } },
+      text: { zh: '## 角色\n你是 ，擅长 。', en: '## Role\nYou are …, skilled in ….' } },
     { id: 'm_scenario', label: { zh: '场景', en: 'Scenario' },
-      text: { zh: '## 场景\n使用场景：……。目标用户是……。', en: '## Scenario\nScenario: …. Target users are ….' } },
+      text: { zh: '## 场景\n使用场景：。目标用户是 。', en: '## Scenario\nScenario: …. Target users are ….' } },
     { id: 'm_problem', label: { zh: '问题', en: 'Problem' },
-      text: { zh: '## 问题\n当前遇到的问题：……。', en: '## Problem\nThe current problem: ….' } },
+      text: { zh: '## 问题\n当前遇到的问题：。', en: '## Problem\nThe current problem: ….' } },
     { id: 'm_outcome', label: { zh: '需求效果', en: 'Outcome' },
-      text: { zh: '## 需求效果\n期望达成的效果：……。', en: '## Desired outcome\nDesired outcome: ….' } },
+      text: { zh: '## 需求效果\n期望达成的效果： 。', en: '## Desired outcome\nDesired outcome: ….' } },
     { id: 'm_solution', label: { zh: '解决方案', en: 'Solution' },
-      text: { zh: '## 解决方案\n建议的解决方案：……。', en: '## Solution\nProposed solution: ….' } },
+      text: { zh: '## 解决方案\n建议的解决方案： 。', en: '## Solution\nProposed solution: ….' } },
     { id: 'm_rules', label: { zh: '规则', en: 'Rules' },
-      text: { zh: '## 规则\n- 始终……\n- 绝不……', en: '## Rules\n- Always …\n- Never …' } },
+      text: { zh: '## 规则\n- 始终\n- 绝不', en: '## Rules\n- Always …\n- Never …' } },
     { id: 'm_workflow', label: { zh: '工作流程', en: 'Workflow' },
-      text: { zh: '## 工作流程\n1. ……\n2. ……\n3. ……', en: '## Workflow\n1. …\n2. …\n3. …' } },
+      text: { zh: '## 工作流程\n1. \n2. \n3. ', en: '## Workflow\n1. …\n2. …\n3. …' } },
     { id: 'm_format', label: { zh: '输出格式', en: 'Format' },
-      text: { zh: '## 输出格式\n以……形式输出。', en: '## Output format\nOutput in ….' } },
+      text: { zh: '## 输出格式\n以 形式输出。', en: '## Output format\nOutput in ….' } },
     { id: 'm_examples', label: { zh: '示例', en: 'Examples' },
-      text: { zh: '## 示例\n输入：……\n输出：……', en: '## Examples\nInput: …\nOutput: …' } },
+      text: { zh: '## 示例\n输入： \n输出： ', en: '## Examples\nInput: …\nOutput: …' } },
     { id: 'm_constraints', label: { zh: '约束', en: 'Constraints' },
-      text: { zh: '## 约束\n不要……。', en: '## Constraints\nDo not ….' } }
+      text: { zh: '## 约束\n不要 。', en: '## Constraints\nDo not ….' } }
   ];
   var MODULE_BY_ID = {};
   INSERT_MODULES.forEach(function (m) { MODULE_BY_ID[m.id] = m; });
 
   var BUILTIN_SNIPPETS = [
-    { id: 'b_step',     tag: '分步思考', zh: '请先一步步思考，再给出最终答案。', en: 'Think step by step, then give the final answer.', builtin: true },
-    { id: 'b_concl',    tag: '先给结论', zh: '请先给出结论，再展开说明理由。', en: 'State the conclusion first, then explain the reasoning.', builtin: true },
-    { id: 'b_concise',  tag: '保持简洁', zh: '回答请保持简洁，避免冗余表述。', en: 'Keep the answer concise and avoid redundancy.', builtin: true },
-    { id: 'b_tone',     tag: '语气专业', zh: '请使用专业、客观的语气。', en: 'Use a professional and objective tone.', builtin: true },
-    { id: 'b_example',  tag: '举例说明', zh: '请结合具体例子进行说明。', en: 'Illustrate with concrete examples.', builtin: true },
-    { id: 'b_bullets',  tag: '分点列出', zh: '请使用分点列表清晰呈现。', en: 'Present the answer as a clear bulleted list.', builtin: true },
+    { id: 'b_step',     tag: '分步思考/分析', zh: '一步步分析思考。', en: 'Think step by step, then give the final answer.', builtin: true },
+    { id: 'b_concl',    tag: '结论-理由', zh: '先给出结论，再展开说明理由。', en: 'State the conclusion first, then explain the reasoning.', builtin: true },
+    { id: 'b_concise',  tag: '保持简洁', zh: '回答保持简洁，避免冗余表述。', en: 'Keep the answer concise and avoid redundancy.', builtin: true },
+    { id: 'b_tone',     tag: '语气专业', zh: '使用专业、客观的语气。', en: 'Use a professional and objective tone.', builtin: true },
+    { id: 'b_example',  tag: '举例说明', zh: '结合具体例子进行说明。', en: 'Illustrate with concrete examples.', builtin: true },
+    { id: 'b_bullets',  tag: '分点列出', zh: '使用分点列表清晰呈现。', en: 'Present the answer as a clear bulleted list.', builtin: true },
     { id: 'b_beginner', tag: '面向新手', zh: '面向零基础用户解释。', en: 'Explain for a complete beginner.', builtin: true },
     { id: 'b_nofab',    tag: '不要编造', zh: '不确定时如实说明，不要编造。', en: 'If uncertain, say so — do not make things up.', builtin: true },
     { id: 'b_md',       tag: 'Markdown', zh: '请使用 Markdown 格式输出。', en: 'Format the output using Markdown.', builtin: true },
@@ -52,10 +52,40 @@
   var BUILTIN_BY_ID = {};
   BUILTIN_SNIPPETS.forEach(function (b) { BUILTIN_BY_ID[b.id] = b; });
 
+  // 内置的“自定义常用句”种子：区别于 BUILTIN_SNIPPETS（不可删、只能改），
+  // 这些是以自定义句身份写入 state.customSnippets 的，用户可完全增删改。
+  // ID 用稳定的可读 slug，snippetOrder 里按需穿插在内置句之间。
+  function defaultCustomSnippets() {
+    return [
+      { id: 'c_face_user', tag: '面向用户', zh: '你面向的是没有技术背景的用户。', en: '', builtin: false, hidden: false },
+      { id: 'c_confirm',   tag: '二次确认', zh: '不确定和不清楚的地方，需要向我确认。', en: '', builtin: false, hidden: false },
+      { id: 'c_bg',        tag: '背景',     zh: '背景如下：\n', en: '', builtin: false, hidden: false },
+      { id: 'c_req',       tag: '需求',     zh: '我要实现的需求如下：\n', en: '', builtin: false, hidden: false },
+      { id: 'c_scene',     tag: '场景',     zh: '用户使用的场景如下：\n', en: '', builtin: false, hidden: false },
+      { id: 'c_divider',   tag: '---',      zh: '------\n', en: '', builtin: false, hidden: false }
+    ];
+  }
+
   // 快速段落：两级结构（分组 → 段落）。作为用户可完全增删改的数据，
   // 首次运行时以下面这些分组作为种子写入 state.quickGroups。
   function defaultQuickGroups() {
     return [
+      { id: 'qg_git', label: { zh: 'Git', en: 'New group' }, hidden: false, items: [
+        { id: 'qi_cp', label: { zh: 'cp', en: 'New paragraph' },
+          text: { zh: 'commit and push. ', en: '' } },
+        { id: 'qi_update', label: { zh: 'update', en: 'New paragraph' },
+          text: { zh: 'update the memory.', en: '' } },
+        { id: 'qi_umcp', label: { zh: 'um cp', en: 'New paragraph' },
+          text: { zh: 'update the memory, then commit and push.', en: '' } },
+        { id: 'qi_pr', label: { zh: 'pr', en: 'New paragraph' },
+          text: { zh: 'create pr.', en: '' } },
+        { id: 'qi_merge', label: { zh: 'merge to ', en: 'New paragraph' },
+          text: { zh: 'merge to main.', en: '' } },
+        { id: 'qi_all', label: { zh: 'all', en: 'New paragraph' },
+          text: { zh: 'update the memory, then commit and push, create pr for me.', en: '' } },
+        { id: 'qi_newfeat', label: { zh: 'newFeat', en: 'New paragraph' },
+          text: { zh: '从main切一个新的分支，我要实现的需求是 ，名字你自己取，切到新的分支上。', en: '' } }
+      ] },
       { id: 'qg_open', label: { zh: '开场铺垫', en: 'Opening' }, hidden: false, items: [
         { id: 'qi_bg', label: { zh: '背景说明', en: 'Background' },
           text: { zh: '## 背景\n以下是本次任务的背景信息：……', en: '## Background\nHere is the background for this task: …' } },
@@ -83,7 +113,7 @@
   function demoContent() {
     return {
       zh: '## 👋 这是一份示例提示词\n下面几张卡片是一份填好的完整提示词，你可以直接改成自己的，或删掉重来。\n试试点左侧的「插入模块」，往正文里加一块积木 —— 这就是 Composer 的用法。\n\n## 角色\n你是一名资深全栈工程师，擅长 Web 产品开发与代码审查，尤其熟悉 TypeScript、React 与 Node.js。你的沟通对象是产品团队里经验尚浅的开发者，请用清晰、耐心的方式解释。\n\n## 场景\n我们正在一个已上线的 SaaS 后台里新增「团队成员邀请」功能：管理员可以填入邮箱发送邀请，被邀请人点击链接后加入团队并被赋予指定角色。前端用 React，后端是 Node.js + PostgreSQL。\n\n## 需求效果\n请给出这个功能的完整实现方案，包含：数据库表结构设计、后端接口（邀请、接受邀请、撤销邀请）、前端交互流程，以及邀请链接的安全性考量（如过期与防重放）。\n\n## 约束\n- 不要引入新的第三方服务，只用现有技术栈。\n- 邀请链接必须有有效期，且不可被猜测。\n- 关键代码请配简短中文注释。\n\n## 输出格式\n先用一段话概述整体思路，再分「数据库 / 后端接口 / 前端 / 安全」四部分展开，每部分附关键示例代码（TypeScript）。',
-      en: '## 👋 This is a sample prompt\nThe cards below are a complete, ready-to-use prompt. Edit them into your own, or delete and start fresh.\nTry clicking an "Insert module" on the left to add a block — that\'s how Composer works.\n\n## Role\nYou are a senior full-stack engineer, skilled in web product development and code review, especially fluent in TypeScript, React and Node.js. You are talking to a junior developer on the product team, so explain things clearly and patiently.\n\n## Scenario\nWe are adding a "team member invitation" feature to a live SaaS admin panel: an admin enters an email to send an invite, the invitee clicks the link to join the team and is assigned a given role. The frontend is React, the backend is Node.js + PostgreSQL.\n\n## Desired outcome\nProvide a complete implementation plan for this feature, covering: database schema design, backend endpoints (invite, accept invite, revoke invite), the frontend interaction flow, and security considerations for the invite link (such as expiry and replay protection).\n\n## Constraints\n- Do not introduce any new third-party services; use only the existing stack.\n- The invite link must expire and must not be guessable.\n- Add short comments to key pieces of code.\n\n## Output format\nStart with a one-paragraph overview of the approach, then break it into four parts — "Database / Backend endpoints / Frontend / Security" — each with key sample code (TypeScript).'
+      en: '## Role\nYou are a senior full-stack engineer skilled in web product development and code review. You serve as a developer for the product team.\n\n## Scenario\nScenario: Adding a new feature module to an existing SaaS product.\n\n## Expected Result\nExpected result: …\n\n## Solution\nPropose solutions in the following aspects: technology stack selection, API design, key implementation steps.\n\n## Output Format\nOutput in Markdown format, including sample code.'
     };
   }
 
@@ -114,9 +144,9 @@
   TRANSLATE_PROVIDERS.forEach(function (p) { TRANSLATE_PROVIDER_BY_ID[p.id] = p; });
 
   function defaultTranslateSettings() {
-    var g = TRANSLATE_PROVIDER_BY_ID.gemini;
+    var g = TRANSLATE_PROVIDER_BY_ID.glm;
     return {
-      provider: 'gemini',       // 预设 id，见 TRANSLATE_PROVIDERS
+      provider: 'glm',          // 预设 id，见 TRANSLATE_PROVIDERS
       protocol: g.protocol,     // 'gemini' | 'openai'
       baseUrl: g.baseUrl,
       model: g.model,
@@ -142,9 +172,11 @@
     return {
       lang: 'zh',
       content: demoContent(),
-      customSnippets: [],
+      customSnippets: defaultCustomSnippets(),         // 内置的自定义常用句种子（用户可增删改）
       builtinPatches: {},                              // { builtinId: {tag?, zh?, en?, hidden?} }
-      snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; }),
+      // 内置句在前、自定义句在后（与 normalizeState 的补齐规则一致）
+      snippetOrder: BUILTIN_SNIPPETS.map(function (b) { return b.id; })
+        .concat(defaultCustomSnippets().map(function (c) { return c.id; })),
       customModules: [],
       modulePatches: {},                               // { moduleId: {labelZh?, labelEn?, textZh?, textEn?, hidden?} }
       moduleOrder: INSERT_MODULES.map(function (m) { return m.id; }),
