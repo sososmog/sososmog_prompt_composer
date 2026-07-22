@@ -8,10 +8,10 @@ describe('normalizeState', () => {
     const s = normalizeState({});
     expect(s.lang).toBe('zh');
     expect(s.content).toEqual(defaultState().content);
-    expect(s.customSnippets).toEqual([]);
-    expect(s.snippetOrder).toEqual(BUILTIN_SNIPPETS.map((b) => b.id));
+    expect(s.customSnippets).toEqual(defaultState().customSnippets);
+    expect(s.snippetOrder).toEqual(defaultState().snippetOrder);
     expect(s.moduleOrder).toEqual(INSERT_MODULES.map((m) => m.id));
-    expect(s.quickGroups.length).toBe(3);
+    expect(s.quickGroups.length).toBe(4);
     expect(s.settings).toEqual(defaultState().settings);
   });
 
@@ -22,10 +22,10 @@ describe('normalizeState', () => {
     expect(s.settings.translation.model).toBe('m');
   });
 
-  it('缺失 translation 时补默认（Gemini）', () => {
+  it('缺失 translation 时补默认（GLM）', () => {
     const s = normalizeState({ settings: { toggleShortcut: 'Ctrl+Alt+X' } });
-    expect(s.settings.translation.provider).toBe('gemini');
-    expect(s.settings.translation.protocol).toBe('gemini');
+    expect(s.settings.translation.provider).toBe('glm');
+    expect(s.settings.translation.protocol).toBe('openai');
   });
 
   it('lang 非 en 一律归一为 zh', () => {
@@ -90,7 +90,8 @@ describe('normalizeState', () => {
     expect(s.snippetOrder[1]).toBe(b0);
     expect(s.snippetOrder).not.toContain('ghost_id');
     expect(new Set(s.snippetOrder).size).toBe(s.snippetOrder.length);
-    expect(s.snippetOrder).toHaveLength(BUILTIN_SNIPPETS.length);
+    // 缺省的 customSnippets（默认种子）也会补进顺序，故长度 = 内置 + 默认自定义句
+    expect(s.snippetOrder).toHaveLength(BUILTIN_SNIPPETS.length + defaultState().customSnippets.length);
   });
 
   it('moduleOrder 保留存档顺序、去重、剔除失效 id，并补齐新出现的 id', () => {
@@ -158,7 +159,7 @@ describe('normalizeState', () => {
 
   it('quickGroups 缺失（老存档升级）时回退默认种子分组', () => {
     const s = normalizeState({});
-    expect(s.quickGroups.map((g) => g.id)).toEqual(['qg_open', 'qg_rule', 'qg_close']);
+    expect(s.quickGroups.map((g) => g.id)).toEqual(['qg_git', 'qg_open', 'qg_rule', 'qg_close']);
   });
 
   it('settings.pasteDelayMs 非法值回退默认 60', () => {
