@@ -12,6 +12,12 @@
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-size",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor",
     {
       "identifier": "fs:allow-read-text-file",
       "allow": [

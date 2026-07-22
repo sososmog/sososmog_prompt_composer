@@ -83,6 +83,41 @@
   .fw-close:hover { background:rgba(224,62,62,0.16); color:#eb5757; }
   .fw-close svg { width:14px; height:14px; }
 
+  .fw-drag-actions { flex:none; display:inline-flex; align-items:center; gap:2px; }
+  .fw-min {
+    flex:none; width:24px; height:24px; border-radius:6px;
+    border:none; background:transparent; color:var(--muted);
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition:background 0.14s ease, color 0.14s ease;
+  }
+  .fw-min:hover { background:var(--amber-soft); color:var(--amber-hi); }
+  .fw-min svg { width:13px; height:13px; }
+
+  /* 缩小态：小圆钮铺满整窗（窗口本身 transparent，呈现为悬浮小球） */
+  .fw-mini-orb {
+    display:none;
+    position:absolute; inset:0; width:100%; height:100%;
+    border:1px solid var(--line);
+    border-radius:50%;
+    background:var(--surface);
+    color:var(--amber-hi);
+    cursor:pointer;
+    align-items:center; justify-content:center;
+    box-shadow:0 8px 24px rgba(0,0,0,0.42), 0 1px 2px rgba(0,0,0,0.3);
+    transition:background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+    -webkit-user-select:none; user-select:none;
+  }
+  .fw-mini-orb:hover { background:var(--surface-hi); border-color:var(--amber-deep); }
+  .fw-mini-orb-label {
+    font-family:var(--font-mono); font-weight:700; font-size:20px; letter-spacing:0.02em;
+    pointer-events:none;
+  }
+  .fw-card.is-mini { border-radius:50%; border-color:transparent; box-shadow:none; }
+  .fw-card.is-mini .fw-drag,
+  .fw-card.is-mini .fw-body,
+  .fw-card.is-mini .fw-toast { display:none; }
+  .fw-card.is-mini .fw-mini-orb { display:flex; }
+
   .fw-body {
     flex:1; min-height:0; display:flex; flex-direction:column;
     padding:10px 10px 8px;
@@ -249,11 +284,19 @@
 <body>
 
   <div class="fw-card" id="fwCard" style="position:relative;">
+    <button class="fw-mini-orb" id="fwMiniOrb" type="button" title="展开浮窗" aria-label="展开浮窗" data-tauri-drag-region>
+      <span class="fw-mini-orb-label">C</span>
+    </button>
     <div class="fw-drag" data-tauri-drag-region>
       <span class="fw-title" data-tauri-drag-region>COMPOSER</span>
-      <button class="fw-close" id="fwCloseBtn" type="button" title="隐藏浮窗" aria-label="隐藏浮窗">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
+      <div class="fw-drag-actions">
+        <button class="fw-min" id="fwMinBtn" type="button" title="缩小为图标" aria-label="缩小为图标">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 15 3 15 3 21"/><polyline points="15 9 21 9 21 3"/><line x1="3" y1="21" x2="10" y2="14"/><line x1="21" y1="3" x2="14" y2="10"/></svg>
+        </button>
+        <button class="fw-close" id="fwCloseBtn" type="button" title="隐藏浮窗" aria-label="隐藏浮窗">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
     </div>
 
     <div class="fw-body">
@@ -363,6 +406,9 @@ import { attachCompletion } from './completion.js';
   var $copyBtn = document.getElementById('fwCopyBtn');
   var $clearBtn = document.getElementById('fwClearBtn');
   var $closeBtn = document.getElementById('fwCloseBtn');
+  var $minBtn = document.getElementById('fwMinBtn');
+  var $orb = document.getElementById('fwMiniOrb');
+  var $card = document.getElementById('fwCard');
   var $toast = document.getElementById('fwToast');
   var $autoPasteToggle = document.getElementById('fwAutoPasteToggle');
 
@@ -847,6 +893,68 @@ import { attachCompletion } from './completion.js';
       }).catch(function () {});
     }
   });
+
+  /* ------------------------------------------------------------
+   * 缩小为图标 / 恢复：把整个浮窗窗口 setSize 到小圆钮尺寸，点圆钮原地恢复。
+   * 尺寸全程走逻辑像素（innerSize 是物理像素，需除以 scaleFactor），
+   * 否则高 DPI 下反复缩放会漂移。tauri.conf.json 有 minWidth/minHeight，
+   * 缩小前先 setMinSize 放开下限，恢复后再设回。
+   * ------------------------------------------------------------ */
+  var MINI = { w: 52, h: 52 };
+  var DEFAULT_MIN = { w: 300, h: 360 };   // 与 tauri.conf.json 保持一致
+  var DEFAULT_SIZE = { w: 380, h: 520 };  // 无记录时的兜底
+  var prevSize = null;
+  var isMini = false;
+  var busy = false;
+
+  // Tauri v2 的 LogicalSize：优先 dpi 命名空间，回退 window 命名空间
+  function LogicalSize(w, h) {
+    var dpi = TAURI && TAURI.dpi;
+    var winApi = TAURI && TAURI.window;
+    var Ctor = (dpi && dpi.LogicalSize) || (winApi && winApi.LogicalSize);
+    if (!Ctor) return null;
+    return new Ctor(w, h);
+  }
+
+  function collapse() {
+    if (!currentWin || isMini || busy) return;
+    if (!currentWin.setSize) { showToast('当前环境不支持缩小'); return; }
+    busy = true;
+    Promise.all([currentWin.innerSize(), currentWin.scaleFactor()]).then(function (r) {
+      var s = r[0], f = r[1] || 1;
+      prevSize = { w: Math.round(s.width / f), h: Math.round(s.height / f) };
+      var mini = LogicalSize(MINI.w, MINI.h);
+      if (!mini) throw new Error('no LogicalSize');
+      // 先放开最小尺寸下限，否则 setSize 会被 minWidth/minHeight 夹住
+      var chain = currentWin.setMinSize ? currentWin.setMinSize(mini) : Promise.resolve();
+      return chain.then(function () { return currentWin.setSize(LogicalSize(MINI.w, MINI.h)); });
+    }).then(function () {
+      isMini = true;
+      $card.classList.add('is-mini');
+    }).catch(function () {
+      showToast('缩小失败');
+    }).finally(function () { busy = false; });
+  }
+
+  function expand() {
+    if (!currentWin || !isMini || busy) return;
+    busy = true;
+    var t = prevSize || DEFAULT_SIZE;
+    currentWin.setSize(LogicalSize(t.w, t.h)).then(function () {
+      if (currentWin.setMinSize) {
+        return currentWin.setMinSize(LogicalSize(DEFAULT_MIN.w, DEFAULT_MIN.h));
+      }
+    }).then(function () {
+      isMini = false;
+      $card.classList.remove('is-mini');
+      if (currentWin.setFocus) currentWin.setFocus().catch(function () {});
+    }).catch(function () {
+      showToast('恢复失败');
+    }).finally(function () { busy = false; });
+  }
+
+  $minBtn.addEventListener('click', collapse);
+  $orb.addEventListener('click', expand);
 
   restoreState();
 })();
