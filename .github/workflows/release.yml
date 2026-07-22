@@ -42,5 +42,6 @@ jobs:
         with:
           tagName: ${{ steps.vars.outputs.tag }}
           releaseName: "Composer ${{ steps.vars.outputs.tag }}"
+          releaseBody: "本次更新详情见下方发布说明。安装包见 Assets。"
           releaseDraft: true
           prerelease: false
