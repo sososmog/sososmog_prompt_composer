@@ -225,7 +225,7 @@
 
   <div class="fw-card" id="fwCard" style="position:relative;">
     <div class="fw-drag" data-tauri-drag-region>
-      <span class="fw-title" data-tauri-drag-region>COMPOSER 浮窗</span>
+      <span class="fw-title" data-tauri-drag-region>COMPOSER</span>
       <button class="fw-close" id="fwCloseBtn" type="button" title="隐藏浮窗" aria-label="隐藏浮窗">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -475,8 +475,12 @@ import {
    * ============================================================ */
   var AUTOPASTE_STORAGE_KEY = 'composer-fw-autopaste';
   var canAutoPaste = !!(coreApi && coreApi.invoke);
-  var autoPasteEnabled = false;
-  try { autoPasteEnabled = window.localStorage.getItem(AUTOPASTE_STORAGE_KEY) === '1'; } catch (e) { autoPasteEnabled = false; }
+  // 新用户（从未存过该 key）默认开启；存过则尊重用户上次的选择（含手动关掉的 '0'）。
+  var autoPasteEnabled = true;
+  try {
+    var savedAutoPaste = window.localStorage.getItem(AUTOPASTE_STORAGE_KEY);
+    autoPasteEnabled = savedAutoPaste === null ? true : savedAutoPaste === '1';
+  } catch (e) { autoPasteEnabled = true; }
 
   if ($autoPasteToggle) {
     if (!canAutoPaste) {
