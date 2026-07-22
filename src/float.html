@@ -284,7 +284,7 @@
 <body>
 
   <div class="fw-card" id="fwCard" style="position:relative;">
-    <button class="fw-mini-orb" id="fwMiniOrb" type="button" title="展开浮窗" aria-label="展开浮窗" data-tauri-drag-region>
+    <button class="fw-mini-orb" id="fwMiniOrb" type="button" title="展开浮窗（可拖动）" aria-label="展开浮窗">
       <span class="fw-mini-orb-label">C</span>
     </button>
     <div class="fw-drag" data-tauri-drag-region>
@@ -952,7 +952,38 @@ import { attachCompletion } from './completion.js';
   }
 
   $minBtn.addEventListener('click', collapse);
-  $orb.addEventListener('click', expand);
+
+  // 小圆钮：不用 data-tauri-drag-region（那会把首次单击吞成拖拽起手，
+  // 导致需双击才恢复）。改为手动判定：按下后位移超过阈值算拖窗口、
+  // 调 startDragging；几乎没动则算点击、恢复浮窗。
+  var DRAG_THRESHOLD = 4; // px
+  $orb.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    var startX = e.clientX, startY = e.clientY;
+    var dragging = false;
+
+    function onMove(ev) {
+      if (dragging) return;
+      if (Math.abs(ev.clientX - startX) > DRAG_THRESHOLD ||
+          Math.abs(ev.clientY - startY) > DRAG_THRESHOLD) {
+        dragging = true;
+        cleanup();
+        if (currentWin && currentWin.startDragging) {
+          currentWin.startDragging().catch(function () {});
+        }
+      }
+    }
+    function onUp() {
+      cleanup();
+      if (!dragging) expand(); // 没拖动 → 视为点击，恢复浮窗
+    }
+    function cleanup() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
 
   restoreState();
 })();
