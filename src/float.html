@@ -139,6 +139,16 @@
   .fw-copy-btn:hover { border-color:var(--amber-deep); color:var(--amber-hi); }
   .fw-copy-btn svg { width:12px; height:12px; }
 
+  .fw-toolbar-right { flex:none; display:inline-flex; align-items:center; gap:6px; }
+  .fw-clear-btn {
+    flex:none; display:inline-flex; align-items:center; gap:5px;
+    border:1px solid var(--line-hi); background:var(--surface-hi); color:var(--text-soft);
+    border-radius:6px; padding:3px 9px; font-size:11px; cursor:pointer;
+    transition:border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+  }
+  .fw-clear-btn:hover { border-color:#c25f3f; color:#e08a6f; }
+  .fw-clear-btn svg { width:12px; height:12px; }
+
   .fw-textarea {
     flex:1; width:100%; min-height:0; resize:none;
     border:none; outline:none; background:transparent; color:var(--text);
@@ -225,7 +235,7 @@
 
   <div class="fw-card" id="fwCard" style="position:relative;">
     <div class="fw-drag" data-tauri-drag-region>
-      <span class="fw-title" data-tauri-drag-region>COMPOSER 浮窗</span>
+      <span class="fw-title" data-tauri-drag-region>COMPOSER</span>
       <button class="fw-close" id="fwCloseBtn" type="button" title="隐藏浮窗" aria-label="隐藏浮窗">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -242,10 +252,16 @@
               <span class="fw-autopaste-text">点击即粘贴</span>
             </label>
           </div>
-          <button class="fw-copy-btn" id="fwCopyBtn" type="button" title="复制编辑器内容">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            复制
-          </button>
+          <div class="fw-toolbar-right">
+            <button class="fw-clear-btn" id="fwClearBtn" type="button" title="清空正文" aria-label="清空正文">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+              清空
+            </button>
+            <button class="fw-copy-btn" id="fwCopyBtn" type="button" title="复制编辑器内容">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              复制
+            </button>
+          </div>
         </div>
         <textarea class="fw-textarea" id="fwTextarea" placeholder="正文内容…" spellcheck="false"></textarea>
       </div>
@@ -313,6 +329,7 @@ import {
   var $moduleWrap = document.getElementById('fwModuleWrap');
   var $snippetWrap = document.getElementById('fwSnippetWrap');
   var $copyBtn = document.getElementById('fwCopyBtn');
+  var $clearBtn = document.getElementById('fwClearBtn');
   var $closeBtn = document.getElementById('fwCloseBtn');
   var $toast = document.getElementById('fwToast');
   var $autoPasteToggle = document.getElementById('fwAutoPasteToggle');
@@ -475,8 +492,12 @@ import {
    * ============================================================ */
   var AUTOPASTE_STORAGE_KEY = 'composer-fw-autopaste';
   var canAutoPaste = !!(coreApi && coreApi.invoke);
-  var autoPasteEnabled = false;
-  try { autoPasteEnabled = window.localStorage.getItem(AUTOPASTE_STORAGE_KEY) === '1'; } catch (e) { autoPasteEnabled = false; }
+  // 新用户（从未存过该 key）默认开启；存过则尊重用户上次的选择（含手动关掉的 '0'）。
+  var autoPasteEnabled = true;
+  try {
+    var savedAutoPaste = window.localStorage.getItem(AUTOPASTE_STORAGE_KEY);
+    autoPasteEnabled = savedAutoPaste === null ? true : savedAutoPaste === '1';
+  } catch (e) { autoPasteEnabled = true; }
 
   if ($autoPasteToggle) {
     if (!canAutoPaste) {
@@ -674,6 +695,16 @@ import {
   $copyBtn.addEventListener('click', function () {
     var text = $textarea.value || '';
     copyToClipboard(text, '已复制编辑器内容');
+  });
+
+  $clearBtn.addEventListener('click', function () {
+    if (!$textarea.value) { showToast('正文已经是空的'); return; }
+    if (!window.confirm('清空当前正文？')) return;
+    $textarea.value = '';
+    state.content[state.lang] = '';
+    scheduleSave();
+    $textarea.focus();
+    showToast('已清空正文');
   });
 
   $closeBtn.addEventListener('click', function () {
