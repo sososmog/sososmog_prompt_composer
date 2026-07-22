@@ -708,8 +708,8 @@
   }
 
   .block-gutter {
-    flex:none; width:26px;
-    display:flex; flex-direction:column; align-items:center; padding-top:9px; gap:2px;
+    flex:none; width:32px;
+    display:flex; flex-direction:column; align-items:center; padding-top:9px; gap:4px;
     opacity:0; transition:opacity 0.12s ease;
   }
   .block:hover .block-gutter, .block:focus-within .block-gutter { opacity:1; }
@@ -723,11 +723,11 @@
   .block-handle:hover { color:var(--amber); background:var(--amber-soft); }
   .block-handle:active { cursor:grabbing; }
   .block-del {
-    width:22px; height:22px; border:none; background:transparent; cursor:pointer;
-    color:var(--faint); border-radius:5px; display:flex; align-items:center; justify-content:center;
+    width:28px; height:28px; border:none; background:transparent; cursor:pointer;
+    color:var(--faint); border-radius:6px; display:flex; align-items:center; justify-content:center;
     transition:color 0.12s ease, background 0.12s ease;
   }
-  .block-del svg { width:12px; height:12px; }
+  .block-del svg { width:17px; height:17px; }
   .block-del:hover { color:var(--warn); background:var(--warn-soft); }
 
   .block-body { flex:1; min-width:0; padding:4px 6px 4px 0; }
