@@ -149,11 +149,26 @@
   .fw-clear-btn:hover { border-color:#c25f3f; color:#e08a6f; }
   .fw-clear-btn svg { width:12px; height:12px; }
 
-  .fw-textarea {
-    flex:1; width:100%; min-height:0; resize:none;
-    border:none; outline:none; background:transparent; color:var(--text);
-    padding:8px 10px;
+  /* 编辑区：textarea 叠一层像素对齐的镜像 overlay。textarea 文字透明、
+     光标可见；overlay 显示正文 + 末尾灰字 ghost（行内补全预览）。
+     二者的字体/行高/padding/换行规则必须严格一致，否则 ghost 会错位。 */
+  .fw-hl-wrap { flex:1; position:relative; min-height:0; overflow:hidden; }
+  .fw-hl-overlay {
+    position:absolute; inset:0;
+    padding:8px 10px; margin:0;
     font-family:var(--font-sans); font-size:13px; line-height:1.6;
+    color:var(--text);
+    white-space:pre-wrap; word-break:break-word; overflow-wrap:break-word;
+    overflow:hidden; pointer-events:none;
+  }
+  .fw-hl-overlay .cmp-ghost { color:var(--faint); opacity:.75; }
+  .fw-textarea {
+    position:absolute; inset:0; width:100%; height:100%; min-height:0; resize:none;
+    border:none; outline:none; background:transparent;
+    color:transparent; caret-color:var(--text);
+    padding:8px 10px; margin:0;
+    font-family:var(--font-sans); font-size:13px; line-height:1.6;
+    white-space:pre-wrap; word-break:break-word; overflow-wrap:break-word;
   }
   .fw-textarea::placeholder { color:var(--faint); }
 
@@ -263,7 +278,10 @@
             </button>
           </div>
         </div>
-        <textarea class="fw-textarea" id="fwTextarea" placeholder="正文内容…" spellcheck="false"></textarea>
+        <div class="fw-hl-wrap">
+          <div class="fw-hl-overlay" id="fwHlOverlay" aria-hidden="true"></div>
+          <textarea class="fw-textarea" id="fwTextarea" placeholder="正文内容…" spellcheck="false"></textarea>
+        </div>
       </div>
 
       <div class="fw-lists">
@@ -288,11 +306,17 @@
 <script type="module">
 import {
   MODULE_BY_ID,
+  BUILTIN_SNIPPETS,
   BUILTIN_BY_ID,
   defaultState,
   normalizeState,
   escapeHtml,
+  // v0.2 行内补全：候选池摊平 + 学习引擎（纯逻辑）
+  learnKey,
+  learnedSnippets,
+  learn,
 } from './core.js';
+import { attachCompletion } from './completion.js';
 
 (function () {
   'use strict';
@@ -322,8 +346,16 @@ import {
   var state = defaultState();
   var suppressBroadcast = false; // 收到远端事件触发的本地更新，不再二次广播（防回声循环）
   var saveTimer = null;
+  // Tauri 的 emit 会把事件回送给发送方自己。补全的学习写入会显著提高广播频率，
+  // 若不过滤自我回声，编辑中收到自己刚发的广播会被暂存进 pendingRemoteState、
+  // 失焦时 flush 触发全量 renderAll，恰好打断输入。记住最近若干条自己广播出去
+  // 的 payload 序列化，listen 收到内容命中的即判为自我回声、跳过。用队列而非单值：
+  // 回声到达时机不定，两次连续保存会让单值被后者覆盖、漏过滤。（对齐主窗口 store.js）
+  var recentBroadcasts = [];
+  var RECENT_BROADCAST_MAX = 6;
 
   var $textarea = document.getElementById('fwTextarea');
+  var $hlOverlay = document.getElementById('fwHlOverlay');
   var $editorLabel = document.getElementById('fwEditorLabel');
   var $quickWrap = document.getElementById('fwQuickWrap');
   var $moduleWrap = document.getElementById('fwModuleWrap');
@@ -362,6 +394,9 @@ import {
       return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
     }).then(function () {
       if (eventApi && eventApi.emit && !suppressBroadcast) {
+        // 记录本次广播指纹（payload 即 JSON.stringify(state,null,2)），供 listen 端滤掉自我回声
+        recentBroadcasts.push(payload);
+        if (recentBroadcasts.length > RECENT_BROADCAST_MAX) recentBroadcasts.shift();
         eventApi.emit('composer-state-changed', state).catch(function () {});
       }
     }).catch(function (err) { console.warn('浮窗持久化失败:', err); });
@@ -415,6 +450,14 @@ import {
     eventApi.listen('composer-state-changed', function (evt) {
       var payload = evt && evt.payload;
       if (!payload || typeof payload !== 'object') return;
+      // 过滤自我回声：命中本窗口近期广播过的任一指纹即忽略（是自己发的，本地
+      // state 已经是它，无需再 apply，更不能在编辑中暂存后打断后续操作）。
+      var fp = JSON.stringify(payload, null, 2);
+      var hitIdx = recentBroadcasts.indexOf(fp);
+      if (hitIdx !== -1) {
+        recentBroadcasts.splice(hitIdx, 1); // 消费掉，避免误吃后续同内容的真实更新
+        return;
+      }
       if (isEditingLocally()) { pendingRemoteState = payload; return; }
       applyRemoteState(payload);
     }).catch(function () {});
@@ -431,11 +474,85 @@ import {
     if (document.activeElement !== $textarea) {
       $textarea.value = state.content[state.lang] || '';
     }
+    syncOverlay();
   }
 
   $textarea.addEventListener('input', function () {
     state.content[state.lang] = $textarea.value;
     scheduleSave();
+  });
+
+  /* ============================================================
+   * 2.5 行内补全（ghost text）：复用主窗口 completion.js 交互层。
+   * ------------------------------------------------------------
+   * 浮窗是单个不透明 textarea，没有主窗口那套透明 textarea + 高亮
+   * overlay。为满足 completion.js「往 overlay 末尾追加灰字 ghost、
+   * 靠 renderHighlight 重绘抹除」的契约，这里给 textarea 叠一层镜像
+   * overlay：textarea 文字透明只留光标，overlay 显示正文文本。浮窗不
+   * 需要 Markdown 高亮，renderHighlight 只把 overlay 内容整体重置为
+   * 转义后的正文即可（必须整体重置，否则上次的 ghost span 抹不掉）。
+   * 学习数据 state.learning 与主窗口共享同一份 composer-state.json。
+   * ============================================================ */
+
+  // overlay 与 textarea 像素对齐重绘：整体重置内容（抹掉上次 ghost）+ 同步滚动。
+  // 这就是注入给 completion.js 的 renderHighlight —— 签名 (area, overlay) 一致。
+  function renderHighlight(area, overlay) {
+    overlay.textContent = area.value;
+    overlay.scrollTop = area.scrollTop;
+    overlay.scrollLeft = area.scrollLeft;
+  }
+  // 显式同步 overlay（远端同步后 renderEditor、清空、初始化时用）。日常打字的
+  // 同步不在这里挂 input 监听——那会与 completion.js recompute 里的 renderHighlight
+  // 抢着重置 overlay、把刚追加的 ghost span 抹掉；打字时的重绘完全交给 completion.js。
+  // 这里只补 completion.js 不负责的滚动同步。
+  function syncOverlay() { renderHighlight($textarea, $hlOverlay); }
+  $textarea.addEventListener('scroll', syncOverlay);
+
+  // 候选池：把三处素材（快速段落 / 常用句含内置+自定义 / learned 片段）
+  // 按当前语言摊平成 [{ key, text, source }]。key 用 learnKey 生成，与
+  // 学习数据的 key 同源，保证 shown/accepted/bigram 对得上号。
+  // 逻辑与主窗口 store.js 的 completionPool 一致，浮窗不 import store.js，故本地重建。
+  function completionPool() {
+    var lang = state.lang;
+    var seen = {};
+    var pool = [];
+    function add(text, source) {
+      if (typeof text !== 'string') return;
+      var t = text;
+      if (t.trim() === '') return;
+      var key = learnKey(lang, t);
+      if (seen[key]) return;
+      seen[key] = true;
+      pool.push({ key: key, text: t, source: source });
+    }
+    // 快速段落
+    (state.quickGroups || []).forEach(function (g) {
+      (g.items || []).forEach(function (it) {
+        var tx = it.text || {};
+        add(tx[lang] || tx.zh || tx.en, 'preset');
+      });
+    });
+    // 常用句：内置（含 patch 后的当前值）+ 自定义
+    BUILTIN_SNIPPETS.forEach(function (b) {
+      var p = (state.builtinPatches && state.builtinPatches[b.id]) || {};
+      if (p.hidden) return;
+      add((p[lang] !== undefined ? p[lang] : b[lang]) || b.zh || b.en, 'preset');
+    });
+    (state.customSnippets || []).forEach(function (c) {
+      if (c.hidden) return;
+      add(c[lang] || c.zh || c.en, 'preset');
+    });
+    // 自学习提炼出的 learned 片段
+    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned'); });
+    return pool;
+  }
+
+  attachCompletion($textarea, $hlOverlay, {
+    getPool: completionPool,
+    getLearning: function () { return state.learning; },
+    onLearn: function (next) { state.learning = next; scheduleSave(); },
+    getLang: function () { return state.lang; },
+    renderHighlight: renderHighlight
   });
 
   /* ============================================================
@@ -539,9 +656,21 @@ import {
     }
   }
 
+  // 用户「完整用过一段文本」（复制正文 / 点击 pill 或快速段落复制粘贴）时喂给
+  // 学习引擎累计 rawCounts、达阈值自动提炼。与主窗口 store.js 的
+  // commitLearningFromText 同构；写回共享 state.learning 后 scheduleSave 广播。
+  function commitLearningFromText(text) {
+    var lines = String(text == null ? '' : text).split('\n');
+    state.learning = learn('commit', { lang: state.lang, lines: lines }, state.learning);
+    scheduleSave();
+  }
+
   /* pasteMsg 为可选参数：传了才会在自动粘贴开启时触发粘贴，
-   * 编辑器工具栏的“复制”按钮不传，保持纯复制不变。 */
+   * 编辑器工具栏的“复制”按钮不传，保持纯复制不变。
+   * 所有复制/粘贴出口都汇聚到这里，故在此统一喂学习引擎 commit —— 覆盖
+   * 复制按钮 + 插入模块 / 常用句 / 快速段落 pill（即「点击即粘贴」）双出口。 */
   function copyToClipboard(text, doneMsg, pasteMsg) {
+    commitLearningFromText(text);
     if (clipboardApi && clipboardApi.writeText) {
       clipboardApi.writeText(text).then(function () { afterCopySucceeded(doneMsg, pasteMsg); }).catch(function () { fallbackCopy(text, doneMsg, pasteMsg); });
     } else {
@@ -702,6 +831,7 @@ import {
     if (!window.confirm('清空当前正文？')) return;
     $textarea.value = '';
     state.content[state.lang] = '';
+    syncOverlay();
     scheduleSave();
     $textarea.focus();
     showToast('已清空正文');
