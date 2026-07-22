@@ -897,11 +897,10 @@ import { attachCompletion } from './completion.js';
   /* ------------------------------------------------------------
    * 缩小为图标 / 恢复：把整个浮窗窗口 setSize 到小圆钮尺寸，点圆钮原地恢复。
    * 尺寸全程走逻辑像素（innerSize 是物理像素，需除以 scaleFactor），
-   * 否则高 DPI 下反复缩放会漂移。tauri.conf.json 有 minWidth/minHeight，
-   * 缩小前先 setMinSize 放开下限，恢复后再设回。
+   * 否则高 DPI 下反复缩放会漂移。tauri.conf.json 的 minWidth/minHeight
+   * 已降到 52，setSize 可直接缩到位，无需运行时 setMinSize。
    * ------------------------------------------------------------ */
   var MINI = { w: 52, h: 52 };
-  var DEFAULT_MIN = { w: 300, h: 360 };   // 与 tauri.conf.json 保持一致
   var DEFAULT_SIZE = { w: 380, h: 520 };  // 无记录时的兜底
   var prevSize = null;
   var isMini = false;
@@ -919,19 +918,21 @@ import { attachCompletion } from './completion.js';
   function collapse() {
     if (!currentWin || isMini || busy) return;
     if (!currentWin.setSize) { showToast('当前环境不支持缩小'); return; }
+    var mini = LogicalSize(MINI.w, MINI.h);
+    if (!mini) { showToast('当前环境不支持缩小'); return; }
     busy = true;
+    // 先切 UI 为圆钮（同步、不依赖窗口 API 成败），再缩窗口，避免出现
+    // “窗口已变小但内容还是完整卡片”的残缺中间态。
+    isMini = true;
+    $card.classList.add('is-mini');
     Promise.all([currentWin.innerSize(), currentWin.scaleFactor()]).then(function (r) {
       var s = r[0], f = r[1] || 1;
       prevSize = { w: Math.round(s.width / f), h: Math.round(s.height / f) };
-      var mini = LogicalSize(MINI.w, MINI.h);
-      if (!mini) throw new Error('no LogicalSize');
-      // 先放开最小尺寸下限，否则 setSize 会被 minWidth/minHeight 夹住
-      var chain = currentWin.setMinSize ? currentWin.setMinSize(mini) : Promise.resolve();
-      return chain.then(function () { return currentWin.setSize(LogicalSize(MINI.w, MINI.h)); });
-    }).then(function () {
-      isMini = true;
-      $card.classList.add('is-mini');
+      return currentWin.setSize(LogicalSize(MINI.w, MINI.h));
     }).catch(function () {
+      // 缩窗口失败则回滚 UI
+      isMini = false;
+      $card.classList.remove('is-mini');
       showToast('缩小失败');
     }).finally(function () { busy = false; });
   }
@@ -939,14 +940,11 @@ import { attachCompletion } from './completion.js';
   function expand() {
     if (!currentWin || !isMini || busy) return;
     busy = true;
+    // 同 collapse：先恢复 UI，再放大窗口
+    isMini = false;
+    $card.classList.remove('is-mini');
     var t = prevSize || DEFAULT_SIZE;
     currentWin.setSize(LogicalSize(t.w, t.h)).then(function () {
-      if (currentWin.setMinSize) {
-        return currentWin.setMinSize(LogicalSize(DEFAULT_MIN.w, DEFAULT_MIN.h));
-      }
-    }).then(function () {
-      isMini = false;
-      $card.classList.remove('is-mini');
       if (currentWin.setFocus) currentWin.setFocus().catch(function () {});
     }).catch(function () {
       showToast('恢复失败');
