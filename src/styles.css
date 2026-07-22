@@ -836,7 +836,7 @@
 
   /* Toast */
   .toast {
-    position:fixed; bottom:26px; left:calc(296px + (100vw - 296px) / 2);
+    position:fixed; bottom:26px; left:50%;
     transform:translateX(-50%) translateY(10px);
     background:var(--surface-hi); border:1px solid var(--line-hi); color:var(--text);
     padding:11px 20px; border-radius:999px; font-size:13px;
@@ -937,7 +937,6 @@
     .rail, .editor { overflow:visible; }
     .rail-scroll { overflow:visible; }
     .editor-main { min-height:60vh; }
-    .toast { left:50%; }
   }
 
   /* ============================================================
