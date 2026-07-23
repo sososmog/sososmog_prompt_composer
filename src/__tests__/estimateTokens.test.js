@@ -38,4 +38,14 @@ describe('estimateTokens', () => {
   it('CJK 扩展区间边界值（0x9fff）计入 cjk', () => {
     expect(estimateTokens('鿿')).toBe(2);
   });
+
+  it('非 BMP 字符按码点计数、不被数两次', () => {
+    // 扩展 B 汉字 U+20000 应按 CJK（×1.6）算，且与基本汉字计数一致
+    expect(estimateTokens('𠀀')).toBe(2);
+    expect(estimateTokens('𠀀𠀀𠀀𠀀𠀀')).toBe(8); // 与 5 个基本汉字相同
+    // emoji（代理对）算 1 个 other，而非 2 个：round(1/4) = 0
+    expect(estimateTokens('😀')).toBe(0);
+    // 混合：1 个扩展 B 汉字 + 4 英文 = round(1.6 + 1) = 3
+    expect(estimateTokens('𠀀abcd')).toBe(3);
+  });
 });

@@ -1024,9 +1024,13 @@
   function estimateTokens(text) {
     if (!text) return 0;
     var cjk = 0, other = 0;
-    for (var i = 0; i < text.length; i++) {
-      var code = text.codePointAt(i);
-      var isCjk = (code >= 0x3000 && code <= 0x303f) || (code >= 0x3400 && code <= 0x9fff) || (code >= 0xff00 && code <= 0xffef);
+    // for...of 按「码点」迭代（不是 UTF-16 码元），非 BMP 字符（CJK 扩展 B、
+    // emoji 等由代理对表示）才不会被数两次。
+    for (var ch of String(text)) {
+      var code = ch.codePointAt(0);
+      var isCjk = (code >= 0x3000 && code <= 0x303f) || (code >= 0x3400 && code <= 0x9fff) ||
+        (code >= 0xff00 && code <= 0xffef) ||
+        (code >= 0x20000 && code <= 0x2ffff) || (code >= 0x30000 && code <= 0x3ffff); // CJK 扩展 B~
       if (isCjk) cjk++; else other++;
     }
     return Math.round(cjk * 1.6 + other / 4);
