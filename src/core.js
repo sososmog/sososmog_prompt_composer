@@ -168,6 +168,13 @@
     return { tourDone: false, hintsSeen: {} };
   }
 
+  /* ============================================================
+   * 1.3 行内补全总开关（默认开）
+   * ============================================================ */
+  function defaultCompletionSettings() {
+    return { enabled: true };
+  }
+
   function defaultState() {
     return {
       lang: 'zh',
@@ -185,7 +192,8 @@
         toggleShortcut: 'Ctrl+Alt+C',
         pasteDelayMs: 60,
         translation: defaultTranslateSettings(),       // 翻译：LLM 提供商配置
-        onboarding: defaultOnboarding()                // 新手引导：是否已完成/各上下文提示是否看过
+        onboarding: defaultOnboarding(),                // 新手引导：是否已完成/各上下文提示是否看过
+        completion: defaultCompletionSettings()        // 行内补全（自学习）总开关，默认开
       },
       learning: defaultLearning()                      // v0.2：行内补全的本地自学习数据
     };
@@ -416,6 +424,109 @@
     return out;
   }
 
+  // 收集所有已提炼的 learned 片段 + 统计信息（供设置面板「自学习」列表展示/管理）。
+  // 不区分语言，按最近使用时间降序，供用户查看/逐条删除。
+  function learnedSnippetsForManage(learning) {
+    var L = normalizeLearning(learning);
+    var out = [];
+    Object.keys(L.snippets).forEach(function (k) {
+      var s = L.snippets[k];
+      if (s.source !== 'learned') return;
+      var r = L.rawCounts[k];
+      if (!r) return;
+      out.push({
+        key: k, text: r.text, lang: r.lang,
+        shown: s.shown, accepted: s.accepted, lastUsedAt: s.lastUsedAt
+      });
+    });
+    out.sort(function (a, b) { return b.lastUsedAt - a.lastUsedAt; });
+    return out;
+  }
+
+  // 删除单条 learned 片段：级联清掉 snippets 记录、rawCounts 原始计数、
+  // bigrams 中以它为候选词的项——否则残留的 rawCounts 计数会在下次达阈值时被重新提炼。
+  function removeLearnedSnippet(learning, key) {
+    var L = normalizeLearning(learning);
+    delete L.snippets[key];
+    delete L.rawCounts[key];
+    Object.keys(L.bigrams).forEach(function (pk) {
+      var m = L.bigrams[pk];
+      if (m && m[key] !== undefined) {
+        delete m[key];
+        if (Object.keys(m).length === 0) delete L.bigrams[pk];
+      }
+    });
+    return L;
+  }
+
+  // 清空全部自学习数据，回到初始状态。
+  function clearLearning() {
+    return defaultLearning();
+  }
+
+  /* ============================================================
+   * 2.0.2 自学习数据的独立导入 / 导出（与配置导入导出完全分离）
+   * ------------------------------------------------------------
+   * 导出：只含 learned 片段（snippets 中 source==='learned' 的）及其
+   * rawCounts 原始文本/计数，不含 bigrams（上下文关联对迁移无意义、
+   * 且体积会随词表膨胀）。导入：同 key（语言+文本）直接把计数相加，
+   * lastUsedAt 取较大值；复用 normalizeLearning 兜底脏值。
+   * ============================================================ */
+  var LEARNING_EXPORT_KIND = 'composer-learning';
+
+  function buildLearningExportBundle(learning) {
+    var L = normalizeLearning(learning);
+    var snippets = {};
+    var rawCounts = {};
+    Object.keys(L.snippets).forEach(function (k) {
+      var s = L.snippets[k];
+      if (s.source !== 'learned') return;
+      var r = L.rawCounts[k];
+      if (!r) return;
+      snippets[k] = s;
+      rawCounts[k] = r;
+    });
+    return { kind: LEARNING_EXPORT_KIND, version: LEARN_VERSION, exportedAt: new Date().toISOString(), snippets: snippets, rawCounts: rawCounts };
+  }
+
+  // 校验导入文件是否是合法的自学习数据导出文件。
+  function validateLearningImportBundle(raw) {
+    if (!raw || typeof raw !== 'object') return { ok: false, code: 'not-object' };
+    if (raw.kind !== LEARNING_EXPORT_KIND) return { ok: false, code: 'not-learning' };
+    if (raw.version !== LEARN_VERSION) return { ok: false, code: 'bad-schema' };
+    return { ok: true };
+  }
+
+  // 合并导入的自学习数据到当前 learning：同 key 计数相加、lastUsedAt 取较大值。
+  function mergeLearningImport(learning, bundle) {
+    var L = normalizeLearning(learning);
+    var incomingSnippets = (bundle && bundle.snippets && typeof bundle.snippets === 'object') ? bundle.snippets : {};
+    var incomingRaw = (bundle && bundle.rawCounts && typeof bundle.rawCounts === 'object') ? bundle.rawCounts : {};
+    var importedCount = 0;
+    Object.keys(incomingRaw).forEach(function (k) {
+      var ir = incomingRaw[k];
+      if (!ir || typeof ir.text !== 'string') return;
+      var lang = ir.lang === 'en' ? 'en' : 'zh';
+      var existingR = L.rawCounts[k];
+      L.rawCounts[k] = {
+        text: existingR ? existingR.text : ir.text,
+        count: (existingR ? existingR.count : 0) + numOr(ir.count, 0),
+        lang: lang
+      };
+
+      var is = incomingSnippets[k] || { shown: 0, accepted: 0, lastUsedAt: 0, source: 'learned' };
+      var existingS = L.snippets[k];
+      L.snippets[k] = {
+        shown: (existingS ? existingS.shown : 0) + numOr(is.shown, 0),
+        accepted: (existingS ? existingS.accepted : 0) + numOr(is.accepted, 0),
+        lastUsedAt: Math.max(existingS ? existingS.lastUsedAt : 0, numOr(is.lastUsedAt, 0)),
+        source: 'learned'
+      };
+      importedCount++;
+    });
+    return { learning: L, importedCount: importedCount };
+  }
+
   var snippetSeq = 0;
   function newSnippetId() {
     snippetSeq++;
@@ -587,7 +698,7 @@
     }
 
     // 阶段4：设置项——快捷键 + 粘贴前等待时长，做好防御性校验，任何脏值都回退默认
-    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings(), onboarding: defaultOnboarding() };
+    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings(), onboarding: defaultOnboarding(), completion: defaultCompletionSettings() };
     if (raw.settings && typeof raw.settings === 'object') {
       if (typeof raw.settings.toggleShortcut === 'string' && raw.settings.toggleShortcut.trim() !== '') {
         s.settings.toggleShortcut = raw.settings.toggleShortcut;
@@ -606,6 +717,11 @@
             if (ob.hintsSeen[k] === true) s.settings.onboarding.hintsSeen[k] = true;
           });
         }
+      }
+      // 行内补全总开关：脏值一律回退默认开
+      var cp = raw.settings.completion;
+      if (cp && typeof cp === 'object') {
+        s.settings.completion.enabled = cp.enabled !== false;
       }
     }
 
@@ -1392,7 +1508,14 @@
     rankCandidates,
     learn,
     learnedSnippets,
+    learnedSnippetsForManage,
+    removeLearnedSnippet,
+    clearLearning,
+    buildLearningExportBundle,
+    validateLearningImportBundle,
+    mergeLearningImport,
     isInCodeContext,
+    defaultCompletionSettings,
     TRANSLATE_PROVIDERS,
     TRANSLATE_PROVIDER_BY_ID,
     defaultTranslateSettings,
