@@ -5,7 +5,6 @@ const {
   defaultLearning,
   normalizeLearning,
   normalizeLearnText,
-  migrateLearningV1toV2,
   learnKey,
   getCandidates,
   scoreCandidate,
