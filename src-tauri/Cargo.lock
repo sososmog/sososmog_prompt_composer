@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "composer"
-version = "0.1.1"
+version = "0.2.0-Beta"
 dependencies = [
  "enigo",
  "objc2 0.5.2",

@@ -1,7 +1,7 @@
 {
   "name": "composer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0-Beta",
   "description": "Composer - 模块化提示词构建工具（Tauri 桌面应用）",
   "type": "module",
   "scripts": {
