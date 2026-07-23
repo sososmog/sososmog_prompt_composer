@@ -11,7 +11,7 @@ export default [
       sourceType: 'module',
     },
     rules: {
-      'no-unused-vars': ['warn', { args: 'none' }],
+      'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
     },
   },
   {
@@ -38,7 +38,7 @@ export default [
       },
     },
     rules: {
-      'no-unused-vars': ['warn', { args: 'none' }],
+      'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
       'no-empty': ['warn'],
     },
   },

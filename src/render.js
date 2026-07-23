@@ -385,7 +385,6 @@ import { attachCompletion } from './completion.js';
     });
 
     var rect = card.getBoundingClientRect();
-    var startX = ev.clientX, startY = ev.clientY;
     var offsetY = ev.clientY - rect.top;
 
     // 占位块：等高，标记被拖块原位
@@ -471,16 +470,6 @@ import { attachCompletion } from './completion.js';
       dragBlock = null;
     }
 
-    function cleanup() {
-      if (placeholder && placeholder.parentNode) placeholder.remove();
-      if (dragBlock) {
-        dragBlock.classList.remove('dragging');
-        dragBlock.style.position = '';
-        dragBlock.style.top = dragBlock.style.left = dragBlock.style.width = dragBlock.style.margin = '';
-      }
-      cleanupListeners();
-      dragBlock = null;
-    }
     function cleanupListeners() {
       document.body.style.userSelect = '';
       window.removeEventListener('pointermove', onMove);

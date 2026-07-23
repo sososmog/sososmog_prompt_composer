@@ -344,7 +344,7 @@ function applyTheme(theme) {
   var isLight = theme === 'light';
   if (isLight) document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', 'dark');
-  try { localStorage.setItem('composer-theme', isLight ? 'light' : 'dark'); } catch (e) {}
+  try { localStorage.setItem('composer-theme', isLight ? 'light' : 'dark'); } catch (e) { /* 存储不可用，主题仍已生效于当前会话 */ }
 }
 
 /* ============================================================
