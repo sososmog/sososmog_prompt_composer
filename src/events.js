@@ -822,7 +822,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   var LEARNING_IMPORT_ERROR_MSG = {
     'not-object': '文件无法读取，可能已损坏或不是有效的文件。',
     'not-learning': '这不是 Composer 自学习数据的导出文件。',
-    'bad-schema': '文件版本不匹配，无法导入。'
+    'bad-schema': '文件版本信息无效，无法导入。',
+    'too-new': '此文件由更新版本的 Composer 导出，请先升级应用后再导入。'
   };
 
   function doImportLearning() {
