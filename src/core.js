@@ -486,6 +486,9 @@
       lines.forEach(function (raw) {
         var text = String(raw == null ? '' : raw).trim();
         if (text.length < 4) return;           // 太短的行不学，避免噪声
+        // 归一化后为空（整行纯标点 / 纯空白）不学：否则多条语义无关的行会
+        // 落到同一个「空内容」key 上被错误合并计数、提炼成无意义候选。
+        if (normalizeLearnText(text) === '') return;
         var rk = learnKey(lang, text);
         var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang };
         r.count += 1;
