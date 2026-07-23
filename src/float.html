@@ -558,7 +558,13 @@ import { attachCompletion } from './completion.js';
   // 按当前语言摊平成 [{ key, text, source }]。key 用 learnKey 生成，与
   // 学习数据的 key 同源，保证 shown/accepted/bigram 对得上号。
   // 逻辑与主窗口 store.js 的 completionPool 一致，浮窗不 import store.js，故本地重建。
+  // 与主窗口 store.js 的 completionEnabled 同构：读共享 state 里的总开关。
+  function completionEnabled() {
+    return !!(state.settings && state.settings.completion && state.settings.completion.enabled);
+  }
+
   function completionPool() {
+    if (!completionEnabled()) return []; // 总开关关闭：不展示候选，也就不会再产生新的 shown/accepted 记账
     var lang = state.lang;
     var seen = {};
     var pool = [];
@@ -706,6 +712,7 @@ import { attachCompletion } from './completion.js';
   // 学习引擎累计 rawCounts、达阈值自动提炼。与主窗口 store.js 的
   // commitLearningFromText 同构；写回共享 state.learning 后 scheduleSave 广播。
   function commitLearningFromText(text) {
+    if (!completionEnabled()) return; // 总开关关闭：不再记账
     var lines = String(text == null ? '' : text).split('\n');
     state.learning = learn('commit', { lang: state.lang, lines: lines }, state.learning);
     scheduleSave();

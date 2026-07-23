@@ -396,6 +396,8 @@
   .st-manage-host .sm-hint { padding-left:0; padding-right:0; padding-top:0; }
   .st-manage-host .sm-list { padding-left:0; padding-right:0; overflow:visible; flex:none; }
   .st-manage-host .sm-foot { padding-left:0; padding-right:0; padding-bottom:8px; }
+  .st-learning-host .sm-hint { padding:0; }
+  .st-learning-host .sm-list { padding:0; overflow:visible; flex:none; max-height:320px; overflow-y:auto; }
   .st-label { font-size:12.5px; font-weight:600; color:var(--text); }
   .st-desc { font-size:11.5px; color:var(--muted); line-height:1.5; }
   .st-path {
@@ -440,7 +442,13 @@
   [data-theme="dark"] .st-delay-input { color-scheme:dark; }
   .st-delay-input:focus { border-color:var(--amber-deep); outline:none; }
   .st-delay-unit { font-size:12px; color:var(--muted); }
-  .st-update-row { display:flex; }
+  .st-update-row { display:flex; gap:10px; flex-wrap:wrap; }
+  .st-danger-btn:hover { border-color:var(--warn); color:var(--warn); background:var(--surface); }
+  /* 自学习 tab：learned 片段列表，独立于 .sm-row 的 4 列布局 */
+  .st-learn-row { display:grid; grid-template-columns:1fr auto; align-items:start; }
+  .st-learn-body { gap:4px; }
+  .st-learn-text { font-size:12.5px; color:var(--text); line-height:1.5; word-break:break-word; }
+  .st-learn-meta { font-size:11px; color:var(--muted); }
   .st-update-btn {
     display:inline-flex; align-items:center; gap:8px;
     height:36px; padding:0 16px; border-radius:var(--radius-sm);

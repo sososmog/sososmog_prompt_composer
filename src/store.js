@@ -26,6 +26,12 @@ import {
   createHistory,
   learn,
   learnedSnippets,
+  learnedSnippetsForManage,
+  removeLearnedSnippet,
+  clearLearning,
+  buildLearningExportBundle,
+  validateLearningImportBundle,
+  mergeLearningImport,
 } from './core.js';
 import {
   renderBlocks,
@@ -402,7 +408,12 @@ import { renderAll, applyStartupShortcut } from './events.js';
    * （learnKey 同款：'zh'/'en' +  + 文本），与学习数据的 key 一致，
    * 保证 shown/accepted/bigram 能正确对上号。
    * ============================================================ */
+  function completionEnabled() {
+    return !!(state.settings && state.settings.completion && state.settings.completion.enabled);
+  }
+
   function completionPool() {
+    if (!completionEnabled()) return []; // 总开关关闭：不展示候选，也就不会再产生新的 shown/accepted 记账
     var lang = state.lang;
     var pfx = (lang === 'en' ? 'en' : 'zh') + '';
     var seen = {};
@@ -453,9 +464,41 @@ import { renderAll, applyStartupShortcut } from './events.js';
   // 用户“完整用过一句”（复制/下载正文）时喂给学习引擎，累计 rawCounts、
   // 达阈值自动提炼。由 events.js 的 doCopy/doDownload 调用。
   function commitLearningFromText(text) {
+    if (!completionEnabled()) return; // 总开关关闭：不再记账
     var lines = String(text == null ? '' : text).split('\n');
     state.learning = learn('commit', { lang: state.lang, lines: lines }, state.learning);
     scheduleSave();
+  }
+
+  /* ============================================================
+   * 2.0.2 自学习数据管理（设置面板「自学习」tab 用）
+   * ============================================================ */
+  function getLearnedSnippetsForManage() {
+    return learnedSnippetsForManage(state.learning);
+  }
+
+  function removeLearnedSnippetByKey(key) {
+    state.learning = removeLearnedSnippet(state.learning, key);
+    scheduleSave();
+  }
+
+  function clearAllLearning() {
+    state.learning = clearLearning();
+    scheduleSave();
+  }
+
+  function exportLearningBundle() {
+    return buildLearningExportBundle(state.learning);
+  }
+
+  // 校验 + 合并导入的自学习数据；返回 { ok, code? , importedCount? }
+  function importLearningBundle(raw) {
+    var res = validateLearningImportBundle(raw);
+    if (!res.ok) return res;
+    var merged = mergeLearningImport(state.learning, raw);
+    state.learning = merged.learning;
+    scheduleSave();
+    return { ok: true, importedCount: merged.importedCount };
   }
 
   export {
@@ -476,7 +519,10 @@ import { renderAll, applyStartupShortcut } from './events.js';
     // 工具 / 块模型
     showToast, collectText, insertSnippet, preserveBlockFocus,
     // 行内补全（v0.2）
-    completionPool, makeCompletionDeps, commitLearningFromText,
+    completionPool, makeCompletionDeps, commitLearningFromText, completionEnabled,
+    // 自学习数据管理（设置面板用）
+    getLearnedSnippetsForManage, removeLearnedSnippetByKey, clearAllLearning,
+    exportLearningBundle, importLearningBundle,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
     INSERT_MODULES, MODULE_BY_ID, BUILTIN_SNIPPETS, BUILTIN_BY_ID,
     demoContent, defaultState, newSnippetId, newModuleId,

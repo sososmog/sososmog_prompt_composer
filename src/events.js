@@ -5,7 +5,7 @@
  * 主窗口最上层：装配各按钮/全局事件，import 其余模块的能力。
  * 文件末尾执行启动逻辑（restoreState + 延迟检查更新）。
  * ============================================================ */
-import { icon, TRANSLATE_PROVIDERS, TRANSLATE_PROVIDER_BY_ID, normalizeTranslateSettings } from './core.js';
+import { icon, escapeHtml, TRANSLATE_PROVIDERS, TRANSLATE_PROVIDER_BY_ID, normalizeTranslateSettings } from './core.js';
 import { translateCurrentContent } from './translate.js';
 import {
   state,
@@ -16,6 +16,11 @@ import {
   showToast,
   collectText,
   commitLearningFromText,
+  getLearnedSnippetsForManage,
+  removeLearnedSnippetByKey,
+  clearAllLearning,
+  exportLearningBundle,
+  importLearningBundle,
   restoreState,
   history,
   captureHistory,
@@ -344,6 +349,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
             '<button type="button" class="st-nav-item" role="tab" data-tab="modules" aria-selected="false">插入模块</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="snippets" aria-selected="false">常用句</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="quick" aria-selected="false">快速段落</button>' +
+            '<button type="button" class="st-nav-item" role="tab" data-tab="learning" aria-selected="false">自学习</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="guide" aria-selected="false">引导</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="backup" aria-selected="false">备份</button>' +
             '<button type="button" class="st-nav-item" role="tab" data-tab="about" aria-selected="false">关于</button>' +
@@ -366,6 +372,11 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                   '<div class="st-recorder-box" id="stRecorderBox" tabindex="0" role="button" aria-label="点击录制快捷键"></div>' +
                   '<button type="button" class="st-recorder-clear" id="stRecorderReset" title="恢复默认（Ctrl+Alt+C）" aria-label="恢复默认快捷键">' + icon('rotate-ccw') + '</button>' +
                 '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">行内自动补全</span>' +
+                '<span class="st-desc">编辑时根据你复制/下载过的内容，用灰色提示可能想输入的句子（按 Tab 采纳）。关闭后不再展示提示、也不再学习新内容，已学到的数据不会被清除。</span>' +
+                '<label class="st-tr-check"><input type="checkbox" id="stCompletionEnabled" /><span>启用行内自动补全</span></label>' +
               '</div>' +
             '</section>' +
             // ---- 翻译 ----
@@ -416,6 +427,29 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
             // ---- 快速段落 ----
             '<section class="st-tab-page st-tab-manage" data-tab="quick" role="tabpanel">' +
               '<div class="st-manage-host" id="stQuickHost"></div>' +
+            '</section>' +
+            // ---- 自学习 ----
+            '<section class="st-tab-page" data-tab="learning" role="tabpanel">' +
+              '<div class="st-field">' +
+                '<span class="st-label">行内补全的自学习数据</span>' +
+                '<span class="st-desc">根据你复制/下载过的内容，在编辑时提示可能想输入的句子；数据只存在本机、不联网，也不随「配置导出」导出。</span>' +
+                '<div class="st-learning-host" id="stLearningHost"></div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">导入 / 导出自学习数据</span>' +
+                '<span class="st-desc">把学到的片段单独导出成一个文件，用于备份或迁移到另一台电脑；导出内容是你写过的原文，注意隐私。</span>' +
+                '<div class="st-update-row">' +
+                  '<button type="button" class="st-update-btn" id="stLearningExport">' + icon('upload') + '<span>导出为文件…</span></button>' +
+                  '<button type="button" class="st-update-btn" id="stLearningImport">' + icon('download') + '<span>从文件导入…</span></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">清空自学习数据</span>' +
+                '<span class="st-desc">清除全部已学到的片段及统计数据，此操作不可恢复。</span>' +
+                '<div class="st-update-row">' +
+                  '<button type="button" class="st-update-btn st-danger-btn" id="stLearningClear">' + icon('eraser') + '<span>清空全部</span></button>' +
+                '</div>' +
+              '</div>' +
             '</section>' +
             // ---- 引导 ----
             '<section class="st-tab-page" data-tab="guide" role="tabpanel">' +
@@ -608,6 +642,19 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       }
     });
 
+    // 通用 tab：行内自动补全总开关
+    var $stCompletionEnabled = $stOverlay.querySelector('#stCompletionEnabled');
+    if ($stCompletionEnabled) {
+      $stCompletionEnabled.addEventListener('change', function () {
+        state.settings.completion.enabled = $stCompletionEnabled.checked;
+        scheduleSave();
+        showToast($stCompletionEnabled.checked ? '已开启行内自动补全' : '已关闭行内自动补全（已学到的数据不会被清除）');
+      });
+    }
+
+    // 自学习 tab：列表 + 清空 + 导入导出
+    bindLearningTab();
+
     // 三个管理 tab 的“保存中… / 已自动保存”状态：订阅 store 的保存状态广播。
     // 面板是单例，只注册一次即可；三处状态字统一联动。
     bindSaveStatus();
@@ -672,7 +719,132 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       mountSnippetManagerInto($stOverlay.querySelector('#stSnippetsHost'));
     } else if (tab === 'quick') {
       mountQuickManagerInto($stOverlay.querySelector('#stQuickHost'));
+    } else if (tab === 'learning') {
+      renderLearningManage();
     }
+  }
+
+  /* ---------- 自学习 tab：learned 片段列表（查看 + 逐条删除）+ 清空 + 导入导出 ---------- */
+  function formatLearnTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function renderLearningManage() {
+    var host = $stOverlay && $stOverlay.querySelector('#stLearningHost');
+    if (!host) return;
+    var items = getLearnedSnippetsForManage();
+    if (items.length === 0) {
+      host.innerHTML = '<div class="sm-hint sm-embed-hint">还没有学习到内容，继续使用复制 / 下载即可自动积累。</div>';
+      return;
+    }
+    host.innerHTML = '<div class="sm-list sm-embed-list"></div>';
+    var list = host.querySelector('.sm-list');
+    items.forEach(function (it) {
+      var row = document.createElement('div');
+      row.className = 'sm-row st-learn-row';
+      var rate = it.shown > 0 ? Math.round((it.accepted / it.shown) * 100) : null;
+      var metaBits = [it.lang === 'en' ? 'English' : '中文'];
+      metaBits.push('展示 ' + it.shown + ' 次');
+      metaBits.push('采纳 ' + it.accepted + ' 次' + (rate !== null ? '（' + rate + '%）' : ''));
+      if (it.lastUsedAt) metaBits.push('最近使用 ' + formatLearnTime(it.lastUsedAt));
+      row.innerHTML =
+        '<div class="sm-body st-learn-body">' +
+          '<div class="st-learn-text">' + escapeHtml(it.text) + '</div>' +
+          '<div class="st-learn-meta">' + metaBits.join(' · ') + '</div>' +
+        '</div>';
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'sm-op danger';
+      delBtn.title = '删除这条';
+      delBtn.setAttribute('aria-label', '删除这条学习到的片段');
+      delBtn.innerHTML = icon('trash-2');
+      delBtn.addEventListener('click', function () {
+        removeLearnedSnippetByKey(it.key);
+        renderLearningManage();
+        showToast('已删除');
+      });
+      row.appendChild(delBtn);
+      list.appendChild(row);
+    });
+  }
+
+  function bindLearningTab() {
+    var $clear = $stOverlay.querySelector('#stLearningClear');
+    if ($clear) {
+      $clear.addEventListener('click', function () {
+        if (getLearnedSnippetsForManage().length === 0) { showToast('目前没有可清空的学习数据'); return; }
+        if (!window.confirm('确定清空全部自学习数据吗？此操作不可恢复。')) return;
+        clearAllLearning();
+        renderLearningManage();
+        showToast('已清空自学习数据');
+      });
+    }
+    var $export = $stOverlay.querySelector('#stLearningExport');
+    if ($export) $export.addEventListener('click', doExportLearning);
+    var $import = $stOverlay.querySelector('#stLearningImport');
+    if ($import) $import.addEventListener('click', doImportLearning);
+  }
+
+  function todayStampLocal() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+  }
+
+  function doExportLearning() {
+    if (getLearnedSnippetsForManage().length === 0) { showToast('目前没有可导出的学习数据'); return; }
+    var bundle = exportLearningBundle();
+    var text = JSON.stringify(bundle, null, 2);
+    var defaultName = 'composer-learning-' + todayStampLocal() + '.json';
+    if (dialogApi && dialogApi.save && fsApi && fsApi.writeTextFile) {
+      dialogApi.save({ defaultPath: defaultName, filters: [{ name: 'Composer 自学习数据', extensions: ['json'] }] })
+        .then(function (filePath) {
+          if (!filePath) return;
+          return fsApi.writeTextFile(filePath, text).then(function () {
+            showToast('已导出自学习数据（含你写过的原文，注意隐私）');
+          });
+        })
+        .catch(function () { showToast('导出失败', true); });
+    } else {
+      var blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = defaultName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast('已导出自学习数据（含你写过的原文，注意隐私）');
+    }
+  }
+
+  var LEARNING_IMPORT_ERROR_MSG = {
+    'not-object': '文件无法读取，可能已损坏或不是有效的文件。',
+    'not-learning': '这不是 Composer 自学习数据的导出文件。',
+    'bad-schema': '文件版本不匹配，无法导入。'
+  };
+
+  function doImportLearning() {
+    if (!(dialogApi && dialogApi.open && fsApi && fsApi.readTextFile)) {
+      showToast('当前环境不支持导入', true);
+      return;
+    }
+    dialogApi.open({ multiple: false, directory: false, filters: [{ name: 'Composer 自学习数据', extensions: ['json'] }] })
+      .then(function (selected) {
+        if (!selected) return;
+        var filePath = Array.isArray(selected) ? selected[0] : selected;
+        return fsApi.readTextFile(filePath).then(function (text) {
+          var raw;
+          try { raw = JSON.parse(text); }
+          catch (e) { showToast(LEARNING_IMPORT_ERROR_MSG['not-object'], true); return; }
+          var res = importLearningBundle(raw);
+          if (!res.ok) { showToast(LEARNING_IMPORT_ERROR_MSG[res.code] || '文件无法导入', true); return; }
+          renderLearningManage();
+          showToast('已导入 ' + res.importedCount + ' 条自学习数据');
+        });
+      })
+      .catch(function () { showToast('读取文件失败，请把文件放到桌面/文档/下载目录后重试', true); });
   }
 
   /* ---------- 关于页版本号（Tauri 环境才能拿到，浏览器降级为占位） ---------- */
@@ -695,12 +867,16 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if (!$stOverlay || isRecordingShortcut) return;
     $stRecorderBox.textContent = state.settings.toggleShortcut;
     $stDelayInput.value = state.settings.pasteDelayMs;
+    var $stCompletionEnabled = $stOverlay.querySelector('#stCompletionEnabled');
+    if ($stCompletionEnabled) $stCompletionEnabled.checked = !!state.settings.completion.enabled;
     renderTranslateSettings();
     // 若当前正停在某个管理 tab 且面板可见，远端同步后重新 mount 以反映最新数据。
     // 此路径只在非编辑态触发（编辑中 isEditingLocally 会暂缓远端 state 应用），
     // 故不会打断用户输入。
     var activeManage = $stOverlay.querySelector('.st-tab-manage.is-active');
     if (activeManage) mountManageTab(activeManage.getAttribute('data-tab'));
+    var activeLearning = $stOverlay.querySelector('.st-tab-page.is-active[data-tab="learning"]');
+    if (activeLearning) renderLearningManage();
     refreshFootHint();
   }
 
