@@ -486,6 +486,9 @@
       lines.forEach(function (raw) {
         var text = String(raw == null ? '' : raw).trim();
         if (text.length < 4) return;           // 太短的行不学，避免噪声
+        // 归一化后为空（整行纯标点 / 纯空白）不学：否则多条语义无关的行会
+        // 落到同一个「空内容」key 上被错误合并计数、提炼成无意义候选。
+        if (normalizeLearnText(text) === '') return;
         var rk = learnKey(lang, text);
         var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang };
         r.count += 1;
@@ -1021,9 +1024,13 @@
   function estimateTokens(text) {
     if (!text) return 0;
     var cjk = 0, other = 0;
-    for (var i = 0; i < text.length; i++) {
-      var code = text.codePointAt(i);
-      var isCjk = (code >= 0x3000 && code <= 0x303f) || (code >= 0x3400 && code <= 0x9fff) || (code >= 0xff00 && code <= 0xffef);
+    // for...of 按「码点」迭代（不是 UTF-16 码元），非 BMP 字符（CJK 扩展 B、
+    // emoji 等由代理对表示）才不会被数两次。
+    for (var ch of String(text)) {
+      var code = ch.codePointAt(0);
+      var isCjk = (code >= 0x3000 && code <= 0x303f) || (code >= 0x3400 && code <= 0x9fff) ||
+        (code >= 0xff00 && code <= 0xffef) ||
+        (code >= 0x20000 && code <= 0x2ffff) || (code >= 0x30000 && code <= 0x3ffff); // CJK 扩展 B~
       if (isCjk) cjk++; else other++;
     }
     return Math.round(cjk * 1.6 + other / 4);

@@ -418,11 +418,14 @@ import { renderAll, applyStartupShortcut } from './events.js';
     var pfx = (lang === 'en' ? 'en' : 'zh') + '';
     var seen = {};
     var pool = [];
-    function add(text, source) {
+    // explicitKey：learned 片段传入其归一化学习 key（与 L.snippets 里的统计
+    // key 一致），使 scoreCandidate / learn('shown'|'accepted') 能对上历史账。
+    // preset 不传，仍按原文重算 key（preset 全程用原文 key，自洽）。
+    function add(text, source, explicitKey) {
       if (typeof text !== 'string') return;
       var t = text;
       if (t.trim() === '') return;
-      var key = pfx + t;
+      var key = explicitKey != null ? explicitKey : pfx + t;
       if (seen[key]) return;
       seen[key] = true;
       pool.push({ key: key, text: t, source: source });
@@ -445,7 +448,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
       add(c[lang] || c.zh || c.en, 'preset');
     });
     // 自学习提炼出的 learned 片段
-    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned'); });
+    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned', s.key); });
     return pool;
   }
 

@@ -300,6 +300,16 @@ describe('commit 在 v2 下合并格式差异', () => {
     // text 保留第一次见到的原文
     expect(L.rawCounts[rk].text).toBe('擅长 Web 开发，尤其熟悉 TypeScript');
   });
+
+  it('整行纯标点/纯空白（归一化后为空）不学，不同行不会被错误合并', () => {
+    let L = defaultLearning();
+    // 三行语义无关、各自长度 >=4 通过过短过滤，但归一化后都为空
+    L = learn('commit', { lang: 'zh', lines: ['。。。。'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['!!!!!'] }, L, 1001);
+    L = learn('commit', { lang: 'zh', lines: ['?? ?? ??'] }, L, 1002);
+    expect(Object.keys(L.rawCounts).length).toBe(0); // 一条都不学
+    expect(Object.keys(L.snippets).length).toBe(0);  // 更不会提炼成候选
+  });
 });
 
 describe('migrateLearningV1toV2（存量数据迁移）', () => {

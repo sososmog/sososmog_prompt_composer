@@ -141,7 +141,12 @@ function buildTour() {
 // 用捕获阶段确保先于（或同时）触发插入逻辑，捕获到后自动前进。
 function armInsertListener() {
   disarmInsertListener();
+  tour.insertFired = false;
   tour.onInsert = function () {
+    // 一次性 guard：双击 / 急促连点会排入多个 click，disarm 只移除监听器却拦
+    // 不住已入队的定时器。若不去抖，第二个定时器会再 advance 一次跳过一步。
+    if (tour.insertFired) return;
+    tour.insertFired = true;
     // 让实际插入逻辑先执行完，再前进（下一步要指向 #blocks 里新出现的卡片）
     setTimeout(function () { if (tour) advance(); }, 60);
   };
