@@ -220,23 +220,58 @@
   var LEARN_JITTER = 0.02;       // 探索用的微小随机扰动幅度
   var LEARN_RECENCY_HALFLIFE_MS = 14 * 24 * 60 * 60 * 1000; // 新近度半衰期 14 天
   var LEARN_PROMOTE_THRESHOLD = 3; // 原始整行重复达到此次数，提炼成 learned 片段
-  var LEARN_VERSION = 1;
+  var LEARN_VERSION = 2;           // v2：key 改用归一化文本，同一句的空白/标点/大小写差异合并计数
 
-  // key：用不可打印分隔符拼语言，避免与正文内容碰撞。
+  // 全角标点 → 半角映射（仅用于归一化 key，不改展示文本）。
+  var FULL_TO_HALF = {
+    '，': ',', '。': '.', '！': '!', '？': '?', '；': ';', '：': ':',
+    '（': '(', '）': ')', '【': '[', '】': ']', '“': '"', '”': '"',
+    '‘': "'", '’': "'", '、': ',', '「': '[', '」': ']', '『': '[', '』': ']',
+    '《': '<', '》': '>', '～': '~'
+  };
+
+  // 归一化文本：仅用于计算 key（判定“是不是同一句”），不改写展示 / 补全用的原文。
+  // 处理：全角标点→半角、连续空白压成单空格、去句末孤立标点、英文转小写。
+  // 不去中文词间空格（风险 > 收益）。同一句仅格式差异的行由此合并计数。
+  function normalizeLearnText(text) {
+    var t = String(text == null ? '' : text);
+    t = t.replace(/[，。！？；：、（）【】“”‘’「」『』《》～]/g, function (ch) {
+      return FULL_TO_HALF[ch] || ch;
+    });
+    t = t.replace(/\s+/g, ' ').trim();      // 连续空白（含全半角、tab）压成单空格
+    t = t.replace(/[\s.,;:!?]+$/, '');       // 去句末孤立标点 / 尾随空白
+    return t.toLowerCase();                  // 仅 key 用；大小写不该区分两条候选
+  }
+
+  // key：用不可打印分隔符（U+0001）拼语言前缀，避免与正文内容碰撞。
+  // v2 起 text 部分先经 normalizeLearnText 归一化，使同一句的格式差异落到同一 key。
+  var LEARN_KEY_SEP = '';
+  function learnKeyParts(key) {
+    // 从既有 key 反解出 [langPrefix, normText]，供 v1→v2 迁移重算 key 用。
+    var k = String(key == null ? '' : key);
+    var idx = k.indexOf(LEARN_KEY_SEP);
+    if (idx === -1) return null;             // 不含分隔符：非法/旧格式，交由调用方丢弃
+    return { lang: k.slice(0, idx) === 'en' ? 'en' : 'zh', text: k.slice(idx + 1) };
+  }
+
   function learnKey(lang, text) {
-    return (lang === 'en' ? 'en' : 'zh') + '' + String(text == null ? '' : text);
+    return (lang === 'en' ? 'en' : 'zh') + LEARN_KEY_SEP + normalizeLearnText(text);
   }
 
   function defaultLearning() {
     return { version: LEARN_VERSION, snippets: {}, bigrams: {}, rawCounts: {} };
   }
 
-  // 归一化：任何脏值都回退到合法结构，version 不符直接重置（学习数据可再学，无需硬迁移）。
+  // 归一化：任何脏值都回退到合法结构。version 处理：
+  //   === LEARN_VERSION(2)：结构清洗后直接用。
+  //   === 1：结构清洗 + v1→v2 迁移（按新 learnKey 重算 key，同 key 合并计数），旧数据不丢。
+  //   其它 / 缺失：无法安全迁移，重置（学习数据可再学）。
   function normalizeLearning(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaultLearning();
-    if (raw.version !== LEARN_VERSION) return defaultLearning();
-    var out = defaultLearning();
+    if (raw.version !== LEARN_VERSION && raw.version !== 1) return defaultLearning();
 
+    // 第一步：结构清洗（脏值兜底），保持原 key 不动。
+    var out = defaultLearning();
     if (raw.snippets && typeof raw.snippets === 'object') {
       Object.keys(raw.snippets).forEach(function (k) {
         var r = raw.snippets[k];
@@ -272,6 +307,74 @@
         };
       });
     }
+
+    // 第二步：v1 数据按新归一化 key 重算并合并（v2 数据 key 已经是归一化的，跳过）。
+    if (raw.version === 1) out = migrateLearningV1toV2(out);
+    return out;
+  }
+
+  // 把（已结构清洗的）v1 learning 按新 learnKey 重算 key、同 key 合并，产出 v2 结构。
+  // 依据：v1/v2 的 key 都是「langPrefix + U+0001 + text」，仅 text 段的归一化程度不同；
+  // 从旧 key 反解出 lang + oldText，对 oldText 走 learnKey 即得新 key，同 key 计数相加。
+  function migrateLearningV1toV2(v1) {
+    var out = defaultLearning();
+    // 旧 key -> 新 key 映射，供 bigrams 重映射复用（避免重复反解 + 归一化）。
+    var remap = {};
+    function newKeyOf(oldKey) {
+      if (Object.prototype.hasOwnProperty.call(remap, oldKey)) return remap[oldKey];
+      var parts = learnKeyParts(oldKey);
+      var nk = parts ? learnKey(parts.lang, parts.text) : null;
+      remap[oldKey] = nk;
+      return nk;
+    }
+
+    // rawCounts：同新 key 计数相加；text 保留最先遇到的原文（展示更自然），lang 沿用。
+    Object.keys(v1.rawCounts).forEach(function (ok) {
+      var nk = newKeyOf(ok);
+      if (!nk) return;
+      var r = v1.rawCounts[ok];
+      var tgt = out.rawCounts[nk];
+      if (!tgt) out.rawCounts[nk] = { text: r.text, count: r.count, lang: r.lang };
+      else tgt.count += r.count;
+    });
+
+    // snippets：同新 key，shown/accepted 相加、lastUsedAt 取 max、source 有 learned 则 learned。
+    Object.keys(v1.snippets).forEach(function (ok) {
+      var nk = newKeyOf(ok);
+      if (!nk) return;
+      var s = v1.snippets[ok];
+      var tgt = out.snippets[nk];
+      if (!tgt) {
+        out.snippets[nk] = { shown: s.shown, accepted: s.accepted, lastUsedAt: s.lastUsedAt, source: s.source };
+      } else {
+        tgt.shown += s.shown;
+        tgt.accepted += s.accepted;
+        tgt.lastUsedAt = Math.max(tgt.lastUsedAt, s.lastUsedAt);
+        if (s.source === 'learned') tgt.source = 'learned';
+      }
+    });
+    // 合并后可能有条目 rawCounts 达阈值但尚无 learned snippet（原本分散未达阈值），补提炼。
+    Object.keys(out.rawCounts).forEach(function (nk) {
+      var r = out.rawCounts[nk];
+      if (r.count >= LEARN_PROMOTE_THRESHOLD && !out.snippets[nk]) {
+        out.snippets[nk] = { shown: 0, accepted: 0, lastUsedAt: 0, source: 'learned' };
+      }
+    });
+
+    // bigrams：prefixKey 与 candKey 都用新 key 重映射，计数相加。
+    Object.keys(v1.bigrams).forEach(function (opk) {
+      var npk = newKeyOf(opk);
+      if (!npk) return;
+      var m = v1.bigrams[opk];
+      var tgt = out.bigrams[npk] || (out.bigrams[npk] = {});
+      Object.keys(m).forEach(function (ock) {
+        var nck = newKeyOf(ock);
+        if (!nck) return;
+        tgt[nck] = (tgt[nck] || 0) + m[ock];
+      });
+      if (Object.keys(tgt).length === 0) delete out.bigrams[npk];
+    });
+
     return out;
   }
 
@@ -490,14 +593,20 @@
   }
 
   // 校验导入文件是否是合法的自学习数据导出文件。
+  // 接受 v1 / v2 导出文件（导入时按新 key 重算合并，见 mergeLearningImport）；
+  // version 高于当前的判为「来自更新版本」，拒绝。
   function validateLearningImportBundle(raw) {
     if (!raw || typeof raw !== 'object') return { ok: false, code: 'not-object' };
     if (raw.kind !== LEARNING_EXPORT_KIND) return { ok: false, code: 'not-learning' };
-    if (raw.version !== LEARN_VERSION) return { ok: false, code: 'bad-schema' };
+    var v = raw.version;
+    if (typeof v !== 'number' || v < 1) return { ok: false, code: 'bad-schema' };
+    if (v > LEARN_VERSION) return { ok: false, code: 'too-new' };
     return { ok: true };
   }
 
-  // 合并导入的自学习数据到当前 learning：同 key 计数相加、lastUsedAt 取较大值。
+  // 合并导入的自学习数据到当前 learning：**按 learnKey 重算 key**（不信任 bundle 里的
+  // 旧 key，这样 v1 导出文件里的条目也能和本地 v2 数据、以及导入文件内彼此归一化合并），
+  // 同 key 计数相加、lastUsedAt 取较大值。
   function mergeLearningImport(learning, bundle) {
     var L = normalizeLearning(learning);
     var incomingSnippets = (bundle && bundle.snippets && typeof bundle.snippets === 'object') ? bundle.snippets : {};
@@ -507,16 +616,18 @@
       var ir = incomingRaw[k];
       if (!ir || typeof ir.text !== 'string') return;
       var lang = ir.lang === 'en' ? 'en' : 'zh';
-      var existingR = L.rawCounts[k];
-      L.rawCounts[k] = {
-        text: existingR ? existingR.text : ir.text,
+      var nk = learnKey(lang, ir.text);      // 重算，落到与本地一致的归一化 key
+
+      var existingR = L.rawCounts[nk];
+      L.rawCounts[nk] = {
+        text: existingR ? existingR.text : ir.text,   // 保留本地已有原文，否则用导入原文
         count: (existingR ? existingR.count : 0) + numOr(ir.count, 0),
         lang: lang
       };
 
       var is = incomingSnippets[k] || { shown: 0, accepted: 0, lastUsedAt: 0, source: 'learned' };
-      var existingS = L.snippets[k];
-      L.snippets[k] = {
+      var existingS = L.snippets[nk];
+      L.snippets[nk] = {
         shown: (existingS ? existingS.shown : 0) + numOr(is.shown, 0),
         accepted: (existingS ? existingS.accepted : 0) + numOr(is.accepted, 0),
         lastUsedAt: Math.max(existingS ? existingS.lastUsedAt : 0, numOr(is.lastUsedAt, 0)),
@@ -1502,6 +1613,8 @@
     // v0.2 行内补全：自学习引擎（纯逻辑）
     defaultLearning,
     normalizeLearning,
+    normalizeLearnText,
+    migrateLearningV1toV2,
     learnKey,
     getCandidates,
     scoreCandidate,
