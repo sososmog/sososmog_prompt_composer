@@ -489,14 +489,11 @@ describe('segmentClause（子句切分）', () => {
 });
 
 describe('segmentText（切分入口）', () => {
-  it('默认与 segmentClause 一致', () => {
+  it('默认（不传 mode）与 segmentClause 一致', () => {
     const s = '你是一名工程师，擅长 Web 开发';
     expect(segmentText(s)).toEqual(segmentClause(s));
   });
-  it('P1 阶段 word 模式降级为 clause', () => {
-    const s = '你是一名工程师，擅长 Web 开发';
-    expect(segmentText(s, { mode: 'word' })).toEqual(segmentClause(s));
-  });
+  // word 模式行为见「步骤二（P2）」测试块。
 });
 
 describe('clauseTailParts（供 splitTail 复用）', () => {
@@ -583,5 +580,45 @@ describe('splitTail（completion.js，子句为单位）', () => {
     const p = splitTail('擅长 Web 开发', 'zh');
     expect(p.tail).toBe('擅长 Web 开发');
     expect(p.prefixKey).toBe(null);
+  });
+});
+
+/* ============================================================
+ * 步骤二（P2）：词级切分（opt-in，Intl.Segmenter + 特性探测回退）
+ * ============================================================ */
+describe('segmentText word 模式', () => {
+  it('无 Intl.Segmenter 时 word 结果 == clause 结果（回退正确）', () => {
+    const orig = Intl.Segmenter;
+    try {
+      Intl.Segmenter = undefined; // 模拟旧环境（如无 Intl.Segmenter 的老 macOS）
+      const s = '今天天气很好我们出去玩吧';
+      expect(segmentText(s, { mode: 'word' })).toEqual(segmentClause(s));
+    } finally {
+      Intl.Segmenter = orig;
+    }
+  });
+
+  it('有 Intl.Segmenter 时，无标点长句能从词起点接续', () => {
+    if (typeof Intl.Segmenter !== 'function') return; // 环境不支持则跳过（回退已单测）
+    const s = '今天天气很好我们出去玩吧';
+    const segs = segmentText(s, { mode: 'word' });
+    expect(segs).toContain(s);                 // 整条子句始终保留
+    expect(segs.length).toBeGreaterThan(1);    // 产出了词起点后缀
+    // 至少有一个后缀是整句的「真后缀」（从某个词的起点切到句末）
+    expect(segs.some((x) => x !== s && s.endsWith(x))).toBe(true);
+  });
+
+  it('word 模式后缀数受 maxStarts 限制（防膨胀）', () => {
+    if (typeof Intl.Segmenter !== 'function') return;
+    const s = '一二三四五六七八九十甲乙丙丁';
+    const segs = segmentText(s, { mode: 'word', maxStarts: 2 });
+    // 整条子句 + 至多 maxStarts 个后缀
+    expect(segs.length).toBeLessThanOrEqual(1 + 2);
+  });
+
+  it('clause 模式不产出词后缀（word 是 opt-in）', () => {
+    const s = '今天天气很好我们出去玩吧';
+    expect(segmentText(s, { mode: 'clause' })).toEqual(segmentClause(s));
+    expect(segmentText(s)).toEqual(segmentClause(s));
   });
 });

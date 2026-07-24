@@ -377,6 +377,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                 '<span class="st-label">行内自动补全</span>' +
                 '<span class="st-desc">编辑时根据你复制/下载过的内容，用灰色提示可能想输入的句子（按 Tab 采纳）。关闭后不再展示提示、也不再学习新内容，已学到的数据不会被清除。</span>' +
                 '<label class="st-tr-check"><input type="checkbox" id="stCompletionEnabled" /><span>启用行内自动补全</span></label>' +
+                '<label class="st-tr-check"><input type="checkbox" id="stCompletionSegWord" /><span>词级切分（实验）</span></label>' +
+                '<span class="st-desc">开启后，无标点的长句也能从词的中间接续（用系统内置分词，个别旧系统不支持时自动退回按标点切分）。</span>' +
               '</div>' +
             '</section>' +
             // ---- 翻译 ----
@@ -651,6 +653,15 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         showToast($stCompletionEnabled.checked ? '已开启行内自动补全' : '已关闭行内自动补全（已学到的数据不会被清除）');
       });
     }
+    // 通用 tab：词级切分（segMode），勾选=word，否则 clause
+    var $stCompletionSegWord = $stOverlay.querySelector('#stCompletionSegWord');
+    if ($stCompletionSegWord) {
+      $stCompletionSegWord.addEventListener('change', function () {
+        state.settings.completion.segMode = $stCompletionSegWord.checked ? 'word' : 'clause';
+        scheduleSave();
+        showToast($stCompletionSegWord.checked ? '已开启词级切分（无标点长句也能句中接续）' : '已切回按标点切分');
+      });
+    }
 
     // 自学习 tab：列表 + 清空 + 导入导出
     bindLearningTab();
@@ -870,6 +881,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     $stDelayInput.value = state.settings.pasteDelayMs;
     var $stCompletionEnabled = $stOverlay.querySelector('#stCompletionEnabled');
     if ($stCompletionEnabled) $stCompletionEnabled.checked = !!state.settings.completion.enabled;
+    var $stCompletionSegWord = $stOverlay.querySelector('#stCompletionSegWord');
+    if ($stCompletionSegWord) $stCompletionSegWord.checked = state.settings.completion.segMode === 'word';
     renderTranslateSettings();
     // 若当前正停在某个管理 tab 且面板可见，远端同步后重新 mount 以反映最新数据。
     // 此路径只在非编辑态触发（编辑中 isEditingLocally 会暂缓远端 state 应用），

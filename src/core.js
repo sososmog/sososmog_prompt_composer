@@ -227,6 +227,7 @@
   // 读时切分（片段补全）可调参数：片段进池的长度 / 跨行复用 / 单行高频阈值。
   var LEARN_FRAG_MIN_LEN = 4;      // 片段字符数下限（过短命中噪声大）
   var LEARN_FRAG_MIN_LINES = 2;    // 片段出现在 ≥ 此数量的不同行 → 进池（跨句复用信号）
+  var LEARN_FRAG_MAX_STARTS = 6;   // word 模式：每子句最多产出多少个「可接续起点」后缀，防膨胀
 
   // 全角标点 → 半角映射（仅用于归一化 key，不改展示文本）。
   var FULL_TO_HALF = {
@@ -411,11 +412,46 @@
     return out;
   }
 
-  // 通用切分入口。当前只做子句切分；opts.mode === 'word' 的词级增强见 P2。
-  // 保持函数签名稳定，上层（候选池 / learnedFragments）传 { mode } 即可平滑升级。
+  // 通用切分入口。opts.mode !== 'word' 时只做子句切分（默认）。
+  // 'word' 模式（opt-in）对每条子句再按词起点切出多个「可接续起点后缀」，
+  // 让无标点的长句也能从词中间接续。无 Intl.Segmenter（旧 macOS）时整段回退为
+  // 子句结果，与 clause 模式完全一致；个别子句构造/切分抛错时该子句只保留整条。
   function segmentText(text, opts) {
     opts = opts || {};
-    return segmentClause(text);
+    var clauses = segmentClause(text);
+    if (opts.mode !== 'word') return clauses;
+    if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return clauses;
+
+    var maxStarts = numOr(opts.maxStarts, LEARN_FRAG_MAX_STARTS);
+    var out = [];
+    var seen = {};
+    function push(s) { if (s && !seen[s]) { seen[s] = true; out.push(s); } }
+    for (var i = 0; i < clauses.length; i++) {
+      var clause = clauses[i];
+      push(clause);                              // 整条子句本身始终保留
+      var starts = wordStartSuffixes(clause, maxStarts);
+      for (var j = 0; j < starts.length; j++) push(starts[j]);
+    }
+    return out;
+  }
+
+  // 用 Intl.Segmenter 找子句内每个词的起点（index>0），从各起点切到子句末，
+  // 得到多个「后缀」候选（越靠前的起点越长），最多 maxStarts 个防膨胀。
+  // 构造 / 切分抛错时返回 []（调用方已单独保留整条子句），即回退为按标点切。
+  function wordStartSuffixes(clause, maxStarts) {
+    try {
+      var seg = new Intl.Segmenter(undefined, { granularity: 'word' });
+      var out = [];
+      var it = seg.segment(clause)[Symbol.iterator]();
+      var st;
+      while (!(st = it.next()).done && out.length < maxStarts) {
+        var s = st.value;
+        if (s.isWordLike && s.index > 0) out.push(clause.slice(s.index));
+      }
+      return out;
+    } catch (_e) {
+      return [];
+    }
   }
 
   // 求「splitTail 用的两段」：当前（可能未结束的）子句 + 它之前那条完整子句。
