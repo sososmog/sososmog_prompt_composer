@@ -25,9 +25,9 @@ import {
   parseBlocks,
   createHistory,
   learn,
-  learnedSnippets,
-  learnedSnippetsForManage,
-  removeLearnedSnippet,
+  learnedFragments,
+  learnedFragmentsForManage,
+  blockLearnedFragment,
   clearLearning,
   buildLearningExportBundle,
   validateLearningImportBundle,
@@ -447,8 +447,9 @@ import { renderAll, applyStartupShortcut } from './events.js';
       if (c.hidden) return;
       add(c[lang] || c.zh || c.en, 'preset');
     });
-    // 自学习提炼出的 learned 片段
-    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned', s.key); });
+    // 自学习片段（读时从整行 rawCounts 现切；key 为片段归一化 learnKey，与统计对齐）
+    var segMode = (state.settings && state.settings.completion && state.settings.completion.segMode) || 'clause';
+    learnedFragments(state.learning, lang, { mode: segMode }).forEach(function (s) { add(s.text, 'learned', s.key); });
     return pool;
   }
 
@@ -476,12 +477,17 @@ import { renderAll, applyStartupShortcut } from './events.js';
   /* ============================================================
    * 2.0.2 自学习数据管理（设置面板「自学习」tab 用）
    * ============================================================ */
-  function getLearnedSnippetsForManage() {
-    return learnedSnippetsForManage(state.learning);
+  // 片段管理列表：两种语言各取一次再合并，按最近使用时间降序（跨语言统一排）。
+  // 管理列表固定用 clause 粒度（不随 segMode 变 word）：给用户看/删的是「学到的短语」，
+  // word 模式的词级后缀是机器内部的接续起点，逐条管理无意义。
+  function getLearnedFragmentsForManage() {
+    var zh = learnedFragmentsForManage(state.learning, 'zh', { mode: 'clause' });
+    var en = learnedFragmentsForManage(state.learning, 'en', { mode: 'clause' });
+    return zh.concat(en).sort(function (a, b) { return b.lastUsedAt - a.lastUsedAt; });
   }
 
-  function removeLearnedSnippetByKey(key) {
-    state.learning = removeLearnedSnippet(state.learning, key);
+  function blockLearnedFragmentByKey(key) {
+    state.learning = blockLearnedFragment(state.learning, key);
     scheduleSave();
   }
 
@@ -524,7 +530,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     // 行内补全（v0.2）
     completionPool, makeCompletionDeps, commitLearningFromText, completionEnabled,
     // 自学习数据管理（设置面板用）
-    getLearnedSnippetsForManage, removeLearnedSnippetByKey, clearAllLearning,
+    getLearnedFragmentsForManage, blockLearnedFragmentByKey, clearAllLearning,
     exportLearningBundle, importLearningBundle,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
     INSERT_MODULES, MODULE_BY_ID, BUILTIN_SNIPPETS, BUILTIN_BY_ID,

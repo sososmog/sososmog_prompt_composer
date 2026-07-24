@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { loadComposer } from './setup.js';
+// splitTail 在 completion.js（UI 逻辑层但不触 DOM，jsdom 环境下可直接 import）。
+import { splitTail } from '../completion.js';
 
 const {
   defaultLearning,
   normalizeLearning,
   normalizeLearnText,
   learnKey,
+  segmentClause,
+  segmentText,
+  clauseTailParts,
+  learnedFragments,
+  learnedFragmentsForManage,
+  blockLearnedFragment,
   getCandidates,
   scoreCandidate,
   rankCandidates,
@@ -451,5 +459,248 @@ describe('导入导出（含 v1/v2 兼容）', () => {
     expect(Object.keys(learning.rawCounts).length).toBe(1); // 合并成一条
     expect(learning.rawCounts[nk].count).toBe(3 + 4);
     expect(learning.rawCounts[nk].text).toBe(line);         // 保留本地原文
+  });
+});
+
+/* ============================================================
+ * 步骤一（P1）：读时子句切分 —— 句中可接续 + bigram 对中文生效
+ * ============================================================ */
+describe('segmentClause（子句切分）', () => {
+  it('按句读标点切子句，单空格不拆散', () => {
+    expect(segmentClause('你是一名工程师，擅长 Web 开发'))
+      .toEqual(['你是一名工程师', '擅长 Web 开发']);
+    // 关键：擅长 Web 开发 内部是单空格，绝不能被拆成 擅长 / Web / 开发
+    expect(segmentClause('擅长 Web 开发')).toEqual(['擅长 Web 开发']);
+  });
+
+  it('连续 2 个及以上空格才作边界', () => {
+    expect(segmentClause('foo  bar')).toEqual(['foo', 'bar']);   // 双空格拆
+    expect(segmentClause('foo bar')).toEqual(['foo bar']);       // 单空格不拆
+  });
+
+  it('换行/制表/全角空格都是边界', () => {
+    expect(segmentClause('甲甲\n乙乙\t丙丙　丁丁')).toEqual(['甲甲', '乙乙', '丙丙', '丁丁']);
+  });
+
+  it('纯标点 / 空串 → []', () => {
+    expect(segmentClause('。。。')).toEqual([]);
+    expect(segmentClause('，,! ? ；')).toEqual([]);
+    expect(segmentClause('')).toEqual([]);
+    expect(segmentClause(null)).toEqual([]);
+  });
+});
+
+describe('segmentText（切分入口）', () => {
+  it('默认（不传 mode）与 segmentClause 一致', () => {
+    const s = '你是一名工程师，擅长 Web 开发';
+    expect(segmentText(s)).toEqual(segmentClause(s));
+  });
+  // word 模式行为见「步骤二（P2）」测试块。
+});
+
+describe('clauseTailParts（供 splitTail 复用）', () => {
+  it('取最后一个子句作 tail、其前一子句作 prev', () => {
+    expect(clauseTailParts('工程师，擅长 Web')).toEqual({ tail: '擅长 Web', prev: '工程师' });
+  });
+  it('无边界时整段为 tail、prev 为空', () => {
+    expect(clauseTailParts('擅长 Web 开发')).toEqual({ tail: '擅长 Web 开发', prev: '' });
+  });
+  it('tail 去前导空白、保留尾部空白', () => {
+    const p = clauseTailParts('前一句，  擅长 Web ');
+    expect(p.tail).toBe('擅长 Web ');   // 前导双空格去掉，尾部单空格保留
+    expect(p.prev).toBe('前一句');
+  });
+});
+
+describe('learnedFragments（读时片段池）', () => {
+  it('同一子句出现在 2 行（各 count 1）→ 进池（lines>=2）', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['擅长 Web 开发，尤其熟悉后端架构'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我需要一个人，擅长 Web 开发'] }, L, 1001);
+    const frags = learnedFragments(L, 'zh', {});
+    const texts = frags.map((f) => f.text);
+    expect(texts).toContain('擅长 Web 开发');
+    // 其余只出现 1 行、count 1 的子句不进池
+    expect(texts).not.toContain('尤其熟悉后端架构');
+    const hit = frags.find((f) => f.text === '擅长 Web 开发');
+    expect(hit.lines).toBe(2);
+    expect(hit.count).toBe(2);
+  });
+
+  it('单行 count 3、子句 lines=1 → 也进池（count>=minCount）', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: ['请务必仔细检查代码逻辑'] }, L, 2000 + i);
+    const frags = learnedFragments(L, 'zh', {});
+    const hit = frags.find((f) => f.text === '请务必仔细检查代码逻辑');
+    expect(hit).toBeDefined();
+    expect(hit.lines).toBe(1);
+    expect(hit.count).toBe(3);
+  });
+
+  it('片段字符数 < minLen(4) 被过滤', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: ['行，我们开始处理这个任务吧'] }, L, 3000 + i);
+    const frags = learnedFragments(L, 'zh', {});
+    const texts = frags.map((f) => f.text);
+    expect(texts).not.toContain('行');                 // 单字子句被过滤
+    expect(texts).toContain('我们开始处理这个任务吧');   // 长子句进池
+  });
+
+  it('只返回对应语言的片段', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) {
+      L = learn('commit', { lang: 'zh', lines: ['一句中文的重复内容够长'] }, L, 4000 + i);
+      L = learn('commit', { lang: 'en', lines: ['a repeated english clause'] }, L, 5000 + i);
+    }
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).toContain('一句中文的重复内容够长');
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).not.toContain('a repeated english clause');
+    expect(learnedFragments(L, 'en', {}).map((f) => f.text)).toContain('a repeated english clause');
+  });
+});
+
+describe('端到端：片段池 → getCandidates 命中句中片段', () => {
+  it('从句中「擅长 Web」能补出「 开发」（复现痛点）', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['你是一名工程师，擅长 Web 开发'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我们要找的人，擅长 Web 开发'] }, L, 1001);
+    const frags = learnedFragments(L, 'zh', {});
+    const pool = frags.map((f) => ({ key: f.key, text: f.text, source: f.source }));
+    const cands = getCandidates('擅长 Web', pool);
+    const hit = cands.find((c) => c.text === '擅长 Web 开发');
+    expect(hit).toBeDefined();
+    expect(hit.remainder).toBe(' 开发');
+  });
+});
+
+describe('splitTail（completion.js，子句为单位）', () => {
+  it('句中光标：tail=当前子句，prefixKey=上一子句', () => {
+    const p = splitTail('工程师，擅长 Web', 'zh');
+    expect(p.tail).toBe('擅长 Web');
+    expect(p.prefixKey).toBe(learnKey('zh', '工程师'));
+  });
+  it('无上一子句时 prefixKey 为 null', () => {
+    const p = splitTail('擅长 Web 开发', 'zh');
+    expect(p.tail).toBe('擅长 Web 开发');
+    expect(p.prefixKey).toBe(null);
+  });
+});
+
+/* ============================================================
+ * 步骤二（P2）：词级切分（opt-in，Intl.Segmenter + 特性探测回退）
+ * ============================================================ */
+describe('segmentText word 模式', () => {
+  it('无 Intl.Segmenter 时 word 结果 == clause 结果（回退正确）', () => {
+    const orig = Intl.Segmenter;
+    try {
+      Intl.Segmenter = undefined; // 模拟旧环境（如无 Intl.Segmenter 的老 macOS）
+      const s = '今天天气很好我们出去玩吧';
+      expect(segmentText(s, { mode: 'word' })).toEqual(segmentClause(s));
+    } finally {
+      Intl.Segmenter = orig;
+    }
+  });
+
+  it('有 Intl.Segmenter 时，无标点长句能从词起点接续', () => {
+    if (typeof Intl.Segmenter !== 'function') return; // 环境不支持则跳过（回退已单测）
+    const s = '今天天气很好我们出去玩吧';
+    const segs = segmentText(s, { mode: 'word' });
+    expect(segs).toContain(s);                 // 整条子句始终保留
+    expect(segs.length).toBeGreaterThan(1);    // 产出了词起点后缀
+    // 至少有一个后缀是整句的「真后缀」（从某个词的起点切到句末）
+    expect(segs.some((x) => x !== s && s.endsWith(x))).toBe(true);
+  });
+
+  it('word 模式后缀数受 maxStarts 限制（防膨胀）', () => {
+    if (typeof Intl.Segmenter !== 'function') return;
+    const s = '一二三四五六七八九十甲乙丙丁';
+    const segs = segmentText(s, { mode: 'word', maxStarts: 2 });
+    // 整条子句 + 至多 maxStarts 个后缀
+    expect(segs.length).toBeLessThanOrEqual(1 + 2);
+  });
+
+  it('clause 模式不产出词后缀（word 是 opt-in）', () => {
+    const s = '今天天气很好我们出去玩吧';
+    expect(segmentText(s, { mode: 'clause' })).toEqual(segmentClause(s));
+    expect(segmentText(s)).toEqual(segmentClause(s));
+  });
+});
+
+/* ============================================================
+ * 步骤三（P3）：管理与删除（blocked 拉黑名单）
+ * ============================================================ */
+describe('blocked 字段（additive schema）', () => {
+  it('defaultLearning 含空 blocked', () => {
+    expect(defaultLearning().blocked).toEqual({});
+  });
+
+  it('normalizeLearning 保留 value===true 的 blocked，忽略其它', () => {
+    const raw = {
+      version: 2, snippets: {}, bigrams: {}, rawCounts: {},
+      blocked: { keepTrue: true, dropFalse: false, dropStr: 'x' },
+    };
+    const out = normalizeLearning(raw);
+    expect(out.blocked).toEqual({ keepTrue: true });
+  });
+
+  it('blocked 缺失 / 为数组时归一化为空对象', () => {
+    expect(normalizeLearning({ version: 2, blocked: undefined }).blocked).toEqual({});
+    expect(normalizeLearning({ version: 2, blocked: ['a'] }).blocked).toEqual({});
+  });
+});
+
+describe('learnedFragments 跳过 blocked', () => {
+  it('blocked 里的片段 key 不进池', () => {
+    // 让「擅长 Web 开发」跨 2 行进池
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['你是工程师，擅长 Web 开发'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我们要找的人，擅长 Web 开发'] }, L, 1001);
+    const fk = learnKey('zh', '擅长 Web 开发');
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).toContain('擅长 Web 开发');
+    // 拉黑后不再产出
+    L.blocked[fk] = true;
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).not.toContain('擅长 Web 开发');
+  });
+});
+
+describe('blockLearnedFragment', () => {
+  it('拉黑后 learnedFragments 不再产出该 key，且 bigram 中以它为候选的项被清', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['你是工程师，擅长 Web 开发'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我们要找的人，擅长 Web 开发'] }, L, 1001);
+    const fk = learnKey('zh', '擅长 Web 开发');
+    const pfx = learnKey('zh', '前一句');
+    // 手工造一个以 fk 为候选、及另一条无关候选的 bigram
+    L.bigrams[pfx] = {}; L.bigrams[pfx][fk] = 3;
+    const otherPfx = learnKey('zh', '别的前缀');
+    const otherCand = learnKey('zh', '别的候选');
+    L.bigrams[otherPfx] = {}; L.bigrams[otherPfx][otherCand] = 2;
+
+    const out = blockLearnedFragment(L, fk);
+    expect(out.blocked[fk]).toBe(true);
+    expect(learnedFragments(out, 'zh', {}).map((f) => f.text)).not.toContain('擅长 Web 开发');
+    // 以 fk 为候选的项被清，该 prefixKey 下清空 → 整个 prefixKey 删除
+    expect(out.bigrams[pfx]).toBeUndefined();
+    // 无关的 bigram 不受影响
+    expect(out.bigrams[otherPfx][otherCand]).toBe(2);
+  });
+});
+
+describe('learnedFragmentsForManage', () => {
+  it('挂上 shown/accepted/lastUsedAt 与 lines/count', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: ['请务必仔细检查代码逻辑'] }, L, 2000 + i);
+    const fk = learnKey('zh', '请务必仔细检查代码逻辑');
+    // 造点行为统计（模拟展示/采纳记账）
+    L = learn('shown', { candKey: fk }, L, 3000);
+    L = learn('accepted', { candKey: fk }, L, 3001);
+    const rows = learnedFragmentsForManage(L, 'zh', { mode: 'clause' });
+    const hit = rows.find((r) => r.text === '请务必仔细检查代码逻辑');
+    expect(hit).toBeDefined();
+    expect(hit.lines).toBe(1);
+    expect(hit.count).toBe(3);
+    expect(hit.shown).toBe(1);
+    expect(hit.accepted).toBe(1);
+    expect(hit.lastUsedAt).toBe(3001);
+    expect(hit.lang).toBe('zh');
   });
 });

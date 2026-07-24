@@ -16,23 +16,17 @@ import {
   learn,
   isInCodeContext,
   learnKey,
+  clauseTailParts,
 } from './core.js';
 
-// 取“当前行光标前的最后一个词”作为补全触发的输入尾巴（inputTail），
-// 以及它之前那个词作为 bigram 上下文前缀（prefixWord）。
-// 分词以空白为界；中文没有空格，则整行尾（自上一空白起）都算一个词。
-function splitTail(textBeforeCaret) {
-  var lineStart = textBeforeCaret.lastIndexOf('\n') + 1;
-  var line = textBeforeCaret.slice(lineStart);
-  // 末尾的词：从最后一段非空白起
-  var m = line.match(/(\S+)\s*$/);
-  if (!m) return { tail: '', prefix: '' };
-  var tail = m[1];
-  // 前缀词：tail 之前那个非空白段
-  var before = line.slice(0, line.length - m[0].length);
-  var pm = before.match(/(\S+)\s*$/);
-  var prefix = pm ? pm[1] : '';
-  return { tail: tail, prefix: prefix };
+// 取补全触发的输入尾巴（inputTail = 当前子句）与 bigram 上下文前缀键。
+// 子句边界由 core 的 clauseTailParts 统一判定（与候选池切分同一套规则）：
+//   - tail：最后一个子句边界之后到光标的文本，去前导空白；中文长句因此可从句中接续。
+//   - prefixKey：tail 之前那条非空子句的 learnKey（子句→子句），让 bigram 对纯中文首次生效。
+// export 供单测（本函数不触 DOM）。
+export function splitTail(textBeforeCaret, lang) {
+  var p = clauseTailParts(textBeforeCaret);
+  return { tail: p.tail, prefixKey: p.prev ? learnKey(lang, p.prev) : null };
 }
 
 /**
@@ -80,19 +74,19 @@ export function attachCompletion(area, overlay, deps) {
     var before = value.slice(0, caret);
     if (isInCodeContext(before)) return; // 代码区不打扰
 
-    var parts = splitTail(before);
+    var lang = deps.getLang();
+    var parts = splitTail(before, lang);
     if (!parts.tail) return;
 
-    var lang = deps.getLang();
     var pool = deps.getPool() || [];
     var cands = getCandidates(parts.tail, pool);
     if (cands.length === 0) return;
 
-    var ranked = rankCandidates(cands, parts.prefix ? learnKey(lang, parts.prefix) : '', deps.getLearning(), Date.now());
+    var ranked = rankCandidates(cands, parts.prefixKey || '', deps.getLearning(), Date.now());
     var top = ranked[0];
     if (!top || !top.remainder) return;
 
-    current = { key: top.key, remainder: top.remainder, prefixKey: parts.prefix ? learnKey(lang, parts.prefix) : '' };
+    current = { key: top.key, remainder: top.remainder, prefixKey: parts.prefixKey || '' };
     showGhost(top.remainder);
     // 记一次展示
     deps.onLearn(learn('shown', { candKey: top.key }, deps.getLearning()));

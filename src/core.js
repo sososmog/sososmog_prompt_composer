@@ -172,7 +172,9 @@
    * 1.3 行内补全总开关（默认开）
    * ============================================================ */
   function defaultCompletionSettings() {
-    return { enabled: true };
+    // segMode：读时切分粒度。'clause'（默认）按句读标点切子句；
+    // 'word' 为 opt-in 增强，对无标点长句再按词起点切（见 segmentText）。
+    return { enabled: true, segMode: 'clause' };
   }
 
   function defaultState() {
@@ -222,6 +224,11 @@
   var LEARN_PROMOTE_THRESHOLD = 3; // 原始整行重复达到此次数，提炼成 learned 片段
   var LEARN_VERSION = 2;           // v2：key 改用归一化文本，同一句的空白/标点/大小写差异合并计数
 
+  // 读时切分（片段补全）可调参数：片段进池的长度 / 跨行复用 / 单行高频阈值。
+  var LEARN_FRAG_MIN_LEN = 4;      // 片段字符数下限（过短命中噪声大）
+  var LEARN_FRAG_MIN_LINES = 2;    // 片段出现在 ≥ 此数量的不同行 → 进池（跨句复用信号）
+  var LEARN_FRAG_MAX_STARTS = 6;   // word 模式：每子句最多产出多少个「可接续起点」后缀，防膨胀
+
   // 全角标点 → 半角映射（仅用于归一化 key，不改展示文本）。
   var FULL_TO_HALF = {
     '，': ',', '。': '.', '！': '!', '？': '?', '；': ';', '：': ':',
@@ -258,8 +265,11 @@
     return (lang === 'en' ? 'en' : 'zh') + LEARN_KEY_SEP + normalizeLearnText(text);
   }
 
+  // blocked：被用户拉黑的片段 key 集合（{ key: true }）。读时片段无法从整行
+  // rawCounts 里删除，故删除 = 拉黑（learnedFragments 读取时跳过）。additive 字段，
+  // 老存档缺失即空；被旧代码读到会静默丢弃（拉黑暂失效，可再拉黑），故 LEARN_VERSION 不动。
   function defaultLearning() {
-    return { version: LEARN_VERSION, snippets: {}, bigrams: {}, rawCounts: {} };
+    return { version: LEARN_VERSION, snippets: {}, bigrams: {}, rawCounts: {}, blocked: {} };
   }
 
   // 归一化：任何脏值都回退到合法结构。version 处理：
@@ -294,6 +304,12 @@
           if (n > 0) clean[ck] = n;
         });
         if (Object.keys(clean).length) out.bigrams[pk] = clean;
+      });
+    }
+    // blocked：仅收 value===true 的 key（对象、非数组）；缺失即空
+    if (raw.blocked && typeof raw.blocked === 'object' && !Array.isArray(raw.blocked)) {
+      Object.keys(raw.blocked).forEach(function (bk) {
+        if (raw.blocked[bk] === true) out.blocked[bk] = true;
       });
     }
     if (raw.rawCounts && typeof raw.rawCounts === 'object') {
@@ -380,6 +396,91 @@
 
   function numOr(v, dflt) {
     return (typeof v === 'number' && isFinite(v)) ? v : dflt;
+  }
+
+  /* ============================================================
+   * 2.0.1a 读时切分（片段补全）
+   * ------------------------------------------------------------
+   * 整行语料（rawCounts）读取时才切成更小候选单位，落盘不含片段。
+   * 子句边界 = 中英句读标点 + 换行/制表 + 全角空格 + 连续 2 个及以上空格。
+   * 单个空格绝不作边界，否则 “擅长 Web 开发” 会被拆成 擅长 / Web / 开发。
+   * ============================================================ */
+  var CLAUSE_BOUNDARY = /(?:[，。！？；：、,.!?;:\n\r\t\u3000]| {2,})+/;
+  var CLAUSE_BOUNDARY_G = /(?:[，。！？；：、,.!?;:\n\r\t\u3000]| {2,})+/g;
+
+  // 把一段文本按子句边界切开，各段 trim、丢空串。纯标点 / 空串 → []。
+  function segmentClause(text) {
+    var t = String(text == null ? '' : text);
+    if (t === '') return [];
+    var parts = t.split(CLAUSE_BOUNDARY);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var seg = parts[i].trim();
+      if (seg !== '') out.push(seg);
+    }
+    return out;
+  }
+
+  // 通用切分入口。opts.mode !== 'word' 时只做子句切分（默认）。
+  // 'word' 模式（opt-in）对每条子句再按词起点切出多个「可接续起点后缀」，
+  // 让无标点的长句也能从词中间接续。无 Intl.Segmenter（旧 macOS）时整段回退为
+  // 子句结果，与 clause 模式完全一致；个别子句构造/切分抛错时该子句只保留整条。
+  function segmentText(text, opts) {
+    opts = opts || {};
+    var clauses = segmentClause(text);
+    if (opts.mode !== 'word') return clauses;
+    if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return clauses;
+
+    var maxStarts = numOr(opts.maxStarts, LEARN_FRAG_MAX_STARTS);
+    var out = [];
+    var seen = {};
+    function push(s) { if (s && !seen[s]) { seen[s] = true; out.push(s); } }
+    for (var i = 0; i < clauses.length; i++) {
+      var clause = clauses[i];
+      push(clause);                              // 整条子句本身始终保留
+      var starts = wordStartSuffixes(clause, maxStarts);
+      for (var j = 0; j < starts.length; j++) push(starts[j]);
+    }
+    return out;
+  }
+
+  // 用 Intl.Segmenter 找子句内每个词的起点（index>0），从各起点切到子句末，
+  // 得到多个「后缀」候选（越靠前的起点越长），最多 maxStarts 个防膨胀。
+  // 构造 / 切分抛错时返回 []（调用方已单独保留整条子句），即回退为按标点切。
+  function wordStartSuffixes(clause, maxStarts) {
+    try {
+      var seg = new Intl.Segmenter(undefined, { granularity: 'word' });
+      var out = [];
+      var it = seg.segment(clause)[Symbol.iterator]();
+      var st;
+      while (!(st = it.next()).done && out.length < maxStarts) {
+        var s = st.value;
+        if (s.isWordLike && s.index > 0) out.push(clause.slice(s.index));
+      }
+      return out;
+    } catch (_e) {
+      return [];
+    }
+  }
+
+  // 求「splitTail 用的两段」：当前（可能未结束的）子句 + 它之前那条完整子句。
+  // - tail：最后一个子句边界之后到末尾的文本，去前导空白（与 segmentClause 的
+  //   trim 对齐，否则原文前缀比对差一个空格就不中）；不去尾部空白。
+  // - prev：tail 之前那条非空子句原文（供上层算 bigram prefixKey）；无则 ''。
+  // 与候选池共用同一套子句边界（CLAUSE_BOUNDARY），不许各写一份正则。
+  function clauseTailParts(textBeforeCaret) {
+    var t = String(textBeforeCaret == null ? '' : textBeforeCaret);
+    var re = new RegExp(CLAUSE_BOUNDARY_G.source, 'g');
+    var lastStart = -1, lastEnd = 0, m;
+    while ((m = re.exec(t)) !== null) {
+      lastStart = m.index;
+      lastEnd = m.index + m[0].length;
+      if (m[0].length === 0) re.lastIndex++;   // 防御：理论上边界非空，稳妥兜底
+    }
+    var tail = t.slice(lastEnd).replace(/^\s+/, '');
+    var beforeSegs = segmentClause(lastStart === -1 ? '' : t.slice(0, lastStart));
+    var prev = beforeSegs.length ? beforeSegs[beforeSegs.length - 1] : '';
+    return { tail: tail, prev: prev };
   }
 
   /* ============================================================
@@ -528,6 +629,85 @@
       if (r && r.lang === want) out.push({ key: k, text: r.text, source: 'learned' });
     });
     return out;
+  }
+
+  // 读时片段池：遍历 rawCounts（按 lang 过滤）把每行 segmentText 切成片段，
+  // 按片段归一化 key 聚合两个量后择优进池——存档里没有片段数据，换切分策略
+  // 只是改代码 + 下次读取重算，零迁移。返回 [{ key, text, source:'learned', lines, count }]。
+  //   lines：该片段出现在多少「不同的行」里（行内去重，跨句复用信号）；
+  //   count：加权频次 = 含该片段的各行 count 之和（单行高频保底）。
+  // 进池：lines >= minLines 或 count >= minCount；片段字符数 < minLen 丢弃；
+  // blocked（P3 拉黑名单，此前缺失即空）里的 key 不进池。
+  function learnedFragments(learning, lang, opts) {
+    opts = opts || {};
+    var L = normalizeLearning(learning);
+    var want = lang === 'en' ? 'en' : 'zh';
+    var minLen = numOr(opts.minLen, LEARN_FRAG_MIN_LEN);
+    var minLines = numOr(opts.minLines, LEARN_FRAG_MIN_LINES);
+    var minCount = numOr(opts.minCount, LEARN_PROMOTE_THRESHOLD);
+    var blocked = (L.blocked && typeof L.blocked === 'object') ? L.blocked : {};
+
+    var agg = {}; // fragKey -> { key, text, lines, count }
+    Object.keys(L.rawCounts).forEach(function (rk) {
+      var r = L.rawCounts[rk];
+      if (!r || r.lang !== want) return;
+      var lineCount = numOr(r.count, 0);
+      var frags = segmentText(r.text, opts);
+      var seenInLine = {};
+      frags.forEach(function (frag) {
+        if (frag.length < minLen) return;
+        if (normalizeLearnText(frag) === '') return; // 归一化后为空（纯标点等）不进池
+        var fk = learnKey(want, frag);
+        if (blocked[fk]) return;
+        var a = agg[fk] || (agg[fk] = { key: fk, text: frag, lines: 0, count: 0 });
+        a.count += lineCount;                        // 加权频次：累加所在行的 count
+        if (!seenInLine[fk]) { seenInLine[fk] = true; a.lines += 1; } // 行内去重后计不同行数
+      });
+    });
+
+    var out = [];
+    Object.keys(agg).forEach(function (fk) {
+      var a = agg[fk];
+      if (a.lines >= minLines || a.count >= minCount) {
+        out.push({ key: a.key, text: a.text, source: 'learned', lines: a.lines, count: a.count });
+      }
+    });
+    return out;
+  }
+
+  // 片段管理列表（供设置面板「自学习」tab）：复用 learnedFragments 取当前进池片段，
+  // 并挂上行为统计（shown/accepted/lastUsedAt，无则 0）与 lines/count。按单一语言取，
+  // 跨语言合并/排序交给上层（store）。opts 透传给 learnedFragments（管理列表默认 clause）。
+  function learnedFragmentsForManage(learning, lang, opts) {
+    var L = normalizeLearning(learning);
+    var want = lang === 'en' ? 'en' : 'zh';
+    return learnedFragments(L, want, opts).map(function (f) {
+      var s = L.snippets[f.key] || {};
+      return {
+        key: f.key, text: f.text, lang: want,
+        lines: f.lines, count: f.count,
+        shown: numOr(s.shown, 0), accepted: numOr(s.accepted, 0), lastUsedAt: numOr(s.lastUsedAt, 0)
+      };
+    });
+  }
+
+  // 删除（拉黑）一个片段：读时片段嵌在整行 rawCounts 里删不掉，故置入 blocked 名单，
+  // learnedFragments 读取时跳过。级联清掉该 key 的 shown/accepted 统计，以及 bigrams 中
+  // 以它为**候选(candKey)**的项（某 prefixKey 下清空则连 prefixKey 一起删）。
+  // 不动 rawCounts —— 整行语料仍在，其它片段不受影响。
+  function blockLearnedFragment(learning, key) {
+    var L = normalizeLearning(learning);
+    if (key == null) return L;
+    L.blocked[key] = true;
+    delete L.snippets[key];
+    Object.keys(L.bigrams).forEach(function (pk) {
+      var m = L.bigrams[pk];
+      if (m && m[key] !== undefined) {
+        delete m[key];
+        if (Object.keys(m).length === 0) delete L.bigrams[pk];
+      }
+    });
+    return L;
   }
 
   // 收集所有已提炼的 learned 片段 + 统计信息（供设置面板「自学习」列表展示/管理）。
@@ -836,6 +1016,8 @@
       var cp = raw.settings.completion;
       if (cp && typeof cp === 'object') {
         s.settings.completion.enabled = cp.enabled !== false;
+        // 读时切分粒度：仅 'word' opt-in，其余（含缺失）回退默认 'clause'
+        s.settings.completion.segMode = cp.segMode === 'word' ? 'word' : 'clause';
       }
     }
 
@@ -1622,6 +1804,13 @@
     normalizeLearning,
     normalizeLearnText,
     learnKey,
+    // 读时切分（片段补全）
+    segmentClause,
+    segmentText,
+    clauseTailParts,
+    learnedFragments,
+    learnedFragmentsForManage,
+    blockLearnedFragment,
     getCandidates,
     scoreCandidate,
     rankCandidates,

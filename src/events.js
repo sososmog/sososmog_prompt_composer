@@ -16,8 +16,8 @@ import {
   showToast,
   collectText,
   commitLearningFromText,
-  getLearnedSnippetsForManage,
-  removeLearnedSnippetByKey,
+  getLearnedFragmentsForManage,
+  blockLearnedFragmentByKey,
   clearAllLearning,
   exportLearningBundle,
   importLearningBundle,
@@ -377,6 +377,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                 '<span class="st-label">行内自动补全</span>' +
                 '<span class="st-desc">编辑时根据你复制/下载过的内容，用灰色提示可能想输入的句子（按 Tab 采纳）。关闭后不再展示提示、也不再学习新内容，已学到的数据不会被清除。</span>' +
                 '<label class="st-tr-check"><input type="checkbox" id="stCompletionEnabled" /><span>启用行内自动补全</span></label>' +
+                '<label class="st-tr-check"><input type="checkbox" id="stCompletionSegWord" /><span>词级切分（实验）</span></label>' +
+                '<span class="st-desc">开启后，无标点的长句也能从词的中间接续（用系统内置分词，个别旧系统不支持时自动退回按标点切分）。</span>' +
               '</div>' +
             '</section>' +
             // ---- 翻译 ----
@@ -651,6 +653,15 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         showToast($stCompletionEnabled.checked ? '已开启行内自动补全' : '已关闭行内自动补全（已学到的数据不会被清除）');
       });
     }
+    // 通用 tab：词级切分（segMode），勾选=word，否则 clause
+    var $stCompletionSegWord = $stOverlay.querySelector('#stCompletionSegWord');
+    if ($stCompletionSegWord) {
+      $stCompletionSegWord.addEventListener('change', function () {
+        state.settings.completion.segMode = $stCompletionSegWord.checked ? 'word' : 'clause';
+        scheduleSave();
+        showToast($stCompletionSegWord.checked ? '已开启词级切分（无标点长句也能句中接续）' : '已切回按标点切分');
+      });
+    }
 
     // 自学习 tab：列表 + 清空 + 导入导出
     bindLearningTab();
@@ -735,7 +746,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   function renderLearningManage() {
     var host = $stOverlay && $stOverlay.querySelector('#stLearningHost');
     if (!host) return;
-    var items = getLearnedSnippetsForManage();
+    var items = getLearnedFragmentsForManage();
     if (items.length === 0) {
       host.innerHTML = '<div class="sm-hint sm-embed-hint">还没有学习到内容，继续使用复制 / 下载即可自动积累。</div>';
       return;
@@ -747,6 +758,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       row.className = 'sm-row st-learn-row';
       var rate = it.shown > 0 ? Math.round((it.accepted / it.shown) * 100) : null;
       var metaBits = [it.lang === 'en' ? 'English' : '中文'];
+      metaBits.push('出现 ' + it.count + ' 次 / ' + it.lines + ' 行');
       metaBits.push('展示 ' + it.shown + ' 次');
       metaBits.push('采纳 ' + it.accepted + ' 次' + (rate !== null ? '（' + rate + '%）' : ''));
       if (it.lastUsedAt) metaBits.push('最近使用 ' + formatLearnTime(it.lastUsedAt));
@@ -758,13 +770,13 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       var delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'sm-op danger';
-      delBtn.title = '删除这条';
-      delBtn.setAttribute('aria-label', '删除这条学习到的片段');
+      delBtn.title = '不再提示这条';
+      delBtn.setAttribute('aria-label', '不再提示这条学习到的片段');
       delBtn.innerHTML = icon('trash-2');
       delBtn.addEventListener('click', function () {
-        removeLearnedSnippetByKey(it.key);
+        blockLearnedFragmentByKey(it.key);
         renderLearningManage();
-        showToast('已删除');
+        showToast('已删除，不再提示这条');
       });
       row.appendChild(delBtn);
       list.appendChild(row);
@@ -775,7 +787,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     var $clear = $stOverlay.querySelector('#stLearningClear');
     if ($clear) {
       $clear.addEventListener('click', function () {
-        if (getLearnedSnippetsForManage().length === 0) { showToast('目前没有可清空的学习数据'); return; }
+        if (getLearnedFragmentsForManage().length === 0) { showToast('目前没有可清空的学习数据'); return; }
         if (!window.confirm('确定清空全部自学习数据吗？此操作不可恢复。')) return;
         clearAllLearning();
         renderLearningManage();
@@ -795,8 +807,12 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   }
 
   function doExportLearning() {
-    if (getLearnedSnippetsForManage().length === 0) { showToast('目前没有可导出的学习数据'); return; }
+    // 导出的是「整行提炼的 learned 语料」（见 buildLearningExportBundle），与面板里
+    // 读时片段列表口径不同，故直接看 bundle 是否有内容，而非片段列表长度。
     var bundle = exportLearningBundle();
+    if (!bundle || !bundle.rawCounts || Object.keys(bundle.rawCounts).length === 0) {
+      showToast('目前没有可导出的学习数据'); return;
+    }
     var text = JSON.stringify(bundle, null, 2);
     var defaultName = 'composer-learning-' + todayStampLocal() + '.json';
     if (dialogApi && dialogApi.save && fsApi && fsApi.writeTextFile) {
@@ -870,6 +886,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     $stDelayInput.value = state.settings.pasteDelayMs;
     var $stCompletionEnabled = $stOverlay.querySelector('#stCompletionEnabled');
     if ($stCompletionEnabled) $stCompletionEnabled.checked = !!state.settings.completion.enabled;
+    var $stCompletionSegWord = $stOverlay.querySelector('#stCompletionSegWord');
+    if ($stCompletionSegWord) $stCompletionSegWord.checked = state.settings.completion.segMode === 'word';
     renderTranslateSettings();
     // 若当前正停在某个管理 tab 且面板可见，远端同步后重新 mount 以反映最新数据。
     // 此路径只在非编辑态触发（编辑中 isEditingLocally 会暂缓远端 state 应用），
