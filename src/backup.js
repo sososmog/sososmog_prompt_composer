@@ -345,6 +345,11 @@ function applyTheme(theme) {
   if (isLight) document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', 'dark');
   try { localStorage.setItem('composer-theme', isLight ? 'light' : 'dark'); } catch (e) { /* 存储不可用，主题仍已生效于当前会话 */ }
+  // 导入偏好也可能改主题，广播给浮窗即时跟随（与 events.js themeToggle 同事件）
+  var eventApi = window.__TAURI__ && window.__TAURI__.event;
+  if (eventApi && eventApi.emit) {
+    eventApi.emit('composer-theme-changed', { theme: isLight ? 'light' : 'dark' }).catch(function () {});
+  }
 }
 
 /* ============================================================

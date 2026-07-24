@@ -1110,12 +1110,17 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   var $themeToggle = document.getElementById('themeToggle');
   $themeToggle.addEventListener('click', function () {
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var newTheme = dark ? 'light' : 'dark';
     if (dark) {
       document.documentElement.removeAttribute('data-theme');
     } else {
       document.documentElement.setAttribute('data-theme', 'dark');
     }
-    try { localStorage.setItem('composer-theme', dark ? 'light' : 'dark'); } catch (e) { /* 存储不可用，主题仍已生效于当前会话 */ }
+    try { localStorage.setItem('composer-theme', newTheme); } catch (e) { /* 存储不可用，主题仍已生效于当前会话 */ }
+    // 广播给浮窗，让其即时跟随主题切换
+    if (eventApi && eventApi.emit) {
+      eventApi.emit('composer-theme-changed', { theme: newTheme }).catch(function () {});
+    }
   });
 
   $btnClearAll.addEventListener('click', function () {
