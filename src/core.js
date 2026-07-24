@@ -265,8 +265,11 @@
     return (lang === 'en' ? 'en' : 'zh') + LEARN_KEY_SEP + normalizeLearnText(text);
   }
 
+  // blocked：被用户拉黑的片段 key 集合（{ key: true }）。读时片段无法从整行
+  // rawCounts 里删除，故删除 = 拉黑（learnedFragments 读取时跳过）。additive 字段，
+  // 老存档缺失即空；被旧代码读到会静默丢弃（拉黑暂失效，可再拉黑），故 LEARN_VERSION 不动。
   function defaultLearning() {
-    return { version: LEARN_VERSION, snippets: {}, bigrams: {}, rawCounts: {} };
+    return { version: LEARN_VERSION, snippets: {}, bigrams: {}, rawCounts: {}, blocked: {} };
   }
 
   // 归一化：任何脏值都回退到合法结构。version 处理：
@@ -301,6 +304,12 @@
           if (n > 0) clean[ck] = n;
         });
         if (Object.keys(clean).length) out.bigrams[pk] = clean;
+      });
+    }
+    // blocked：仅收 value===true 的 key（对象、非数组）；缺失即空
+    if (raw.blocked && typeof raw.blocked === 'object' && !Array.isArray(raw.blocked)) {
+      Object.keys(raw.blocked).forEach(function (bk) {
+        if (raw.blocked[bk] === true) out.blocked[bk] = true;
       });
     }
     if (raw.rawCounts && typeof raw.rawCounts === 'object') {
@@ -664,6 +673,41 @@
       }
     });
     return out;
+  }
+
+  // 片段管理列表（供设置面板「自学习」tab）：复用 learnedFragments 取当前进池片段，
+  // 并挂上行为统计（shown/accepted/lastUsedAt，无则 0）与 lines/count。按单一语言取，
+  // 跨语言合并/排序交给上层（store）。opts 透传给 learnedFragments（管理列表默认 clause）。
+  function learnedFragmentsForManage(learning, lang, opts) {
+    var L = normalizeLearning(learning);
+    var want = lang === 'en' ? 'en' : 'zh';
+    return learnedFragments(L, want, opts).map(function (f) {
+      var s = L.snippets[f.key] || {};
+      return {
+        key: f.key, text: f.text, lang: want,
+        lines: f.lines, count: f.count,
+        shown: numOr(s.shown, 0), accepted: numOr(s.accepted, 0), lastUsedAt: numOr(s.lastUsedAt, 0)
+      };
+    });
+  }
+
+  // 删除（拉黑）一个片段：读时片段嵌在整行 rawCounts 里删不掉，故置入 blocked 名单，
+  // learnedFragments 读取时跳过。级联清掉该 key 的 shown/accepted 统计，以及 bigrams 中
+  // 以它为**候选(candKey)**的项（某 prefixKey 下清空则连 prefixKey 一起删）。
+  // 不动 rawCounts —— 整行语料仍在，其它片段不受影响。
+  function blockLearnedFragment(learning, key) {
+    var L = normalizeLearning(learning);
+    if (key == null) return L;
+    L.blocked[key] = true;
+    delete L.snippets[key];
+    Object.keys(L.bigrams).forEach(function (pk) {
+      var m = L.bigrams[pk];
+      if (m && m[key] !== undefined) {
+        delete m[key];
+        if (Object.keys(m).length === 0) delete L.bigrams[pk];
+      }
+    });
+    return L;
   }
 
   // 收集所有已提炼的 learned 片段 + 统计信息（供设置面板「自学习」列表展示/管理）。
@@ -1765,6 +1809,8 @@
     segmentText,
     clauseTailParts,
     learnedFragments,
+    learnedFragmentsForManage,
+    blockLearnedFragment,
     getCandidates,
     scoreCandidate,
     rankCandidates,

@@ -12,6 +12,8 @@ const {
   segmentText,
   clauseTailParts,
   learnedFragments,
+  learnedFragmentsForManage,
+  blockLearnedFragment,
   getCandidates,
   scoreCandidate,
   rankCandidates,
@@ -620,5 +622,85 @@ describe('segmentText word 模式', () => {
     const s = '今天天气很好我们出去玩吧';
     expect(segmentText(s, { mode: 'clause' })).toEqual(segmentClause(s));
     expect(segmentText(s)).toEqual(segmentClause(s));
+  });
+});
+
+/* ============================================================
+ * 步骤三（P3）：管理与删除（blocked 拉黑名单）
+ * ============================================================ */
+describe('blocked 字段（additive schema）', () => {
+  it('defaultLearning 含空 blocked', () => {
+    expect(defaultLearning().blocked).toEqual({});
+  });
+
+  it('normalizeLearning 保留 value===true 的 blocked，忽略其它', () => {
+    const raw = {
+      version: 2, snippets: {}, bigrams: {}, rawCounts: {},
+      blocked: { keepTrue: true, dropFalse: false, dropStr: 'x' },
+    };
+    const out = normalizeLearning(raw);
+    expect(out.blocked).toEqual({ keepTrue: true });
+  });
+
+  it('blocked 缺失 / 为数组时归一化为空对象', () => {
+    expect(normalizeLearning({ version: 2, blocked: undefined }).blocked).toEqual({});
+    expect(normalizeLearning({ version: 2, blocked: ['a'] }).blocked).toEqual({});
+  });
+});
+
+describe('learnedFragments 跳过 blocked', () => {
+  it('blocked 里的片段 key 不进池', () => {
+    // 让「擅长 Web 开发」跨 2 行进池
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['你是工程师，擅长 Web 开发'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我们要找的人，擅长 Web 开发'] }, L, 1001);
+    const fk = learnKey('zh', '擅长 Web 开发');
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).toContain('擅长 Web 开发');
+    // 拉黑后不再产出
+    L.blocked[fk] = true;
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).not.toContain('擅长 Web 开发');
+  });
+});
+
+describe('blockLearnedFragment', () => {
+  it('拉黑后 learnedFragments 不再产出该 key，且 bigram 中以它为候选的项被清', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['你是工程师，擅长 Web 开发'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我们要找的人，擅长 Web 开发'] }, L, 1001);
+    const fk = learnKey('zh', '擅长 Web 开发');
+    const pfx = learnKey('zh', '前一句');
+    // 手工造一个以 fk 为候选、及另一条无关候选的 bigram
+    L.bigrams[pfx] = {}; L.bigrams[pfx][fk] = 3;
+    const otherPfx = learnKey('zh', '别的前缀');
+    const otherCand = learnKey('zh', '别的候选');
+    L.bigrams[otherPfx] = {}; L.bigrams[otherPfx][otherCand] = 2;
+
+    const out = blockLearnedFragment(L, fk);
+    expect(out.blocked[fk]).toBe(true);
+    expect(learnedFragments(out, 'zh', {}).map((f) => f.text)).not.toContain('擅长 Web 开发');
+    // 以 fk 为候选的项被清，该 prefixKey 下清空 → 整个 prefixKey 删除
+    expect(out.bigrams[pfx]).toBeUndefined();
+    // 无关的 bigram 不受影响
+    expect(out.bigrams[otherPfx][otherCand]).toBe(2);
+  });
+});
+
+describe('learnedFragmentsForManage', () => {
+  it('挂上 shown/accepted/lastUsedAt 与 lines/count', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: ['请务必仔细检查代码逻辑'] }, L, 2000 + i);
+    const fk = learnKey('zh', '请务必仔细检查代码逻辑');
+    // 造点行为统计（模拟展示/采纳记账）
+    L = learn('shown', { candKey: fk }, L, 3000);
+    L = learn('accepted', { candKey: fk }, L, 3001);
+    const rows = learnedFragmentsForManage(L, 'zh', { mode: 'clause' });
+    const hit = rows.find((r) => r.text === '请务必仔细检查代码逻辑');
+    expect(hit).toBeDefined();
+    expect(hit.lines).toBe(1);
+    expect(hit.count).toBe(3);
+    expect(hit.shown).toBe(1);
+    expect(hit.accepted).toBe(1);
+    expect(hit.lastUsedAt).toBe(3001);
+    expect(hit.lang).toBe('zh');
   });
 });
