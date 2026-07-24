@@ -54,4 +54,24 @@ export default [
       },
     },
   },
+  {
+    // __tests__ 下的 .mjs 冒烟脚本：node 里驱动 playwright，
+    // page.evaluate 内联的浏览器全局（document/getComputedStyle）静态可见但运行在浏览器。
+    files: ['src/__tests__/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        document: 'readonly',
+        getComputedStyle: 'readonly',
+        localStorage: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
+      'no-empty': ['warn'],
+    },
+  },
 ];
