@@ -4,6 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Composer 浮窗</title>
+<script>
+  /* 渲染前应用主题，避免首屏闪烁；与主窗口共享 localStorage 的 composer-theme。
+     默认深色，仅当显式为 light 时不加 data-theme（浅色）。 */
+  (function () {
+    var t = 'dark';
+    try { t = localStorage.getItem('composer-theme') || 'dark'; } catch (e) {}
+    if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+  })();
+</script>
 <style>
   /* ============================================================
    * 浮窗：无边框 + 透明窗口，根容器自己画圆角卡片背景。
@@ -538,6 +547,16 @@ import { attachCompletion } from './completion.js';
     document.addEventListener('focusout', function () {
       setTimeout(flushPendingRemoteState, 0);
     });
+
+    // 主题实时同步：主窗口切换主题（或导入偏好）时广播，浮窗即时跟随。
+    // 同时回写 localStorage，供浮窗下次重开时首帧取到正确主题。
+    eventApi.listen('composer-theme-changed', function (evt) {
+      var theme = evt && evt.payload && evt.payload.theme;
+      var isLight = theme === 'light';
+      if (isLight) document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', 'dark');
+      try { localStorage.setItem('composer-theme', isLight ? 'light' : 'dark'); } catch (e) { /* 存不了就算了，当次已生效 */ }
+    }).catch(function () {});
   }
 
   /* ============================================================
