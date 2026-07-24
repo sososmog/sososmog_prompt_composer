@@ -11,6 +11,8 @@
 - 变量系统：内容中写 `{{名称}}` 即创建变量；变量名中英共用、值按语言分别填写
 - 右栏检视：变量填写、中英双语 Token 估算对比卡、编译预览（标题/正文/变量三处可直接点击内联编辑）
 - 常用句：每个模块下方内置常用句，可一键插入光标处，支持自定义增删
+- **行内自动补全**：在模块正文里打字时，编辑区会以灰字（ghost text）预览接续内容，`Tab` / `→` 采纳、`Esc` 取消；只在光标位于文本末尾、且不在代码块内时提示。候选来自内置常用句/段落，以及一套**本地自学习引擎**——每当你完整复制或导出一段文本，就会把其中的子句/片段学下来，越用越贴合你的写法（数据只存在本机，可在设置面板关闭；关闭仅停用，不清除已学数据）
+- **自学习数据管理**：设置面板「自学习」页可查看、逐条删除或一键清空学到的片段，并支持把自学习数据单独导入/导出为文件（与配置备份相互独立）
 - **快速段落**：独立功能区，支持自定义分组（两级结构：分组 → 段落），下拉展开后点击即可插入预设文本，可通过管理面板增删分组/段落、调整顺序
 - **一键翻译**：把当前语言正文按块整体翻译到另一种语言并写回对应槽位。内置 Google Gemini / GLM 智谱 / Groq / OpenRouter 以及「自定义（OpenAI 兼容）」端点，可在设置面板选择服务商、填 API Key 与模型；请求经 Tauri `http` 插件直发（绕开浏览器 CORS，Key 只留在应用侧），代码块会被遮罩不参与翻译，失败时不改动任何已有内容
 - **配置导入导出**：把素材库 / 变量 / 设置等打包为 `.json` 备份文件，导入时可预览摘要并按名称判重合并。**API Key 从不导出，导入也永不清空本机 Key**
@@ -22,6 +24,7 @@
 ### 浮窗模式
 
 - 全局快捷键（默认 `Ctrl+Alt+C`，可在设置面板自定义）随时呼出/隐藏一个置顶小窗，无需切回主窗口即可复制常用句/模块内容
+- 浮窗内的编辑同样支持上面的**行内自动补全**（灰字预览、`Tab`/`→` 采纳），与主窗口共用同一套候选池与自学习数据
 - **一键缩小为悬浮小球**：点击浮窗右上角的收拢图标，可把整个浮窗缩成一个约 52×52 的置顶小圆球，暂时不用时不占屏幕；单击小球即原地恢复到缩小前的尺寸，按住小球可拖动挪位
 - 窗口位置与尺寸会被记住，下次呼出恢复原位（不记忆可见性，默认仍是隐藏启动）
 - **自动粘贴到外部窗口**（Windows 已在真机验证；macOS 为未编译验证的草稿实现）：开启开关后，点击浮窗内容会先复制到剪贴板，再自动切回你刚才操作的窗口并模拟粘贴，粘贴前等待时长可配置
@@ -120,7 +123,7 @@ npm run tauri dev
 ```
 
 - 启动主窗口（标题 Composer，默认 1200×800，最小 900×600）。
-- 前端为纯静态文件、原生 ESM 分模块：纯逻辑在 [src/core.js](src/core.js)，主窗口按 [src/store.js](src/store.js)（状态/持久化）→ [src/render.js](src/render.js)（渲染）→ [src/quick.js](src/quick.js)（浮窗/管理面板）→ [src/events.js](src/events.js)（装配入口）分层，另有 [src/backup.js](src/backup.js)（导入导出）、[src/translate.js](src/translate.js)（一键翻译）、[src/guide.js](src/guide.js)（新手引导）与 [src/styles.css](src/styles.css)；主窗口 UI 在 [src/index.html](src/index.html)，浮窗 UI 在 [src/float.html](src/float.html)。修改后刷新对应窗口即可看到变化。
+- 前端为纯静态文件、原生 ESM 分模块：纯逻辑在 [src/core.js](src/core.js)，主窗口按 [src/store.js](src/store.js)（状态/持久化）→ [src/render.js](src/render.js)（渲染）→ [src/quick.js](src/quick.js)（浮窗/管理面板）→ [src/events.js](src/events.js)（装配入口）分层，另有 [src/backup.js](src/backup.js)（导入导出）、[src/translate.js](src/translate.js)（一键翻译）、[src/guide.js](src/guide.js)（新手引导）、[src/completion.js](src/completion.js)（行内自动补全交互层）与 [src/styles.css](src/styles.css)；主窗口 UI 在 [src/index.html](src/index.html)，浮窗 UI 在 [src/float.html](src/float.html)。修改后刷新对应窗口即可看到变化。
 - 按下 `Ctrl+Alt+C`（或在设置面板中自定义后的快捷键）可呼出/隐藏浮窗；浮窗默认不可见，不会随应用启动自动弹出。
 
 > 也可以直接用浏览器打开 `src/index.html` 预览主窗口界面（此时无 Tauri 环境，持久化/系统剪贴板/保存对话框/浮窗热键/一键翻译等能力会自动降级为浏览器行为或空操作，UI 仍可正常操作）。
@@ -180,7 +183,7 @@ npm run tauri icon path/to/your-icon.png
 │   └── workflows/
 │       └── release.yml       # 推送 v* tag 自动构建全平台产物 + 创建 Draft Release
 ├── src/
-│   ├── core.js                # 纯逻辑层（无 DOM）：预设数据/持久化归一化/token 估算/翻译请求构造 等纯函数，主窗口与浮窗、测试共用
+│   ├── core.js                # 纯逻辑层（无 DOM）：预设数据/持久化归一化/token 估算/翻译请求构造/补全候选筛选打分与自学习 等纯函数，主窗口与浮窗、测试共用
 │   ├── store.js               # 运行时状态 + 持久化 + 双向同步 + 基础 DOM/工具（主窗口最底层）
 │   ├── render.js              # 左栏模块库 / 右栏编辑器渲染 + 块拖拽
 │   ├── quick.js               # 快速段落 + 通用管理浮窗（常用句/插入模块）+ 快速段落管理
@@ -188,9 +191,10 @@ npm run tauri icon path/to/your-icon.png
 │   ├── backup.js              # 配置导入导出（打包/校验/合并的编排 + 弹窗 UI）
 │   ├── translate.js           # 一键翻译编排层（收集待翻块 → http 请求 → 解析写回）
 │   ├── guide.js               # 新手引导：首启动高亮遮罩引导 + 上下文轻提示
+│   ├── completion.js          # 行内自动补全交互层（ghost text 展示/键盘接管，纯逻辑在 core.js），主窗口与浮窗共用
 │   ├── styles.css             # 主窗口样式
 │   ├── index.html             # 主窗口 UI：模块库/装配区/检视栏/快速段落/设置面板
-│   ├── float.html             # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、自动粘贴开关、一键缩小为悬浮小球
+│   ├── float.html             # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、行内自动补全、自动粘贴开关、一键缩小为悬浮小球
 │   └── __tests__/             # Vitest 用例（纯逻辑层）
 └── src-tauri/
     ├── Cargo.toml             # Rust 依赖（tauri + fs/dialog/clipboard/updater/process/global-shortcut/window-state/http 插件 + enigo 等）
