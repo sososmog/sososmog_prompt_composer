@@ -172,7 +172,9 @@
    * 1.3 行内补全总开关（默认开）
    * ============================================================ */
   function defaultCompletionSettings() {
-    return { enabled: true };
+    // segMode：读时切分粒度。'clause'（默认）按句读标点切子句；
+    // 'word' 为 opt-in 增强，对无标点长句再按词起点切（见 segmentText）。
+    return { enabled: true, segMode: 'clause' };
   }
 
   function defaultState() {
@@ -221,6 +223,10 @@
   var LEARN_RECENCY_HALFLIFE_MS = 14 * 24 * 60 * 60 * 1000; // 新近度半衰期 14 天
   var LEARN_PROMOTE_THRESHOLD = 3; // 原始整行重复达到此次数，提炼成 learned 片段
   var LEARN_VERSION = 2;           // v2：key 改用归一化文本，同一句的空白/标点/大小写差异合并计数
+
+  // 读时切分（片段补全）可调参数：片段进池的长度 / 跨行复用 / 单行高频阈值。
+  var LEARN_FRAG_MIN_LEN = 4;      // 片段字符数下限（过短命中噪声大）
+  var LEARN_FRAG_MIN_LINES = 2;    // 片段出现在 ≥ 此数量的不同行 → 进池（跨句复用信号）
 
   // 全角标点 → 半角映射（仅用于归一化 key，不改展示文本）。
   var FULL_TO_HALF = {
@@ -383,6 +389,56 @@
   }
 
   /* ============================================================
+   * 2.0.1a 读时切分（片段补全）
+   * ------------------------------------------------------------
+   * 整行语料（rawCounts）读取时才切成更小候选单位，落盘不含片段。
+   * 子句边界 = 中英句读标点 + 换行/制表 + 全角空格 + 连续 2 个及以上空格。
+   * 单个空格绝不作边界，否则 “擅长 Web 开发” 会被拆成 擅长 / Web / 开发。
+   * ============================================================ */
+  var CLAUSE_BOUNDARY = /(?:[，。！？；：、,.!?;:\n\r\t\u3000]| {2,})+/;
+  var CLAUSE_BOUNDARY_G = /(?:[，。！？；：、,.!?;:\n\r\t\u3000]| {2,})+/g;
+
+  // 把一段文本按子句边界切开，各段 trim、丢空串。纯标点 / 空串 → []。
+  function segmentClause(text) {
+    var t = String(text == null ? '' : text);
+    if (t === '') return [];
+    var parts = t.split(CLAUSE_BOUNDARY);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var seg = parts[i].trim();
+      if (seg !== '') out.push(seg);
+    }
+    return out;
+  }
+
+  // 通用切分入口。当前只做子句切分；opts.mode === 'word' 的词级增强见 P2。
+  // 保持函数签名稳定，上层（候选池 / learnedFragments）传 { mode } 即可平滑升级。
+  function segmentText(text, opts) {
+    opts = opts || {};
+    return segmentClause(text);
+  }
+
+  // 求「splitTail 用的两段」：当前（可能未结束的）子句 + 它之前那条完整子句。
+  // - tail：最后一个子句边界之后到末尾的文本，去前导空白（与 segmentClause 的
+  //   trim 对齐，否则原文前缀比对差一个空格就不中）；不去尾部空白。
+  // - prev：tail 之前那条非空子句原文（供上层算 bigram prefixKey）；无则 ''。
+  // 与候选池共用同一套子句边界（CLAUSE_BOUNDARY），不许各写一份正则。
+  function clauseTailParts(textBeforeCaret) {
+    var t = String(textBeforeCaret == null ? '' : textBeforeCaret);
+    var re = new RegExp(CLAUSE_BOUNDARY_G.source, 'g');
+    var lastStart = -1, lastEnd = 0, m;
+    while ((m = re.exec(t)) !== null) {
+      lastStart = m.index;
+      lastEnd = m.index + m[0].length;
+      if (m[0].length === 0) re.lastIndex++;   // 防御：理论上边界非空，稳妥兜底
+    }
+    var tail = t.slice(lastEnd).replace(/^\s+/, '');
+    var beforeSegs = segmentClause(lastStart === -1 ? '' : t.slice(0, lastStart));
+    var prev = beforeSegs.length ? beforeSegs[beforeSegs.length - 1] : '';
+    return { tail: tail, prev: prev };
+  }
+
+  /* ============================================================
    * 2.0.1 补全引擎：四个纯函数（无 DOM，供 Vitest 覆盖）
    * ============================================================ */
 
@@ -526,6 +582,50 @@
       if (L.snippets[k].source !== 'learned') return;
       var r = L.rawCounts[k];
       if (r && r.lang === want) out.push({ key: k, text: r.text, source: 'learned' });
+    });
+    return out;
+  }
+
+  // 读时片段池：遍历 rawCounts（按 lang 过滤）把每行 segmentText 切成片段，
+  // 按片段归一化 key 聚合两个量后择优进池——存档里没有片段数据，换切分策略
+  // 只是改代码 + 下次读取重算，零迁移。返回 [{ key, text, source:'learned', lines, count }]。
+  //   lines：该片段出现在多少「不同的行」里（行内去重，跨句复用信号）；
+  //   count：加权频次 = 含该片段的各行 count 之和（单行高频保底）。
+  // 进池：lines >= minLines 或 count >= minCount；片段字符数 < minLen 丢弃；
+  // blocked（P3 拉黑名单，此前缺失即空）里的 key 不进池。
+  function learnedFragments(learning, lang, opts) {
+    opts = opts || {};
+    var L = normalizeLearning(learning);
+    var want = lang === 'en' ? 'en' : 'zh';
+    var minLen = numOr(opts.minLen, LEARN_FRAG_MIN_LEN);
+    var minLines = numOr(opts.minLines, LEARN_FRAG_MIN_LINES);
+    var minCount = numOr(opts.minCount, LEARN_PROMOTE_THRESHOLD);
+    var blocked = (L.blocked && typeof L.blocked === 'object') ? L.blocked : {};
+
+    var agg = {}; // fragKey -> { key, text, lines, count }
+    Object.keys(L.rawCounts).forEach(function (rk) {
+      var r = L.rawCounts[rk];
+      if (!r || r.lang !== want) return;
+      var lineCount = numOr(r.count, 0);
+      var frags = segmentText(r.text, opts);
+      var seenInLine = {};
+      frags.forEach(function (frag) {
+        if (frag.length < minLen) return;
+        if (normalizeLearnText(frag) === '') return; // 归一化后为空（纯标点等）不进池
+        var fk = learnKey(want, frag);
+        if (blocked[fk]) return;
+        var a = agg[fk] || (agg[fk] = { key: fk, text: frag, lines: 0, count: 0 });
+        a.count += lineCount;                        // 加权频次：累加所在行的 count
+        if (!seenInLine[fk]) { seenInLine[fk] = true; a.lines += 1; } // 行内去重后计不同行数
+      });
+    });
+
+    var out = [];
+    Object.keys(agg).forEach(function (fk) {
+      var a = agg[fk];
+      if (a.lines >= minLines || a.count >= minCount) {
+        out.push({ key: a.key, text: a.text, source: 'learned', lines: a.lines, count: a.count });
+      }
     });
     return out;
   }
@@ -836,6 +936,8 @@
       var cp = raw.settings.completion;
       if (cp && typeof cp === 'object') {
         s.settings.completion.enabled = cp.enabled !== false;
+        // 读时切分粒度：仅 'word' opt-in，其余（含缺失）回退默认 'clause'
+        s.settings.completion.segMode = cp.segMode === 'word' ? 'word' : 'clause';
       }
     }
 
@@ -1622,6 +1724,11 @@
     normalizeLearning,
     normalizeLearnText,
     learnKey,
+    // 读时切分（片段补全）
+    segmentClause,
+    segmentText,
+    clauseTailParts,
+    learnedFragments,
     getCandidates,
     scoreCandidate,
     rankCandidates,

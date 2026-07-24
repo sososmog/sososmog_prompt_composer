@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { loadComposer } from './setup.js';
+// splitTail 在 completion.js（UI 逻辑层但不触 DOM，jsdom 环境下可直接 import）。
+import { splitTail } from '../completion.js';
 
 const {
   defaultLearning,
   normalizeLearning,
   normalizeLearnText,
   learnKey,
+  segmentClause,
+  segmentText,
+  clauseTailParts,
+  learnedFragments,
   getCandidates,
   scoreCandidate,
   rankCandidates,
@@ -451,5 +457,131 @@ describe('导入导出（含 v1/v2 兼容）', () => {
     expect(Object.keys(learning.rawCounts).length).toBe(1); // 合并成一条
     expect(learning.rawCounts[nk].count).toBe(3 + 4);
     expect(learning.rawCounts[nk].text).toBe(line);         // 保留本地原文
+  });
+});
+
+/* ============================================================
+ * 步骤一（P1）：读时子句切分 —— 句中可接续 + bigram 对中文生效
+ * ============================================================ */
+describe('segmentClause（子句切分）', () => {
+  it('按句读标点切子句，单空格不拆散', () => {
+    expect(segmentClause('你是一名工程师，擅长 Web 开发'))
+      .toEqual(['你是一名工程师', '擅长 Web 开发']);
+    // 关键：擅长 Web 开发 内部是单空格，绝不能被拆成 擅长 / Web / 开发
+    expect(segmentClause('擅长 Web 开发')).toEqual(['擅长 Web 开发']);
+  });
+
+  it('连续 2 个及以上空格才作边界', () => {
+    expect(segmentClause('foo  bar')).toEqual(['foo', 'bar']);   // 双空格拆
+    expect(segmentClause('foo bar')).toEqual(['foo bar']);       // 单空格不拆
+  });
+
+  it('换行/制表/全角空格都是边界', () => {
+    expect(segmentClause('甲甲\n乙乙\t丙丙　丁丁')).toEqual(['甲甲', '乙乙', '丙丙', '丁丁']);
+  });
+
+  it('纯标点 / 空串 → []', () => {
+    expect(segmentClause('。。。')).toEqual([]);
+    expect(segmentClause('，,! ? ；')).toEqual([]);
+    expect(segmentClause('')).toEqual([]);
+    expect(segmentClause(null)).toEqual([]);
+  });
+});
+
+describe('segmentText（切分入口）', () => {
+  it('默认与 segmentClause 一致', () => {
+    const s = '你是一名工程师，擅长 Web 开发';
+    expect(segmentText(s)).toEqual(segmentClause(s));
+  });
+  it('P1 阶段 word 模式降级为 clause', () => {
+    const s = '你是一名工程师，擅长 Web 开发';
+    expect(segmentText(s, { mode: 'word' })).toEqual(segmentClause(s));
+  });
+});
+
+describe('clauseTailParts（供 splitTail 复用）', () => {
+  it('取最后一个子句作 tail、其前一子句作 prev', () => {
+    expect(clauseTailParts('工程师，擅长 Web')).toEqual({ tail: '擅长 Web', prev: '工程师' });
+  });
+  it('无边界时整段为 tail、prev 为空', () => {
+    expect(clauseTailParts('擅长 Web 开发')).toEqual({ tail: '擅长 Web 开发', prev: '' });
+  });
+  it('tail 去前导空白、保留尾部空白', () => {
+    const p = clauseTailParts('前一句，  擅长 Web ');
+    expect(p.tail).toBe('擅长 Web ');   // 前导双空格去掉，尾部单空格保留
+    expect(p.prev).toBe('前一句');
+  });
+});
+
+describe('learnedFragments（读时片段池）', () => {
+  it('同一子句出现在 2 行（各 count 1）→ 进池（lines>=2）', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['擅长 Web 开发，尤其熟悉后端架构'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我需要一个人，擅长 Web 开发'] }, L, 1001);
+    const frags = learnedFragments(L, 'zh', {});
+    const texts = frags.map((f) => f.text);
+    expect(texts).toContain('擅长 Web 开发');
+    // 其余只出现 1 行、count 1 的子句不进池
+    expect(texts).not.toContain('尤其熟悉后端架构');
+    const hit = frags.find((f) => f.text === '擅长 Web 开发');
+    expect(hit.lines).toBe(2);
+    expect(hit.count).toBe(2);
+  });
+
+  it('单行 count 3、子句 lines=1 → 也进池（count>=minCount）', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: ['请务必仔细检查代码逻辑'] }, L, 2000 + i);
+    const frags = learnedFragments(L, 'zh', {});
+    const hit = frags.find((f) => f.text === '请务必仔细检查代码逻辑');
+    expect(hit).toBeDefined();
+    expect(hit.lines).toBe(1);
+    expect(hit.count).toBe(3);
+  });
+
+  it('片段字符数 < minLen(4) 被过滤', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: ['行，我们开始处理这个任务吧'] }, L, 3000 + i);
+    const frags = learnedFragments(L, 'zh', {});
+    const texts = frags.map((f) => f.text);
+    expect(texts).not.toContain('行');                 // 单字子句被过滤
+    expect(texts).toContain('我们开始处理这个任务吧');   // 长子句进池
+  });
+
+  it('只返回对应语言的片段', () => {
+    let L = defaultLearning();
+    for (let i = 0; i < 3; i++) {
+      L = learn('commit', { lang: 'zh', lines: ['一句中文的重复内容够长'] }, L, 4000 + i);
+      L = learn('commit', { lang: 'en', lines: ['a repeated english clause'] }, L, 5000 + i);
+    }
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).toContain('一句中文的重复内容够长');
+    expect(learnedFragments(L, 'zh', {}).map((f) => f.text)).not.toContain('a repeated english clause');
+    expect(learnedFragments(L, 'en', {}).map((f) => f.text)).toContain('a repeated english clause');
+  });
+});
+
+describe('端到端：片段池 → getCandidates 命中句中片段', () => {
+  it('从句中「擅长 Web」能补出「 开发」（复现痛点）', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['你是一名工程师，擅长 Web 开发'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['我们要找的人，擅长 Web 开发'] }, L, 1001);
+    const frags = learnedFragments(L, 'zh', {});
+    const pool = frags.map((f) => ({ key: f.key, text: f.text, source: f.source }));
+    const cands = getCandidates('擅长 Web', pool);
+    const hit = cands.find((c) => c.text === '擅长 Web 开发');
+    expect(hit).toBeDefined();
+    expect(hit.remainder).toBe(' 开发');
+  });
+});
+
+describe('splitTail（completion.js，子句为单位）', () => {
+  it('句中光标：tail=当前子句，prefixKey=上一子句', () => {
+    const p = splitTail('工程师，擅长 Web', 'zh');
+    expect(p.tail).toBe('擅长 Web');
+    expect(p.prefixKey).toBe(learnKey('zh', '工程师'));
+  });
+  it('无上一子句时 prefixKey 为 null', () => {
+    const p = splitTail('擅长 Web 开发', 'zh');
+    expect(p.tail).toBe('擅长 Web 开发');
+    expect(p.prefixKey).toBe(null);
   });
 });

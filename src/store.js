@@ -25,7 +25,7 @@ import {
   parseBlocks,
   createHistory,
   learn,
-  learnedSnippets,
+  learnedFragments,
   learnedSnippetsForManage,
   removeLearnedSnippet,
   clearLearning,
@@ -447,8 +447,9 @@ import { renderAll, applyStartupShortcut } from './events.js';
       if (c.hidden) return;
       add(c[lang] || c.zh || c.en, 'preset');
     });
-    // 自学习提炼出的 learned 片段
-    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned', s.key); });
+    // 自学习片段（读时从整行 rawCounts 现切；key 为片段归一化 learnKey，与统计对齐）
+    var segMode = (state.settings && state.settings.completion && state.settings.completion.segMode) || 'clause';
+    learnedFragments(state.learning, lang, { mode: segMode }).forEach(function (s) { add(s.text, 'learned', s.key); });
     return pool;
   }
 

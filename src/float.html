@@ -393,7 +393,7 @@ import {
   escapeHtml,
   // v0.2 行内补全：候选池摊平 + 学习引擎（纯逻辑）
   learnKey,
-  learnedSnippets,
+  learnedFragments,
   learn,
 } from './core.js';
 import { attachCompletion } from './completion.js';
@@ -641,8 +641,9 @@ import { attachCompletion } from './completion.js';
       if (c.hidden) return;
       add(c[lang] || c.zh || c.en, 'preset');
     });
-    // 自学习提炼出的 learned 片段
-    learnedSnippets(state.learning, lang).forEach(function (s) { add(s.text, 'learned'); });
+    // 自学习片段（读时从整行 rawCounts 现切；add 内部按 learnKey 重算，与片段 key 同源）
+    var segMode = (state.settings && state.settings.completion && state.settings.completion.segMode) || 'clause';
+    learnedFragments(state.learning, lang, { mode: segMode }).forEach(function (s) { add(s.text, 'learned'); });
     return pool;
   }
 
