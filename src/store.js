@@ -40,6 +40,7 @@ import {
 } from './render.js';
 import { renderAll, applyStartupShortcut } from './events.js';
 import { STATE_FILE, writeStateAtomic, readState } from './statefile.js';
+import { insertTextAtCaret } from './edit.js';
 
   /* ============================================================
    * 0. Tauri API 安全获取（浏览器中预览时降级）
@@ -346,19 +347,22 @@ import { STATE_FILE, writeStateAtomic, readState } from './statefile.js';
     if (isBlockArea && !isModuleTemplate) {
       // 短句：插入到当前块光标处
       var el = active;
-      var start = el.selectionStart, end = el.selectionEnd;
-      var before = el.value.slice(0, start);
+      var before = el.value.slice(0, el.selectionStart);
       var pre = (before.length > 0 && !before.endsWith('\n')) ? '\n' : '';
-      var insertText = pre + snippet;
-      el.value = before + insertText + el.value.slice(end);
-      var caret = before.length + insertText.length;
-      el.focus();
-      el.setSelectionRange(caret, caret);
-      // 直接改 textarea.value 不会触发 input 事件，而块的高亮 overlay / 自适应
-      // 高度 / 内容回写都挂在 input handler 上（见 render.js buildBlockCard）。
-      // 派发一次 input 让那套逻辑跑起来，否则新插入文字因 overlay 未重画而“隐形”
-      // （透明 textarea 上没上色，仅选中态可见）。
-      el.dispatchEvent(new Event('input', { bubbles: true }));
+
+      // 先把 DOM 里的现值收回 state 再入栈，快照才是"插入之前"的完整内容。
+      // 以前这条路径完全不入栈，而程序化改 value 又会清空原生撤销栈，导致
+      // 「点常用句插入」既没有结构级撤销、也没有原生撤销 —— 彻底撤不回来。
+      collectText();
+      captureHistory();
+
+      // insertTextAtCaret 优先走 execCommand('insertText')：插入会进入原生撤销栈，
+      // 且由浏览器自行派发 input。降级路径直接改 value，需要我们手动派发 ——
+      // 块的高亮 overlay / 自适应高度 / 内容回写全挂在 input handler 上
+      // （见 render.js buildBlockCard），不派发的话新插入的字会因 overlay 未重画
+      // 而"隐形"（透明 textarea 上没上色，仅选中态可见）。
+      var mode = insertTextAtCaret(el, pre + snippet);
+      if (mode !== 'native') el.dispatchEvent(new Event('input', { bubbles: true }));
       scrollBlockIntoView(el);
     } else {
       // 模块模板，或未聚焦任何块：作为新块追加

@@ -18,6 +18,7 @@ import {
   learnKey,
   clauseTailParts,
 } from './core.js';
+import { insertTextAtCaret } from './edit.js';
 
 // 取补全触发的输入尾巴（inputTail = 当前子句）与 bigram 上下文前缀键。
 // 子句边界由 core 的 clauseTailParts 统一判定（与候选池切分同一套规则）：
@@ -120,15 +121,15 @@ export function attachCompletion(area, overlay, deps) {
     var prefixKey = current.prefixKey;
     current = null;
 
-    // 真正写入 textarea：把剩余文本插到光标处（此时光标在末尾）
-    var caret = area.selectionStart;
-    area.value = area.value.slice(0, caret) + remainder + area.value.slice(caret);
-    var newCaret = caret + remainder.length;
-    area.setSelectionRange(newCaret, newCaret);
-    // 这次展示已被消费：清掉去重标记，之后同一条候选再出现算新的一次展示
+    // 真正写入 textarea：把剩余文本插到光标处（此时光标在末尾）。
+    // 走 insertTextAtCaret 而不是直接改 value —— 后者会清空原生撤销栈，
+    // 采纳完的补全就再也 Ctrl+Z 不回去了（详见 edit.js 注释）。
+    // 这次展示已被消费：清掉去重标记要在派发 input（会触发 recompute）之前做。
     lastShownKey = null;
-    // 派发 input，走既有的 autosize / 高亮重绘 / 回写 state / 保存链路
-    area.dispatchEvent(new Event('input', { bubbles: true }));
+    var mode = insertTextAtCaret(area, remainder);
+    // native 模式浏览器已自行派发 input；降级模式需手动派发，
+    // 以驱动既有的 autosize / 高亮重绘 / 回写 state / 保存链路。
+    if (mode !== 'native') area.dispatchEvent(new Event('input', { bubbles: true }));
 
     // 记一次采纳（含 bigram）
     deps.onLearn(learn('accepted', { candKey: candKey, prefixKey: prefixKey }, deps.getLearning()));

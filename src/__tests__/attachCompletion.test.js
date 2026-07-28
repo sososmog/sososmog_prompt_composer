@@ -209,6 +209,32 @@ describe('attachCompletion - 采纳与取消', () => {
     expect(ev.defaultPrevented).toBe(false);
   });
 
+  /* 采纳走 insertTextAtCaret：native 模式下浏览器自己派发 input，我们不能再补一次，
+   * 否则 recompute / collectText / scheduleSave 会白跑两遍。 */
+  it('native 插入模式下不重复派发 input', () => {
+    const cand = '请严格按照要求的格式输出';
+    const { area } = setup([cand]);
+    type(area, '请严格');
+
+    let inputs = 0;
+    Object.defineProperty(document, 'execCommand', {
+      value: function (cmd, ui, arg) {
+        if (cmd !== 'insertText') return false;
+        area.value += arg;
+        area.setSelectionRange(area.value.length, area.value.length);
+        area.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      },
+      writable: true, configurable: true,
+    });
+    area.addEventListener('input', () => { inputs++; });
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    delete document.execCommand;
+
+    expect(area.value).toBe(cand);
+    expect(inputs).toBe(1);
+  });
+
   it('采纳会记 bigram（前一子句 → 候选）', () => {
     const cand = '不要添加额外说明';
     const { area, env } = setup([cand]);
