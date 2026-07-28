@@ -143,6 +143,41 @@
   var TRANSLATE_PROVIDER_BY_ID = {};
   TRANSLATE_PROVIDERS.forEach(function (p) { TRANSLATE_PROVIDER_BY_ID[p.id] = p; });
 
+  /* ------------------------------------------------------------
+   * 翻译端点的信任判定（配置导入的安全闸门）
+   * ------------------------------------------------------------
+   * baseUrl 决定「API Key 和整篇正文会被发到哪台服务器」。配置导入会写入
+   * 偏好设置，若连 baseUrl 一起悄悄换掉，一份别人给的配置文件就能把本机的
+   * Key 与正文重定向到任意主机（Key 本身不在文件里，但请求头带的是本机 Key）。
+   * 因此把「预设服务商的 host」列为可信，其余 host 一律需要用户在导入预览里
+   * 显式勾选确认（见 mergePreferences 的 options.importEndpoint）。
+   * ---------------------------------------------------------- */
+
+  // 从 baseUrl 取出实际会被连接的 host（含端口，小写）。取不出返回 ''。
+  // 刻意不用 URL 构造器：core.js 要保持无环境依赖，且畸形输入不应抛异常。
+  // 关键点：authority 里有 '@' 时取最后一个之后的部分——https://api.groq.com@evil.com/
+  // 实际连的是 evil.com，取错就等于把闸门开了。'\' 与 '/' 同样终止 authority（对齐浏览器）。
+  function translateHostOf(baseUrl) {
+    var s = String(baseUrl == null ? '' : baseUrl).trim();
+    var m = s.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/\\?#]*)/);
+    if (!m) return '';
+    var authority = m[1];
+    var at = authority.lastIndexOf('@');
+    if (at !== -1) authority = authority.slice(at + 1);
+    return authority.toLowerCase();
+  }
+
+  // 预设服务商的 host 集合（由 TRANSLATE_PROVIDERS 派生，改预设即自动同步）
+  var PRESET_TRANSLATE_HOSTS = {};
+  TRANSLATE_PROVIDERS.forEach(function (p) {
+    var h = translateHostOf(p.baseUrl);
+    if (h) PRESET_TRANSLATE_HOSTS[h] = true;
+  });
+
+  function isPresetTranslateHost(host) {
+    return !!(host && PRESET_TRANSLATE_HOSTS[String(host).toLowerCase()] === true);
+  }
+
   function defaultTranslateSettings() {
     var g = TRANSLATE_PROVIDER_BY_ID.glm;
     return {
@@ -1545,7 +1580,7 @@
     }
 
     if (sections.indexOf('preferences') !== -1 && payload.preferences) {
-      mergePreferences(next, payload.preferences, mode);
+      mergePreferences(next, payload.preferences, mode, options);
     }
 
     if (sections.indexOf('content') !== -1 && payload.content) {
@@ -1729,8 +1764,17 @@
     return out;
   }
 
+  // 决定「Key 和正文发往哪台服务器」的一组字段。只有这组受信任闸门管控，
+  // overwrite 之类的纯本地开关不涉及外发，照常合并。
+  var TRANSLATE_ENDPOINT_FIELDS = ['provider', 'protocol', 'baseUrl', 'model'];
+
   // 偏好合并：标量字段导入值存在则采用；apiKey 永远保留本机（导入文件本就无 Key）。
-  function mergePreferences(next, prefs, mode) {
+  // 翻译端点（provider/protocol/baseUrl/model）另有闸门：仅当 host 是预设服务商，
+  // 或调用方显式传 options.importEndpoint===true（用户在导入预览里勾了确认框）时才采用；
+  // 否则保留本机端点设置，其余偏好照常导入——不然一份外来配置就能把本机 Key 与正文
+  // 重定向到任意主机。
+  function mergePreferences(next, prefs, mode, options) {
+    options = options || {};
     var s = next.settings || (next.settings = {});
     if (typeof prefs.toggleShortcut === 'string' && prefs.toggleShortcut.trim() !== '') {
       s.toggleShortcut = prefs.toggleShortcut;
@@ -1739,9 +1783,19 @@
       s.pasteDelayMs = prefs.pasteDelayMs;
     }
     if (prefs.translation && typeof prefs.translation === 'object') {
-      var localKey = (s.translation && s.translation.apiKey) || '';
-      var tr = deepClone(prefs.translation);
-      tr.apiKey = localKey; // 铁律：导入不改本机 Key
+      var local = (s.translation && typeof s.translation === 'object') ? s.translation : {};
+      var incoming = prefs.translation;
+      var trusted = isPresetTranslateHost(translateHostOf(incoming.baseUrl));
+      var takeEndpoint = trusted || options.importEndpoint === true;
+
+      var tr = deepClone(local) || {};
+      if (takeEndpoint) {
+        TRANSLATE_ENDPOINT_FIELDS.forEach(function (f) {
+          if (incoming[f] !== undefined) tr[f] = deepClone(incoming[f]);
+        });
+      }
+      if (incoming.overwrite !== undefined) tr.overwrite = incoming.overwrite;
+      tr.apiKey = local.apiKey || ''; // 铁律：导入不改本机 Key
       s.translation = tr;
     }
     // theme 不在 state（localStorage），由 UI 层从 payload 单独应用。
@@ -1772,7 +1826,23 @@
       };
     }
     if (sections.indexOf('preferences') !== -1 && payload.preferences) {
-      out.preferences = { includesApiKey: false, keptLocalApiKey: true };
+      out.preferences = { includesApiKey: false, keptLocalApiKey: true, translation: null };
+      // 把「这份文件想把翻译请求发到哪」摊到预览里——以前预览只说"不含 API Key"，
+      // 用户看不到 baseUrl 会被换掉，等于闭眼确认。
+      var ptr = payload.preferences.translation;
+      if (ptr && typeof ptr === 'object') {
+        var host = translateHostOf(ptr.baseUrl);
+        var trusted = isPresetTranslateHost(host);
+        out.preferences.translation = {
+          provider: typeof ptr.provider === 'string' ? ptr.provider : '',
+          baseUrl: typeof ptr.baseUrl === 'string' ? ptr.baseUrl : '',
+          model: typeof ptr.model === 'string' ? ptr.model : '',
+          host: host,
+          trusted: trusted,
+          // 与 mergePreferences 的闸门保持同一判据，预览与实际结果不许不一致
+          willImport: trusted || options.importEndpoint === true
+        };
+      }
     }
     if (sections.indexOf('content') !== -1 && payload.content) {
       var c = payload.content.content || {};
@@ -1826,6 +1896,9 @@
     defaultCompletionSettings,
     TRANSLATE_PROVIDERS,
     TRANSLATE_PROVIDER_BY_ID,
+    PRESET_TRANSLATE_HOSTS,
+    translateHostOf,
+    isPresetTranslateHost,
     defaultTranslateSettings,
     normalizeTranslateSettings,
     defaultOnboarding,

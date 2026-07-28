@@ -18,6 +18,7 @@ import {
   mergeState,
   summarizeImport,
   normalizeState,
+  escapeHtml,
   icon,
 } from './core.js';
 import {
@@ -242,14 +243,35 @@ function openImportFlow() {
 }
 
 function openImportPreview(bundle) {
-  // 预览态可切换的选项（默认 合并 + 保留两份）
-  var optState = { mode: 'merge', conflict: 'rename' };
+  // 预览态可切换的选项（默认 合并 + 保留两份 + 不导入陌生翻译接口地址）
+  var optState = { mode: 'merge', conflict: 'rename', importEndpoint: false };
+
+  // 先算一次摘要，看这份文件是否想改写翻译接口地址。非预设 host 时要额外
+  // 摆一个默认不勾的确认框——导入 baseUrl 等于把本机 Key 与正文的收件人换掉。
+  var preTr = (summarizeImport(state, bundle, { sections: bundle.includes }).preferences || {}).translation || null;
+  var needEndpointConsent = !!(preTr && !preTr.trusted);
+  var endpointHost = preTr ? (preTr.host || '（地址无法解析）') : '';
+
+  var endpointHtml = needEndpointConsent
+    ? '<div class="bk-group bk-endpoint">' +
+        '<div class="bk-group-title bk-endpoint-title">⚠ 这份文件想改写翻译接口地址</div>' +
+        '<p class="bk-note">导入后，一键翻译会把你的 <strong>API Key</strong> 和<strong>整篇正文</strong>' +
+          '发送到 <code class="bk-endpoint-host">' + escapeHtml(endpointHost) + '</code>。' +
+          '这不是内置服务商的地址。只有你确实信任它时才勾选；' +
+          '不勾选也能正常导入其余内容，翻译接口保持你本机现在的设置。</p>' +
+        '<label class="bk-check"><input type="checkbox" id="bkImportEndpoint" />' +
+          '<span class="bk-check-main"><span class="bk-check-label">我信任这个地址，一并导入</span>' +
+          '<span class="bk-check-desc">' + escapeHtml(preTr.baseUrl || '（空）') +
+            (preTr.model ? ' · 模型 ' + escapeHtml(preTr.model) : '') + '</span></span></label>' +
+      '</div>'
+    : '';
 
   var html =
     '<div class="sm-head"><span class="sm-title">导入配置</span>' +
       '<button type="button" class="sm-close" aria-label="关闭">' + icon('x') + '</button></div>' +
     '<div class="bk-body">' +
       '<div class="bk-summary" id="bkSummary"></div>' +
+      endpointHtml +
       '<div class="bk-group"><div class="bk-group-title">应用方式</div>' +
         '<label class="bk-radio"><input type="radio" name="bkMode" value="merge" checked /> ' +
           '<span>合并 —— 并入本机现有内容，保留你已有的</span></label>' +
@@ -275,7 +297,10 @@ function openImportPreview(bundle) {
   var $conflictGroup = overlay.querySelector('#bkConflictGroup');
 
   function renderSummary() {
-    var sum = summarizeImport(state, bundle, { mode: optState.mode, conflict: optState.conflict, sections: bundle.includes });
+    var sum = summarizeImport(state, bundle, {
+      mode: optState.mode, conflict: optState.conflict,
+      sections: bundle.includes, importEndpoint: optState.importEndpoint
+    });
     var parts = [];
     if (sum.materials) {
       var m = sum.materials;
@@ -288,7 +313,21 @@ function openImportPreview(bundle) {
       parts.push(line('条常用句', m.snippets));
       parts.push(line('个快速段落分组', m.quickGroups));
     }
-    if (sum.preferences) parts.push('<li>偏好设置（不含 API Key，本机密钥保留）</li>');
+    if (sum.preferences) {
+      parts.push('<li>偏好设置（不含 API Key，本机密钥保留）</li>');
+      // 翻译接口地址单独列一行：用户必须能看见「Key 和正文将发往哪」
+      var tr = sum.preferences.translation;
+      if (tr) {
+        var hostText = escapeHtml(tr.host || '（地址无法解析）');
+        if (tr.willImport) {
+          parts.push('<li>翻译接口 → <code>' + hostText + '</code>' +
+            (tr.trusted ? '（内置服务商）' : '（<strong>自定义地址，已确认导入</strong>）') + '</li>');
+        } else {
+          parts.push('<li>翻译接口 <code>' + hostText + '</code> <strong>不导入</strong>' +
+            '，保留本机现有设置</li>');
+        }
+      }
+    }
     if (sum.content) parts.push('<li>正文草稿' + (optState.mode === 'merge' ? '（合并模式下保留本机正文）' : '') + '</li>');
     var body = parts.filter(Boolean).join('');
     $summary.innerHTML = '<div class="bk-summary-title">将导入：</div><ul class="bk-summary-list">' +
@@ -305,10 +344,20 @@ function openImportPreview(bundle) {
   overlay.querySelectorAll('input[name="bkConflict"]').forEach(function (r) {
     r.addEventListener('change', function () { if (r.checked) { optState.conflict = r.value; renderSummary(); } });
   });
+  var $endpointChk = overlay.querySelector('#bkImportEndpoint');
+  if ($endpointChk) {
+    $endpointChk.addEventListener('change', function () {
+      optState.importEndpoint = $endpointChk.checked;
+      renderSummary();
+    });
+  }
 
   overlay.querySelector('#bkImportGo').addEventListener('click', function () {
     dlg.close();
-    applyImported(bundle, { mode: optState.mode, conflict: optState.conflict, sections: bundle.includes });
+    applyImported(bundle, {
+      mode: optState.mode, conflict: optState.conflict,
+      sections: bundle.includes, importEndpoint: optState.importEndpoint
+    });
   });
 
   renderSummary();
