@@ -730,19 +730,6 @@
     return false;
   }
 
-  // 收集所有已提炼的 learned 片段文本（供 UI 合成候选池时取用）。
-  function learnedSnippets(learning, lang) {
-    var L = normalizeLearning(learning);
-    var want = lang === 'en' ? 'en' : 'zh';
-    var out = [];
-    Object.keys(L.snippets).forEach(function (k) {
-      if (L.snippets[k].source !== 'learned') return;
-      var r = L.rawCounts[k];
-      if (r && r.lang === want) out.push({ key: k, text: r.text, source: 'learned' });
-    });
-    return out;
-  }
-
   // 读时片段池：遍历 rawCounts（按 lang 过滤）把每行 segmentText 切成片段，
   // 按片段归一化 key 聚合两个量后择优进池——存档里没有片段数据，换切分策略
   // 只是改代码 + 下次读取重算，零迁移。返回 [{ key, text, source:'learned', lines, count }]。
@@ -1963,7 +1950,6 @@
     scoreCandidate,
     rankCandidates,
     learn,
-    learnedSnippets,
     clearLearning,
     buildLearningExportBundle,
     validateLearningImportBundle,

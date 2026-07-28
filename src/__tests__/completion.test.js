@@ -18,7 +18,6 @@ const {
   scoreCandidate,
   rankCandidates,
   learn,
-  learnedSnippets,
   buildLearningExportBundle,
   validateLearningImportBundle,
   mergeLearningImport,
@@ -182,22 +181,6 @@ describe('learn', () => {
   });
 });
 
-describe('learnedSnippets', () => {
-  it('只返回对应语言的 learned 片段', () => {
-    let L = defaultLearning();
-    const zhLine = '中文重复提交的一句话内容';
-    const enLine = 'an english repeated sentence';
-    for (let i = 0; i < 3; i++) {
-      L = learn('commit', { lang: 'zh', lines: [zhLine] }, L, 1000 + i);
-      L = learn('commit', { lang: 'en', lines: [enLine] }, L, 2000 + i);
-    }
-    const zh = learnedSnippets(L, 'zh');
-    const en = learnedSnippets(L, 'en');
-    expect(zh.map((s) => s.text)).toContain(zhLine);
-    expect(zh.map((s) => s.text)).not.toContain(enLine);
-    expect(en.map((s) => s.text)).toContain(enLine);
-  });
-});
 
 describe('normalizeLearning', () => {
   it('空/非法输入回退合法结构', () => {
