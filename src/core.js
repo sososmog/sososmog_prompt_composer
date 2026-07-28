@@ -268,6 +268,20 @@
   var LEARN_PROMOTE_THRESHOLD = 3; // 原始整行重复达到此次数，提炼成 learned 片段
   var LEARN_VERSION = 2;           // v2：key 改用归一化文本，同一句的空白/标点/大小写差异合并计数
 
+  // rawCounts / blocked 都只增不减：learn('commit') 只会往 rawCounts 里加，
+  // blockLearnedFragment 只会往 blocked 里加。日积月累后会拖慢“每次按键都要读”的
+  // 候选池合成（pool.js 的 learnedFragments 遍历整份 rawCounts）、拖大存盘/IPC 广播体积。
+  // LEARN_RAW_MAX=2000：基准脚本实测 2000 条互不相同的语料行，learning 整体序列化
+  // 体积约 600KB 量级（视句子长短有出入，但同数量级）——一年高强度使用也很难越过
+  // 这个上限，同时把最坏情况的候选池合成开销钉死在“2000 行语料”这个常数上，不再
+  // 随使用年限无限增长（基准脚本实测 2000 行、word 模式下单次合成约 200ms 出头，
+  // 若不加上限会随语料继续线性变慢；有 pool.js 的缓存兜底，这只在语料真正变化时
+  // 触发一次，不是每次按键都要付的成本）。
+  // LEARN_BLOCKED_MAX=500：拉黑是用户手动操作，远比 commit 稀疏，单条几十字节，
+  // 500 条同样只是为了不让这张表本身也无限膨胀，不是当前的性能瓶颈。
+  var LEARN_RAW_MAX = 2000;
+  var LEARN_BLOCKED_MAX = 500;
+
   // 读时切分（片段补全）可调参数：片段进池的长度 / 跨行复用 / 单行高频阈值。
   var LEARN_FRAG_MIN_LEN = 4;      // 片段字符数下限（过短命中噪声大）
   var LEARN_FRAG_MIN_LINES = 2;    // 片段出现在 ≥ 此数量的不同行 → 进池（跨句复用信号）
@@ -350,10 +364,14 @@
         if (Object.keys(clean).length) out.bigrams[pk] = clean;
       });
     }
-    // blocked：仅收 value===true 的 key（对象、非数组）；缺失即空
+    // blocked：value 是拉黑时刻的时间戳（数字），供超限淘汰时按“加入先后”排序；
+    // 老存档里是 value===true（没有时间戳概念的旧格式），兼容处理成时间戳 0——
+    // 即“最早加入”，容量超限时最先被淘汰。其余脏值丢弃。缺失即空。
     if (raw.blocked && typeof raw.blocked === 'object' && !Array.isArray(raw.blocked)) {
       Object.keys(raw.blocked).forEach(function (bk) {
-        if (raw.blocked[bk] === true) out.blocked[bk] = true;
+        var bv = raw.blocked[bk];
+        if (bv === true) out.blocked[bk] = 0;
+        else if (typeof bv === 'number' && isFinite(bv)) out.blocked[bk] = bv;
       });
     }
     if (raw.rawCounts && typeof raw.rawCounts === 'object') {
@@ -363,7 +381,8 @@
         out.rawCounts[rk] = {
           text: r.text,
           count: numOr(r.count, 0),
-          lang: r.lang === 'en' ? 'en' : 'zh'
+          lang: r.lang === 'en' ? 'en' : 'zh',
+          at: numOr(r.at, 0) // 最近一次命中（写入/更新）的时间戳；additive 字段，老存档缺失即 0
         };
       });
     }
@@ -388,14 +407,15 @@
       return nk;
     }
 
-    // rawCounts：同新 key 计数相加；text 保留最先遇到的原文（展示更自然），lang 沿用。
+    // rawCounts：同新 key 计数相加；text 保留最先遇到的原文（展示更自然），lang 沿用，
+    // at 取较大值（合并后代表这个 key 最近一次被命中的时间，供容量淘汰按新近度排序）。
     Object.keys(v1.rawCounts).forEach(function (ok) {
       var nk = newKeyOf(ok);
       if (!nk) return;
       var r = v1.rawCounts[ok];
       var tgt = out.rawCounts[nk];
-      if (!tgt) out.rawCounts[nk] = { text: r.text, count: r.count, lang: r.lang };
-      else tgt.count += r.count;
+      if (!tgt) out.rawCounts[nk] = { text: r.text, count: r.count, lang: r.lang, at: numOr(r.at, 0) };
+      else { tgt.count += r.count; tgt.at = Math.max(tgt.at, numOr(r.at, 0)); }
     });
 
     // snippets：同新 key，shown/accepted 相加、lastUsedAt 取 max、source 有 learned 则 learned。
@@ -635,16 +655,64 @@
         // 落到同一个「空内容」key 上被错误合并计数、提炼成无意义候选。
         if (normalizeLearnText(text) === '') return;
         var rk = learnKey(lang, text);
-        var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang };
+        var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang, at: 0 };
         r.count += 1;
+        r.at = now; // 记最近一次命中时间（用调用方传入的 now，不直接调 Date.now()，便于单测控制），供容量淘汰按新近度排序
         L.rawCounts[rk] = r;
         // 达阈值：提炼成 learned 片段（用同一 key，进候选池与预设平起平坐）
         if (r.count >= LEARN_PROMOTE_THRESHOLD && !L.snippets[rk]) {
           L.snippets[rk] = { shown: 0, accepted: 0, lastUsedAt: now, source: 'learned' };
         }
       });
+      capRawCounts(L); // rawCounts 只增不减，见 LEARN_RAW_MAX 注释；导入大文件的裁剪见 mergeLearningImport
     }
     return L;
+  }
+
+  /* ============================================================
+   * 2.0.1b 容量上限 + 淘汰
+   * ------------------------------------------------------------
+   * rawCounts 超过 LEARN_RAW_MAX、blocked 超过 LEARN_BLOCKED_MAX 时才触发，
+   * 平时是一次 O(表大小) 的长度检查，不排序、不淘汰，开销可忽略。
+   * ============================================================ */
+
+  // 按 rawCounts key 级联清理：该 key 对应的 snippets 记录、bigrams 中以它为
+  // prefixKey 的整条、以及各 prefixKey 下以它为 candKey 的项，一并清掉——
+  // 否则残留的统计会指向已被淘汰、不复存在的语料（与 removeLearnedSnippet 同一思路）。
+  function cascadeRemoveRawKey(L, key) {
+    delete L.rawCounts[key];
+    delete L.snippets[key];
+    delete L.bigrams[key]; // 该 key 自身作为 prefixKey 的整条 bigram 记录
+    Object.keys(L.bigrams).forEach(function (pk) {
+      var m = L.bigrams[pk];
+      if (m && m[key] !== undefined) {
+        delete m[key];
+        if (Object.keys(m).length === 0) delete L.bigrams[pk];
+      }
+    });
+  }
+
+  // rawCounts 超过 LEARN_RAW_MAX 时，按“价值”升序淘汰到刚好不超限：
+  // 价值先看 count（重复次数越少越该丢），count 相同再看 at（越久未用越该丢）。
+  function capRawCounts(L) {
+    var keys = Object.keys(L.rawCounts);
+    if (keys.length <= LEARN_RAW_MAX) return;
+    keys.sort(function (a, b) {
+      var ra = L.rawCounts[a], rb = L.rawCounts[b];
+      if (ra.count !== rb.count) return ra.count - rb.count;
+      return numOr(ra.at, 0) - numOr(rb.at, 0);
+    });
+    var overflow = keys.length - LEARN_RAW_MAX;
+    for (var i = 0; i < overflow; i++) cascadeRemoveRawKey(L, keys[i]);
+  }
+
+  // blocked 超过 LEARN_BLOCKED_MAX 时丢最早加入的（value 即拉黑时刻的时间戳）。
+  function capBlocked(L) {
+    var keys = Object.keys(L.blocked);
+    if (keys.length <= LEARN_BLOCKED_MAX) return;
+    keys.sort(function (a, b) { return numOr(L.blocked[a], 0) - numOr(L.blocked[b], 0); });
+    var overflow = keys.length - LEARN_BLOCKED_MAX;
+    for (var i = 0; i < overflow; i++) delete L.blocked[keys[i]];
   }
 
   // 判断光标（在 textBeforeCaret 末尾处）是否处于 Markdown 代码区，
@@ -702,7 +770,10 @@
         if (frag.length < minLen) return;
         if (normalizeLearnText(frag) === '') return; // 归一化后为空（纯标点等）不进池
         var fk = learnKey(want, frag);
-        if (blocked[fk]) return;
+        // 用 hasOwnProperty 而非真值判断：blocked[fk] 可能是时间戳 0（老存档的
+        // true 迁移而来，是最常见的情况——旧数据全部没有时间戳）。0 是 falsy，
+        // 若写成 `if (blocked[fk])` 这些老拉黑记录会被判定为“未拉黑”，拉黑静默失效。
+        if (Object.prototype.hasOwnProperty.call(blocked, fk)) return;
         var a = agg[fk] || (agg[fk] = { key: fk, text: frag, lines: 0, count: 0 });
         a.count += lineCount;                        // 加权频次：累加所在行的 count
         if (!seenInLine[fk]) { seenInLine[fk] = true; a.lines += 1; } // 行内去重后计不同行数
@@ -739,10 +810,14 @@
   // learnedFragments 读取时跳过。级联清掉该 key 的 shown/accepted 统计，以及 bigrams 中
   // 以它为**候选(candKey)**的项（某 prefixKey 下清空则连 prefixKey 一起删）。
   // 不动 rawCounts —— 整行语料仍在，其它片段不受影响。
-  function blockLearnedFragment(learning, key) {
+  // now 可选（默认 Date.now()）：拉黑时刻的时间戳，写进 blocked[key]，供
+  // LEARN_BLOCKED_MAX 超限淘汰时按“加入先后”排序；不传时兜底取当前时间，
+  // 兼容既有调用方（store.js 只传 (learning, key) 两个参数）。
+  function blockLearnedFragment(learning, key, now) {
     var L = normalizeLearning(learning);
     if (key == null) return L;
-    L.blocked[key] = true;
+    now = numOr(now, Date.now());
+    L.blocked[key] = now;
     delete L.snippets[key];
     Object.keys(L.bigrams).forEach(function (pk) {
       var m = L.bigrams[pk];
@@ -751,6 +826,7 @@
         if (Object.keys(m).length === 0) delete L.bigrams[pk];
       }
     });
+    capBlocked(L); // blocked 同样只增不减，见 LEARN_BLOCKED_MAX 注释
     return L;
   }
 
@@ -853,7 +929,8 @@
       L.rawCounts[nk] = {
         text: existingR ? existingR.text : ir.text,   // 保留本地已有原文，否则用导入原文
         count: (existingR ? existingR.count : 0) + numOr(ir.count, 0),
-        lang: lang
+        lang: lang,
+        at: Math.max(existingR ? numOr(existingR.at, 0) : 0, numOr(ir.at, 0)) // 取较新的时间戳
       };
 
       // 行为统计只在「导入文件带了」或「本机已有」时才写 snippets。导出改成全量
@@ -871,6 +948,7 @@
       }
       importedCount++;
     });
+    capRawCounts(L); // 导入一份大文件也不能突破容量上限（见 LEARN_RAW_MAX 注释）
     return { learning: L, importedCount: importedCount };
   }
 
@@ -1906,6 +1984,9 @@
     normalizeLearning,
     normalizeLearnText,
     learnKey,
+    LEARN_RAW_MAX,
+    LEARN_BLOCKED_MAX,
+    LEARN_PROMOTE_THRESHOLD,
     // 读时切分（片段补全）
     segmentClause,
     segmentText,

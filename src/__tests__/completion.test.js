@@ -686,13 +686,15 @@ describe('blocked 字段（additive schema）', () => {
     expect(defaultLearning().blocked).toEqual({});
   });
 
-  it('normalizeLearning 保留 value===true 的 blocked，忽略其它', () => {
+  it('normalizeLearning 把老存档的 value===true 兼容成时间戳 0，保留合法数字时间戳，忽略其它脏值', () => {
+    // true 是老格式（没有时间戳概念时写入的），迁移语义是「最早加入」——
+    // 容量超限淘汰时最先被丢，因此归一化为 0；数字时间戳原样保留；其余脏值丢弃。
     const raw = {
       version: 2, snippets: {}, bigrams: {}, rawCounts: {},
-      blocked: { keepTrue: true, dropFalse: false, dropStr: 'x' },
+      blocked: { keepTrue: true, keepTimestamp: 12345, dropFalse: false, dropStr: 'x', dropNaN: NaN },
     };
     const out = normalizeLearning(raw);
-    expect(out.blocked).toEqual({ keepTrue: true });
+    expect(out.blocked).toEqual({ keepTrue: 0, keepTimestamp: 12345 });
   });
 
   it('blocked 缺失 / 为数组时归一化为空对象', () => {
@@ -728,8 +730,8 @@ describe('blockLearnedFragment', () => {
     const otherCand = learnKey('zh', '别的候选');
     L.bigrams[otherPfx] = {}; L.bigrams[otherPfx][otherCand] = 2;
 
-    const out = blockLearnedFragment(L, fk);
-    expect(out.blocked[fk]).toBe(true);
+    const out = blockLearnedFragment(L, fk, 5000);
+    expect(out.blocked[fk]).toBe(5000); // 存时间戳（传入的 now）而非 true，供容量超限淘汰按加入先后排序
     expect(learnedFragments(out, 'zh', {}).map((f) => f.text)).not.toContain('擅长 Web 开发');
     // 以 fk 为候选的项被清，该 prefixKey 下清空 → 整个 prefixKey 删除
     expect(out.bigrams[pfx]).toBeUndefined();
