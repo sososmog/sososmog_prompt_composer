@@ -138,6 +138,17 @@ npm run test:cov  # 附带 v8 覆盖率
 npm run lint      # eslint 全量检查
 ```
 
+`package.json` 与 `src-tauri/tauri.conf.json` 里各有一份 `version` 字段，靠人手
+保持一致容易漂移，用 [scripts/sync-version.mjs](scripts/sync-version.mjs) 校验/同步：
+
+```bash
+npm run version:check       # 校验模式：两处 version 不一致就报错退出（非 0）
+npm run version:set 0.2.1   # 写入模式：把两处 version 都改成 0.2.1
+```
+
+`--set` 只接受纯 `数字.数字.数字` 格式，不接受 `-Beta` 之类后缀——MSI 打包要求
+`version` 字段是纯数字，后缀只能放 git tag / GitHub Release 名字里。
+
 ---
 
 ## 四、打包发布
@@ -179,6 +190,10 @@ npm run tauri icon path/to/your-icon.png
 ```
 .
 ├── package.json              # 脚本与前端/CLI 依赖
+├── docs/
+│   └── csp.md                 # CSP 最终字符串 + 每条指令的理由 + 真机验证清单
+├── scripts/
+│   └── sync-version.mjs       # package.json / tauri.conf.json 的 version 字段校验与同步
 ├── .github/
 │   └── workflows/
 │       └── release.yml       # 推送 v* tag 自动构建全平台产物 + 创建 Draft Release
@@ -192,6 +207,9 @@ npm run tauri icon path/to/your-icon.png
 │   ├── translate.js           # 一键翻译编排层（收集待翻块 → http 请求 → 解析写回）
 │   ├── guide.js               # 新手引导：首启动高亮遮罩引导 + 上下文轻提示
 │   ├── completion.js          # 行内自动补全交互层（ghost text 展示/键盘接管，纯逻辑在 core.js），主窗口与浮窗共用
+│   ├── theme-boot.js          # 主题 bootstrap（同步阻塞的普通脚本，避免首屏闪烁），index.html 与 float.html 共用
+│   ├── fonts.css              # 本地字体 @font-face 声明（取代运行时请求 Google Fonts），详见 src/fonts/README.md
+│   ├── fonts/                  # 本地字体 woff2 文件存放处（默认空目录，不放也完全可用）
 │   ├── styles.css             # 主窗口样式
 │   ├── index.html             # 主窗口 UI：模块库/装配区/检视栏/快速段落/设置面板
 │   ├── float.html             # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、行内自动补全、自动粘贴开关、一键缩小为悬浮小球
@@ -229,3 +247,6 @@ npm run tauri icon path/to/your-icon.png
 - **应用内检测不到新版本** → 确认对应 tag 已推送并且 CI 已成功跑完（会生成 `latest.json` 并附加到 Release），本地网络能访问 GitHub。
 - **一键翻译报错 / 无响应** → 先在设置面板选好服务商并填写有效 API Key 与模型；请求走 `http` 插件，需能访问对应端点域名（见 `capabilities/default.json` 的 `http` 白名单）；失败会自动重试一次，仍失败则不改动已有内容。
 - **导入配置后 API Key 丢了 / 想同步 Key** → 属预期：导出永不包含 API Key、导入也永不清空本机 Key，Key 需在目标机器上手动重填。
+- **开启 CSP 后某功能白屏 / DevTools Console 报 `Refused to ... Content Security Policy`** → 见 [docs/csp.md](docs/csp.md)：里面有最终 CSP 字符串、每条指令的理由，以及一份**尚未真机验证过**的检查清单；排查时优先确认是不是漏放了某个同源资源或 Tauri 自身需要的来源，不要直接删掉整条 CSP 或改成 `'unsafe-inline'` 了事。
+- **字体看起来是系统默认字体（不是 Fraunces / Inter / IBM Plex Mono）** → 属预期：`src/fonts/` 目录默认没有放任何 `.woff2` 文件（详见 [src/fonts/README.md](src/fonts/README.md)），`@font-face` 加载失败会静默回退到系统字体，不影响使用；想启用自定义字体就按该 README 放对应文件即可。
+- **两个版本号文件不一致 / 想改版本号** → 用 `npm run version:check` 校验、`npm run version:set X.Y.Z` 同步（详见「测试与静态检查」小节）；不要手改其中一个文件后忘了改另一个。

@@ -4,16 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Composer 浮窗</title>
-<script>
-  /* 渲染前应用主题，避免首屏闪烁；与主窗口共享 localStorage 的 composer-theme。
-     默认深色，仅当显式为 light 时不加 data-theme（浅色）。此段必须内联同步执行
-     （在 CSS 应用之前），不能像下面的正文样式那样外置成文件，否则会闪一下默认主题。 */
-  (function () {
-    var t = 'dark';
-    try { t = localStorage.getItem('composer-theme') || 'dark'; } catch (e) {}
-    if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
-  })();
-</script>
+<!-- 主题 bootstrap：与主窗口 index.html 共用同一份 theme-boot.js（原来这里各自内联
+     一份完全相同的代码）。非 module 的普通 <script src> 仍是同步阻塞执行，放在样式
+     表 <link> 之前就能在 CSS 生效前完成，效果与内联等价，不会闪一下默认主题；外置
+     出去是为了让 CSP 的 script-src 不需要 'unsafe-inline'。 -->
+<script src="theme-boot.js"></script>
+<!-- 本地字体：与主窗口同源同文件，浮窗字体来源终于和主窗口一致了（以前只有
+     index.html 挂了 Google Fonts 的 <link>，float.html 从未加载过，@font-face 是
+     按文档生效的，浮窗一直用 Segoe UI 系统字体兜底）。详见 src/fonts.css。 -->
+<link rel="stylesheet" href="fonts.css" />
 <link rel="stylesheet" href="float.css" />
 </head>
 <body>

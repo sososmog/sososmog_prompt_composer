@@ -51,6 +51,30 @@ export default [
     },
   },
   {
+    // theme-boot.js 是**普通脚本**而非 ESM 模块：它必须在样式表之前同步阻塞执行
+    // 才能避免首屏主题闪烁，所以两份 HTML 用的是 <script src> 而非
+    // <script type="module">（module 隐含 defer，会等到解析完才跑）。
+    // sourceType 因此得是 'script'，不能跟着上面那批模块一起配。
+    files: ['src/theme-boot.js'],
+    languageOptions: {
+      ecmaVersion: 2021,
+      sourceType: 'script',
+      globals: globals.browser,
+    },
+  },
+  {
+    // scripts/ 下的构建期脚本：纯 node 环境（抓字体、同步版本号等），不进打包产物。
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: globals.node,
+    },
+    rules: {
+      'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
+    },
+  },
+  {
     // __tests__ 下的 .mjs 冒烟脚本：node 里驱动 playwright，
     // page.evaluate 内联的浏览器全局静态可见但运行在浏览器。
     files: ['src/__tests__/**/*.mjs'],
