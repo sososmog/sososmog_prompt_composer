@@ -1306,6 +1306,118 @@
   }
 
   /* ============================================================
+   * 4. 素材管理：排序与增删（纯函数）
+   * ------------------------------------------------------------
+   * quick.js 的管理器（常用句 / 插入模块 / 快速段落）原来把这些数据变换
+   * 直接写在事件回调里。它们出错不会抛异常、界面也照样渲染，只会让用户
+   * 下次打开发现内容顺序变了或少了一条——正是最该有测试兜底的地方，
+   * 所以抽到这里显式传入数组/state。
+   *
+   * 排序模型有两种，别混：
+   *   - quickGroups / group.items 是「对象数组」，顺序就是数组下标顺序；
+   *   - snippetOrder / moduleOrder 是「id 字符串数组」，对象另存一处。
+   * 因此下面成对提供 moveById（按对象 .id 找）与 moveId（按元素值找）。
+   * 两者都只做相邻交换，越界时原地不动（对应 UI 上首/末行按钮置灰）。
+   * ============================================================ */
+
+  // 对象数组内相邻移动：arr 元素形如 { id, ... }。返回是否真的移动了。
+  function moveById(arr, id, dir) {
+    if (!Array.isArray(arr)) return false;
+    var i = -1;
+    for (var k = 0; k < arr.length; k++) { if (arr[k] && arr[k].id === id) { i = k; break; } }
+    if (i < 0) return false;
+    var j = i + dir;
+    if (j < 0 || j >= arr.length) return false;
+    var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    return true;
+  }
+
+  // id 数组内相邻移动：order 元素就是 id 本身。返回是否真的移动了。
+  function moveId(order, id, dir) {
+    if (!Array.isArray(order)) return false;
+    var i = order.indexOf(id);
+    if (i < 0) return false;
+    var j = i + dir;
+    if (j < 0 || j >= order.length) return false;
+    var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+    return true;
+  }
+
+  // 从对象数组里按 id 删除（只删第一个命中）。返回是否删掉了。
+  function removeById(arr, id) {
+    if (!Array.isArray(arr)) return false;
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] && arr[i].id === id) { arr.splice(i, 1); return true; }
+    }
+    return false;
+  }
+
+  /* 删除自定义素材：对象数组与 order 数组必须同时剔除，否则 order 里
+   * 残留一个找不到对象的 id —— 左栏渲染会跳过它、看着"正常"，但管理器里
+   * 的上移/下移用的是 order 下标，从此与实际显示顺序错位。 */
+  function removeCustomMaterial(list, order, id) {
+    var removed = removeById(list, id);
+    var oi = Array.isArray(order) ? order.indexOf(id) : -1;
+    if (oi >= 0) order.splice(oi, 1);
+    return removed || oi >= 0;
+  }
+
+  // 按 id 给对象数组里的某条设置字段（自定义常用句用）。返回是否命中。
+  function setFieldById(list, id, field, value) {
+    if (!Array.isArray(list)) return false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) { list[i][field] = value; return true; }
+    }
+    return false;
+  }
+
+  /* 按 id 设置自定义模块的多语字段：kind 是 'label' / 'text'，lang 是 'zh' / 'en'。
+   * 结构缺失时补出来再写，避免历史存档里少一层就静默丢掉这次编辑。 */
+  function setLangFieldById(list, id, kind, lang, value) {
+    if (!Array.isArray(list)) return false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) {
+        if (!list[i][kind] || typeof list[i][kind] !== 'object') list[i][kind] = {};
+        list[i][kind][lang] = value;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 新增自定义常用句：对象与 order 一起追加，返回新对象（调用方要聚焦它）。
+  function addCustomSnippet(state) {
+    var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false, hidden: false };
+    state.customSnippets.push(c);
+    state.snippetOrder.push(c.id);
+    return c;
+  }
+
+  // 新增自定义插入模块：同上。
+  function addCustomModule(state) {
+    var m = { id: newModuleId(), label: { zh: '新模块', en: 'New module' }, text: { zh: '', en: '' }, builtin: false, hidden: false };
+    state.customModules.push(m);
+    state.moduleOrder.push(m.id);
+    return m;
+  }
+
+  // 新增快速段落分组。
+  function addQuickGroup(state) {
+    var g = { id: newQuickGroupId(), label: { zh: '新分组', en: 'New group' }, hidden: false, items: [] };
+    state.quickGroups.push(g);
+    return g;
+  }
+
+  // 往分组里新增一条段落。group.items 缺失时补出来，避免脏存档下丢编辑。
+  function addQuickItem(group) {
+    if (!group) return null;
+    if (!Array.isArray(group.items)) group.items = [];
+    var it = { id: newQuickItemId(), label: { zh: '新段落', en: 'New paragraph' }, text: { zh: '', en: '' } };
+    group.items.push(it);
+    return it;
+  }
+
+  /* ============================================================
    * 5.1 Lucide 风格内联图标：统一图标来源，避免 emoji / 字符占位
    * 用法：icon('trash-2') 返回可直接塞进 innerHTML 的 SVG 字符串
    * ============================================================ */
@@ -1980,6 +2092,17 @@
     parseBlocks,
     patchBuiltinSnippet,
     patchBuiltinModule,
+    // 素材管理：排序与增删（纯函数）
+    moveById,
+    moveId,
+    removeById,
+    removeCustomMaterial,
+    setFieldById,
+    setLangFieldById,
+    addCustomSnippet,
+    addCustomModule,
+    addQuickGroup,
+    addQuickItem,
     escapeHtml,
     icon,
     highlightMarkdown,

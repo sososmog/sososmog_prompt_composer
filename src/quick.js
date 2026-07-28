@@ -9,12 +9,18 @@ import {
   icon,
   BUILTIN_BY_ID,
   MODULE_BY_ID,
-  newSnippetId,
-  newModuleId,
-  newQuickGroupId,
-  newQuickItemId,
   patchBuiltinSnippet as corePatchBuiltinSnippet,
   patchBuiltinModule as corePatchBuiltinModule,
+  moveById,
+  moveId,
+  removeById,
+  removeCustomMaterial,
+  setFieldById,
+  setLangFieldById,
+  addCustomSnippet,
+  addCustomModule,
+  addQuickGroup,
+  addQuickItem,
 } from './core.js';
 import {
   state,
@@ -193,16 +199,10 @@ import {
       },
       reset: function (id) { delete state.builtinPatches[id]; },
       deleteCustom: function (id) {
-        for (var i = 0; i < state.customSnippets.length; i++) {
-          if (state.customSnippets[i].id === id) { state.customSnippets.splice(i, 1); break; }
-        }
-        var oi = state.snippetOrder.indexOf(id);
-        if (oi >= 0) state.snippetOrder.splice(oi, 1);
+        removeCustomMaterial(state.customSnippets, state.snippetOrder, id);
       },
       addCustom: function () {
-        var c = { id: newSnippetId(), tag: '新常用句', zh: '', en: '', builtin: false, hidden: false };
-        state.customSnippets.push(c);
-        state.snippetOrder.push(c.id);
+        addCustomSnippet(state);
         scheduleSave();
         renderSnippetManager();
         renderLeft();
@@ -249,16 +249,10 @@ import {
       },
       reset: function (id) { delete state.modulePatches[id]; },
       deleteCustom: function (id) {
-        for (var i = 0; i < state.customModules.length; i++) {
-          if (state.customModules[i].id === id) { state.customModules.splice(i, 1); break; }
-        }
-        var oi = state.moduleOrder.indexOf(id);
-        if (oi >= 0) state.moduleOrder.splice(oi, 1);
+        removeCustomMaterial(state.customModules, state.moduleOrder, id);
       },
       addCustom: function () {
-        var m = { id: newModuleId(), label: { zh: '新模块', en: 'New module' }, text: { zh: '', en: '' }, builtin: false, hidden: false };
-        state.customModules.push(m);
-        state.moduleOrder.push(m.id);
+        addCustomModule(state);
         scheduleSave();
         renderSnippetManager();
         renderLeft();
@@ -279,9 +273,7 @@ import {
     corePatchBuiltinSnippet(id, state, field, value);
   }
   function updateCustomSnippetField(id, field, value) {
-    for (var i = 0; i < state.customSnippets.length; i++) {
-      if (state.customSnippets[i].id === id) { state.customSnippets[i][field] = value; return; }
-    }
+    setFieldById(state.customSnippets, id, field, value);
   }
 
   // 内置模块 patch 清除逻辑已抽离到 core.js（纯函数，显式传入 state）
@@ -289,14 +281,10 @@ import {
     corePatchBuiltinModule(id, state, field, value);
   }
   function updateCustomModuleField(id, kind, lang, value) {
-    for (var i = 0; i < state.customModules.length; i++) {
-      if (state.customModules[i].id === id) { state.customModules[i][kind][lang] = value; return; }
-    }
+    setLangFieldById(state.customModules, id, kind, lang, value);
   }
   function updateCustomModuleHidden(id, hidden) {
-    for (var i = 0; i < state.customModules.length; i++) {
-      if (state.customModules[i].id === id) { state.customModules[i].hidden = hidden; return; }
-    }
+    setFieldById(state.customModules, id, 'hidden', hidden);
   }
 
   function openSnippetManager() { openManager(snippetAdapter()); }
@@ -328,12 +316,7 @@ import {
   }
 
   function moveManagerItem(id, dir) {
-    var order = SM.order();
-    var i = order.indexOf(id);
-    if (i < 0) return;
-    var j = i + dir;
-    if (j < 0 || j >= order.length) return;
-    var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+    if (!moveId(SM.order(), id, dir)) return;
     scheduleSave();
     renderSnippetManager();
     renderLeft();
@@ -479,13 +462,9 @@ import {
   /* ---------- 快速段落管理浮窗（两级嵌套：分组 → 段落） ---------- */
   var $qmOverlay = null, $qmList = null, qmKeyHandler = null;
 
-  function moveInArray(arr, id, dir) {
-    var i = -1;
-    for (var k = 0; k < arr.length; k++) { if (arr[k].id === id) { i = k; break; } }
-    if (i < 0) return;
-    var j = i + dir;
-    if (j < 0 || j >= arr.length) return;
-    var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  // 移动成功才重渲染 + 保存；越界时 UI 上按钮本就是 disabled，走不到这里。
+  function moveQuick(arr, id, dir) {
+    if (moveById(arr, id, dir)) afterQuickChange();
   }
 
   function afterQuickChange() {
@@ -521,8 +500,7 @@ import {
     });
     $qmOverlay.querySelector('.sm-close').addEventListener('click', closeQuickManager);
     $qmOverlay.querySelector('#qmAddGroup').addEventListener('click', function () {
-      var g = { id: newQuickGroupId(), label: { zh: '新分组', en: 'New group' }, hidden: false, items: [] };
-      state.quickGroups.push(g);
+      addQuickGroup(state);
       afterQuickChange();
       var last = $qmList.querySelector('.qm-group:last-child .sm-tag');
       if (last) { last.focus(); last.select(); }
@@ -553,9 +531,9 @@ import {
       var order = document.createElement('div');
       order.className = 'qm-order';
       var up = mkOpBtn('chevron-up', '上移分组', gIdx === 0);
-      up.addEventListener('click', function () { moveInArray(state.quickGroups, group.id, -1); afterQuickChange(); });
+      up.addEventListener('click', function () { moveQuick(state.quickGroups, group.id, -1); });
       var down = mkOpBtn('chevron-down', '下移分组', gIdx === state.quickGroups.length - 1);
-      down.addEventListener('click', function () { moveInArray(state.quickGroups, group.id, 1); afterQuickChange(); });
+      down.addEventListener('click', function () { moveQuick(state.quickGroups, group.id, 1); });
       order.appendChild(up); order.appendChild(down);
       head.appendChild(order);
 
@@ -579,8 +557,7 @@ import {
       var delGroup = mkOpBtn('trash-2', '删除分组', false);
       delGroup.classList.add('danger');
       delGroup.addEventListener('click', function () {
-        var idx = state.quickGroups.indexOf(group);
-        if (idx >= 0) state.quickGroups.splice(idx, 1);
+        removeById(state.quickGroups, group.id);
         afterQuickChange();
       });
       head.appendChild(delGroup);
@@ -596,9 +573,9 @@ import {
         var iorder = document.createElement('div');
         iorder.className = 'qm-order';
         var iup = mkOpBtn('chevron-up', '上移', iIdx === 0);
-        iup.addEventListener('click', function () { moveInArray(group.items, item.id, -1); afterQuickChange(); });
+        iup.addEventListener('click', function () { moveQuick(group.items, item.id, -1); });
         var idown = mkOpBtn('chevron-down', '下移', iIdx === group.items.length - 1);
-        idown.addEventListener('click', function () { moveInArray(group.items, item.id, 1); afterQuickChange(); });
+        idown.addEventListener('click', function () { moveQuick(group.items, item.id, 1); });
         iorder.appendChild(iup); iorder.appendChild(idown);
         row.appendChild(iorder);
 
@@ -624,8 +601,7 @@ import {
         var delItem = mkOpBtn('x', '删除段落', false);
         delItem.classList.add('danger');
         delItem.addEventListener('click', function () {
-          var ii = group.items.indexOf(item);
-          if (ii >= 0) group.items.splice(ii, 1);
+          removeById(group.items, item.id);
           afterQuickChange();
         });
         row.appendChild(delItem);
@@ -640,7 +616,7 @@ import {
       addItem.className = 'qm-add-item';
       addItem.innerHTML = icon('plus') + ' <span>新增段落</span>';
       addItem.addEventListener('click', function () {
-        group.items.push({ id: newQuickItemId(), label: { zh: '新段落', en: 'New paragraph' }, text: { zh: '', en: '' } });
+        addQuickItem(group);
         afterQuickChange();
         var rows = wrap.querySelectorAll('.qm-item-row');
         var lastLab = rows.length ? rows[rows.length - 1].querySelector('.sm-tag') : null;
@@ -716,8 +692,7 @@ import {
       '</div>';
     $qmList = host.querySelector('#qmListEmbed');
     host.querySelector('.sm-embed-add-group').addEventListener('click', function () {
-      var g = { id: newQuickGroupId(), label: { zh: '新分组', en: 'New group' }, hidden: false, items: [] };
-      state.quickGroups.push(g);
+      addQuickGroup(state);
       afterQuickChange();
       var last = $qmList.querySelector('.qm-group:last-child .sm-tag');
       if (last) { last.focus(); last.select(); }
