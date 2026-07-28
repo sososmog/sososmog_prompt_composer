@@ -1284,6 +1284,58 @@
   }
 
   /* ============================================================
+   * 2.5 翻译：配置校验 + 译文回填（纯函数）
+   * ------------------------------------------------------------
+   * 这两段原来写在 translate.js 里。它们全是防御性分支——模型少返回一项、
+   * 某项返回空串、返回数量比块数还多——正因为平时不触发，所以从没被验证过，
+   * 而真出问题时表现是「翻译完某一块内容没了」，属于会丢用户内容的那类。
+   * ============================================================ */
+
+  // 返回 null 表示配置可用；否则返回错误标识/提示文案。
+  // 'need-key' 是特殊标识：UI 要据此引导去填 Key，而不是直接弹这句话。
+  function validateTranslateConfig(cfg) {
+    if (!cfg) return '翻译未配置';
+    if (!cfg.apiKey || !cfg.apiKey.trim()) return 'need-key';
+    if (!cfg.baseUrl || !cfg.baseUrl.trim()) return '请先在设置里填写 baseURL';
+    if (!cfg.model || !cfg.model.trim()) return '请先在设置里填写模型名';
+    return null;
+  }
+
+  /* 把模型返回的译文按序拼回整篇。
+   *
+   * 关键约定：**以源块数组为基准**逐位取译文，而不是遍历译文数组。模型少返回
+   * 几项时，缺的位置用源块原文回填（等价于该块未翻译），绝不能让块数变少——
+   * 那就是静默吞掉用户的正文。多返回的项直接丢弃。
+   * 每块去掉尾部空白，避免以 '\n\n' 拼接后累积出越来越多的空行。
+   *
+   * 返回 { text, partial, count }，partial 为真时 UI 应提示"部分未翻译"。
+   */
+  function assembleTranslatedBlocks(srcBlocks, translations, tokensList) {
+    var blocks = Array.isArray(srcBlocks) ? srcBlocks : [];
+    var list = Array.isArray(translations) ? translations : [];
+    var toks = Array.isArray(tokensList) ? tokensList : [];
+    var partial = list.length !== blocks.length;
+
+    var outBlocks = blocks.map(function (srcBlock, i) {
+      var t = list[i];
+      // 非字符串或空白串都当作"这一项没翻出来"，回退到源块
+      var block = (typeof t !== 'string' || t.trim() === '') ? srcBlock : unmaskCode(t, toks[i]);
+      return String(block).replace(/\s+$/, '');
+    });
+
+    // 长度对得上但个别项为空/非字符串时也算部分失败，否则 UI 会把
+    // "有几块其实没翻"报成完全成功。
+    if (!partial) {
+      for (var i = 0; i < blocks.length; i++) {
+        var v = list[i];
+        if (typeof v !== 'string' || v.trim() === '') { partial = true; break; }
+      }
+    }
+
+    return { text: outBlocks.join('\n\n'), partial: partial, count: blocks.length };
+  }
+
+  /* ============================================================
    * 3. token 估算
    * ============================================================ */
   function estimateTokens(text) {
@@ -2079,6 +2131,8 @@
     buildTranslatePayload,
     extractModelText,
     parseTranslateResponse,
+    validateTranslateConfig,
+    assembleTranslatedBlocks,
     demoContent,
     defaultState,
     newSnippetId,

@@ -9,6 +9,8 @@ const {
   buildTranslatePayload,
   parseTranslateResponse,
   extractModelText,
+  validateTranslateConfig,
+  assembleTranslatedBlocks,
   TRANSLATE_PROVIDER_BY_ID,
 } = loadComposer();
 
@@ -153,5 +155,109 @@ describe('预设完整性', () => {
       expect(typeof p.baseUrl).toBe('string');
       expect(typeof p.model).toBe('string');
     });
+  });
+});
+
+describe('validateTranslateConfig 配置校验', () => {
+  const ok = { apiKey: 'sk-x', baseUrl: 'https://api.example.com', model: 'gpt-x' };
+
+  it('三项齐全时返回 null', () => {
+    expect(validateTranslateConfig(ok)).toBe(null);
+  });
+
+  it('配置对象缺失时给出提示', () => {
+    expect(validateTranslateConfig(null)).toBe('翻译未配置');
+    expect(validateTranslateConfig(undefined)).toBe('翻译未配置');
+  });
+
+  it('缺 Key 返回特殊标识 need-key（UI 据此引导去填，而非弹这句话）', () => {
+    expect(validateTranslateConfig({ ...ok, apiKey: '' })).toBe('need-key');
+    expect(validateTranslateConfig({ ...ok, apiKey: undefined })).toBe('need-key');
+  });
+
+  it('Key 只有空白也算没填', () => {
+    expect(validateTranslateConfig({ ...ok, apiKey: '   ' })).toBe('need-key');
+  });
+
+  it('缺 baseUrl / model 各自给出对应提示', () => {
+    expect(validateTranslateConfig({ ...ok, baseUrl: '' })).toMatch(/baseURL/);
+    expect(validateTranslateConfig({ ...ok, baseUrl: '  ' })).toMatch(/baseURL/);
+    expect(validateTranslateConfig({ ...ok, model: '' })).toMatch(/模型名/);
+    expect(validateTranslateConfig({ ...ok, model: '\t' })).toMatch(/模型名/);
+  });
+
+  it('校验顺序：Key 优先于 baseUrl（同时缺时先引导填 Key）', () => {
+    expect(validateTranslateConfig({ apiKey: '', baseUrl: '', model: '' })).toBe('need-key');
+  });
+});
+
+describe('assembleTranslatedBlocks 译文回填', () => {
+  it('数量对齐且都非空：逐块替换，partial 为假', () => {
+    const out = assembleTranslatedBlocks(['## A\n中文一', '## B\n中文二'], ['## A\nOne', '## B\nTwo'], [[], []]);
+    expect(out.text).toBe('## A\nOne\n\n## B\nTwo');
+    expect(out.partial).toBe(false);
+    expect(out.count).toBe(2);
+  });
+
+  it('模型少返回一项：缺的位置回填源块原文，块数不减（不能吞掉正文）', () => {
+    const src = ['块一', '块二', '块三'];
+    const out = assembleTranslatedBlocks(src, ['One', 'Two'], [[], [], []]);
+    expect(out.text.split('\n\n')).toEqual(['One', 'Two', '块三']);
+    expect(out.partial).toBe(true);
+    expect(out.count).toBe(3);
+  });
+
+  it('模型多返回项：多出来的丢弃，块数仍等于源块数', () => {
+    const out = assembleTranslatedBlocks(['块一'], ['One', 'Extra', 'More'], [[]]);
+    expect(out.text).toBe('One');
+    expect(out.count).toBe(1);
+    expect(out.partial).toBe(true);
+  });
+
+  it('某项是空串 / 纯空白：该块回填原文，并标记 partial', () => {
+    const out = assembleTranslatedBlocks(['块一', '块二'], ['One', '   '], [[], []]);
+    expect(out.text.split('\n\n')).toEqual(['One', '块二']);
+    // 长度对得上但有一块其实没翻，不能报成完全成功
+    expect(out.partial).toBe(true);
+  });
+
+  it('某项不是字符串（null / 数字 / 对象）也回退到源块，不把 null 写进正文', () => {
+    const out = assembleTranslatedBlocks(['a', 'b', 'c'], [null, 42, { x: 1 }], [[], [], []]);
+    expect(out.text.split('\n\n')).toEqual(['a', 'b', 'c']);
+    expect(out.partial).toBe(true);
+  });
+
+  it('去掉每块尾部空白，拼接后不累积空行', () => {
+    const out = assembleTranslatedBlocks(['a', 'b'], ['One\n\n\n', 'Two   \n'], [[], []]);
+    expect(out.text).toBe('One\n\nTwo');
+  });
+
+  it('还原遮罩：译文里的占位符换回原始代码', () => {
+    const { masked, tokens } = maskCode('看这段 `code()` 代码');
+    const out = assembleTranslatedBlocks(['看这段 `code()` 代码'], [masked], [tokens]);
+    expect(out.text).toContain('`code()`');
+  });
+
+  it('translations 不是数组：整篇回填源文，全部标记 partial', () => {
+    const out = assembleTranslatedBlocks(['a', 'b'], null, [[], []]);
+    expect(out.text).toBe('a\n\nb');
+    expect(out.partial).toBe(true);
+  });
+
+  it('源块为空数组：产出空串、count 为 0，不抛异常', () => {
+    const out = assembleTranslatedBlocks([], [], []);
+    expect(out.text).toBe('');
+    expect(out.count).toBe(0);
+    expect(out.partial).toBe(false);
+  });
+
+  it('tokensList 缺失时不抛异常（按无遮罩处理）', () => {
+    const out = assembleTranslatedBlocks(['a'], ['One'], undefined);
+    expect(out.text).toBe('One');
+  });
+
+  it('源块本身带尾部空白时，回填的原文也被裁掉尾部空白', () => {
+    const out = assembleTranslatedBlocks(['块一   \n\n'], [''], [[]]);
+    expect(out.text).toBe('块一');
   });
 });
