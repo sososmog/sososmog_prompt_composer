@@ -18,7 +18,6 @@ const {
   scoreCandidate,
   rankCandidates,
   learn,
-  learnedSnippets,
   buildLearningExportBundle,
   validateLearningImportBundle,
   mergeLearningImport,
@@ -182,22 +181,6 @@ describe('learn', () => {
   });
 });
 
-describe('learnedSnippets', () => {
-  it('只返回对应语言的 learned 片段', () => {
-    let L = defaultLearning();
-    const zhLine = '中文重复提交的一句话内容';
-    const enLine = 'an english repeated sentence';
-    for (let i = 0; i < 3; i++) {
-      L = learn('commit', { lang: 'zh', lines: [zhLine] }, L, 1000 + i);
-      L = learn('commit', { lang: 'en', lines: [enLine] }, L, 2000 + i);
-    }
-    const zh = learnedSnippets(L, 'zh');
-    const en = learnedSnippets(L, 'en');
-    expect(zh.map((s) => s.text)).toContain(zhLine);
-    expect(zh.map((s) => s.text)).not.toContain(enLine);
-    expect(en.map((s) => s.text)).toContain(enLine);
-  });
-});
 
 describe('normalizeLearning', () => {
   it('空/非法输入回退合法结构', () => {
@@ -419,7 +402,7 @@ describe('migrateLearningV1toV2（存量数据迁移）', () => {
 });
 
 describe('导入导出（含 v1/v2 兼容）', () => {
-  it('导出 bundle 版本为当前 LEARN_VERSION 且只含 learned', () => {
+  it('导出 bundle 版本为当前 LEARN_VERSION 且含语料', () => {
     let L = defaultLearning();
     const line = '一句会被提炼成learned的测试话语';
     for (let i = 0; i < 3; i++) L = learn('commit', { lang: 'zh', lines: [line] }, L, 1000 + i);
@@ -428,6 +411,59 @@ describe('导入导出（含 v1/v2 兼容）', () => {
     expect(bundle.version).toBe(2);
     const nk = learnKey('zh', line);
     expect(bundle.rawCounts[nk]).toBeDefined();
+  });
+
+  /* 回归：候选片段是读时从 rawCounts 现切的，落盘不存片段。以前导出只取
+   * snippets 里 source==='learned' 的条目（重复≥3 次的整行），于是"某短语出现在
+   * 2 个不同行"这类靠 lines 信号进池的片段一条都导不出去——管理列表看得见，
+   * 点导出却说"没有可导出的学习数据"，迁移到新机器等于语料全丢。 */
+  it('回归：只出现 1 次的行也要导出（片段靠跨行 lines 信号进池）', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['请严格按照要求的格式输出，不要添加额外说明。'] }, L, 1000);
+    L = learn('commit', { lang: 'zh', lines: ['请严格按照要求的格式输出，并附上示例。'] }, L, 2000);
+
+    // 这两行各只提交 1 次，都没达到提炼阈值，但共享的短语已经进池
+    const visible = learnedFragmentsForManage(L, 'zh', { mode: 'clause' }).map((f) => f.text);
+    expect(visible).toContain('请严格按照要求的格式输出');
+    expect(Object.keys(L.snippets).length).toBe(0); // 确实没有任何 learned snippet
+
+    const bundle = buildLearningExportBundle(L);
+    expect(Object.keys(bundle.rawCounts).length).toBe(2); // 两行语料都在
+
+    // 导到一台干净的机器上，能重算出同样的片段
+    const fresh = mergeLearningImport(defaultLearning(), bundle);
+    expect(fresh.importedCount).toBe(2);
+    const rebuilt = learnedFragmentsForManage(fresh.learning, 'zh', { mode: 'clause' }).map((f) => f.text);
+    expect(rebuilt).toContain('请严格按照要求的格式输出');
+    expect(rebuilt.sort()).toEqual(visible.sort());
+  });
+
+  it('导出带上已有的行为统计，纯语料行不凭空造全 0 记录', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['有统计的那一句测试文本', '没统计的那一句测试文本'] }, L, 1000);
+    const withStats = learnKey('zh', '有统计的那一句测试文本');
+    L = learn('shown', { candKey: withStats }, L, 2000);
+    L = learn('accepted', { candKey: withStats }, L, 3000);
+
+    const bundle = buildLearningExportBundle(L);
+    expect(Object.keys(bundle.rawCounts).length).toBe(2);
+    expect(Object.keys(bundle.snippets)).toEqual([withStats]); // 只有那一条带统计
+
+    const fresh = mergeLearningImport(defaultLearning(), bundle).learning;
+    expect(fresh.snippets[withStats]).toMatchObject({ shown: 1, accepted: 1, lastUsedAt: 3000 });
+    expect(fresh.snippets[learnKey('zh', '没统计的那一句测试文本')]).toBeUndefined();
+    expect(fresh.rawCounts[learnKey('zh', '没统计的那一句测试文本')].count).toBe(1);
+  });
+
+  it('导入两次会把计数叠加（幂等性不保证，但不丢数据）', () => {
+    let L = defaultLearning();
+    L = learn('commit', { lang: 'zh', lines: ['一句用于测试重复导入的文本'] }, L, 1000);
+    const bundle = buildLearningExportBundle(L);
+    const once = mergeLearningImport(defaultLearning(), bundle).learning;
+    const twice = mergeLearningImport(once, bundle).learning;
+    const nk = learnKey('zh', '一句用于测试重复导入的文本');
+    expect(once.rawCounts[nk].count).toBe(1);
+    expect(twice.rawCounts[nk].count).toBe(2);
   });
 
   it('validate 接受 v1 / v2，拒绝更高版本与非法', () => {
@@ -633,13 +669,15 @@ describe('blocked 字段（additive schema）', () => {
     expect(defaultLearning().blocked).toEqual({});
   });
 
-  it('normalizeLearning 保留 value===true 的 blocked，忽略其它', () => {
+  it('normalizeLearning 把老存档的 value===true 兼容成时间戳 0，保留合法数字时间戳，忽略其它脏值', () => {
+    // true 是老格式（没有时间戳概念时写入的），迁移语义是「最早加入」——
+    // 容量超限淘汰时最先被丢，因此归一化为 0；数字时间戳原样保留；其余脏值丢弃。
     const raw = {
       version: 2, snippets: {}, bigrams: {}, rawCounts: {},
-      blocked: { keepTrue: true, dropFalse: false, dropStr: 'x' },
+      blocked: { keepTrue: true, keepTimestamp: 12345, dropFalse: false, dropStr: 'x', dropNaN: NaN },
     };
     const out = normalizeLearning(raw);
-    expect(out.blocked).toEqual({ keepTrue: true });
+    expect(out.blocked).toEqual({ keepTrue: 0, keepTimestamp: 12345 });
   });
 
   it('blocked 缺失 / 为数组时归一化为空对象', () => {
@@ -675,8 +713,8 @@ describe('blockLearnedFragment', () => {
     const otherCand = learnKey('zh', '别的候选');
     L.bigrams[otherPfx] = {}; L.bigrams[otherPfx][otherCand] = 2;
 
-    const out = blockLearnedFragment(L, fk);
-    expect(out.blocked[fk]).toBe(true);
+    const out = blockLearnedFragment(L, fk, 5000);
+    expect(out.blocked[fk]).toBe(5000); // 存时间戳（传入的 now）而非 true，供容量超限淘汰按加入先后排序
     expect(learnedFragments(out, 'zh', {}).map((f) => f.text)).not.toContain('擅长 Web 开发');
     // 以 fk 为候选的项被清，该 prefixKey 下清空 → 整个 prefixKey 删除
     expect(out.bigrams[pfx]).toBeUndefined();

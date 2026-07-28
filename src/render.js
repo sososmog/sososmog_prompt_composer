@@ -7,12 +7,19 @@
 import {
   escapeHtml,
   icon,
+  isFenceLine,
   parseBlocks,
   estimateTokens,
   highlightMarkdown,
-  MODULE_BY_ID,
-  BUILTIN_BY_ID,
 } from './core.js';
+import {
+  resolveModule as materialsResolveModule,
+  orderedModules as materialsOrderedModules,
+  visibleModules as materialsVisibleModules,
+  resolveSnippet as materialsResolveSnippet,
+  orderedSnippets as materialsOrderedSnippets,
+  visibleSnippets as materialsVisibleSnippets,
+} from './materials.js';
 import {
   state,
   view,
@@ -34,41 +41,16 @@ import { attachCompletion } from './completion.js';
 
   /* ============================================================
    * 7. 渲染：左栏
+   * ------------------------------------------------------------
+   * resolveModule/orderedModules/visibleModules 与 resolveSnippet/
+   * orderedSnippets（下方 allSnippets 即 visibleSnippets）的实际解析
+   * 逻辑已抽到 materials.js（与浮窗共用，见该文件头部注释）；这里的
+   * 同名函数是薄包装：补上 state 参数、保持无参调用签名不变，
+   * 以免牵动 quick.js 里 `orderedSnippets()` / `orderedModules()` 的调用点。
    * ============================================================ */
-  // 把一个 id 解析成可用的模块对象（内置合并覆盖；返回含 hidden 标记）
-  function resolveModule(id) {
-    var b = MODULE_BY_ID[id];
-    if (b) {
-      var p = state.modulePatches[id] || {};
-      return {
-        id: id,
-        builtin: true,
-        label: {
-          zh: typeof p.labelZh === 'string' ? p.labelZh : b.label.zh,
-          en: typeof p.labelEn === 'string' ? p.labelEn : b.label.en
-        },
-        text: {
-          zh: typeof p.textZh === 'string' ? p.textZh : b.text.zh,
-          en: typeof p.textEn === 'string' ? p.textEn : b.text.en
-        },
-        hidden: p.hidden === true
-      };
-    }
-    var c = null;
-    for (var i = 0; i < state.customModules.length; i++) {
-      if (state.customModules[i].id === id) { c = state.customModules[i]; break; }
-    }
-    if (!c) return null;
-    return { id: id, builtin: false, label: { zh: c.label.zh, en: c.label.en }, text: { zh: c.text.zh, en: c.text.en }, hidden: c.hidden === true };
-  }
-
-  function orderedModules() {
-    return state.moduleOrder.map(resolveModule).filter(Boolean);
-  }
-
-  function visibleModules() {
-    return orderedModules().filter(function (m) { return !m.hidden; });
-  }
+  function resolveModule(id) { return materialsResolveModule(state, id); }
+  function orderedModules() { return materialsOrderedModules(state); }
+  function visibleModules() { return materialsVisibleModules(state); }
 
   function renderInsertGrid() {
     var lang = state.lang;
@@ -86,37 +68,11 @@ import { attachCompletion } from './completion.js';
     });
   }
 
-  // 把一个 id 解析成可用的句子对象（内置合并覆盖；返回含 hidden 标记）
-  function resolveSnippet(id) {
-    var b = BUILTIN_BY_ID[id];
-    if (b) {
-      var p = state.builtinPatches[id] || {};
-      return {
-        id: id,
-        builtin: true,
-        tag: typeof p.tag === 'string' ? p.tag : b.tag,
-        zh: typeof p.zh === 'string' ? p.zh : b.zh,
-        en: typeof p.en === 'string' ? p.en : b.en,
-        hidden: p.hidden === true
-      };
-    }
-    var c = null;
-    for (var i = 0; i < state.customSnippets.length; i++) {
-      if (state.customSnippets[i].id === id) { c = state.customSnippets[i]; break; }
-    }
-    if (!c) return null;
-    return { id: id, builtin: false, tag: c.tag, zh: c.zh, en: c.en, hidden: c.hidden === true };
-  }
-
-  // 按顺序返回全部句子（含隐藏，供管理浮窗使用）
-  function orderedSnippets() {
-    return state.snippetOrder.map(resolveSnippet).filter(Boolean);
-  }
-
-  // 左栏可见句子（排除隐藏）
-  function allSnippets() {
-    return orderedSnippets().filter(function (s) { return !s.hidden; });
-  }
+  function resolveSnippet(id) { return materialsResolveSnippet(state, id); }
+  function orderedSnippets() { return materialsOrderedSnippets(state); }
+  // allSnippets 即 visibleSnippets；保留这个名字是因为 quick.js 用不到它，
+  // 但本文件内部 renderSnippets() 沿用旧名，改名无必要收益。
+  function allSnippets() { return materialsVisibleSnippets(state); }
 
   function renderSnippets() {
     var lang = state.lang;
@@ -498,10 +454,13 @@ import { attachCompletion } from './completion.js';
       return;
     }
 
-    // 按行渲染：## 开头的行做标题色，其余作为纯文本
+    // 按行渲染：围栏之外以 ## 开头的行做标题色，其余作为纯文本。
+    // 认围栏与 parseBlocks 同理——代码示例里的 ## 不是标题。
     var lines = raw.split('\n');
+    var inFence = false;
     lines.forEach(function (line, i) {
-      if (/^##\s?/.test(line)) {
+      var fence = isFenceLine(line);
+      if (!inFence && !fence && /^##\s?/.test(line)) {
         var h = document.createElement('span');
         h.className = 'pv-h';
         h.textContent = line;
@@ -509,6 +468,7 @@ import { attachCompletion } from './completion.js';
       } else {
         $preview.appendChild(document.createTextNode(line));
       }
+      if (fence) inFence = !inFence;
       if (i < lines.length - 1) $preview.appendChild(document.createTextNode('\n'));
     });
   }
@@ -516,10 +476,9 @@ import { attachCompletion } from './completion.js';
   export {
     // 左栏
     resolveModule, orderedModules, visibleModules, renderInsertGrid,
-    resolveSnippet, orderedSnippets, allSnippets, renderSnippets,
+    resolveSnippet, orderedSnippets, renderSnippets,
     // 编辑器 / 块
-    renderEditor, autosize, renderBlocks, appendAddBlockButton,
-    markLastBlockAsNew, buildBlockCard, renderHighlight, syncOverlayScroll,
-    onBlocksChanged, deleteBlock, moveBlock, attachDrag, flipReorder,
-    startBlockDrag, refreshStat, renderPreview,
+    renderEditor, renderBlocks,
+    markLastBlockAsNew,
+    refreshStat, renderPreview,
   };

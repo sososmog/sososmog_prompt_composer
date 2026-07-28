@@ -992,6 +992,19 @@
   .bk-summary-title { font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px; }
   .bk-summary-list { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:3px; }
   .bk-summary-list li { font-size:12px; color:var(--text-soft); line-height:1.5; }
+  .bk-summary-list code, .bk-endpoint-host {
+    font-family:var(--font-mono); font-size:11px;
+    background:var(--surface-hi); border-radius:4px; padding:1px 5px;
+  }
+
+  /* 导入预览里的「陌生翻译接口地址」确认块：默认不勾，视觉上要明显是警示区 */
+  .bk-endpoint {
+    border:1px solid var(--amber-deep); border-radius:var(--radius-sm);
+    background:var(--amber-soft); padding:12px 14px;
+  }
+  .bk-endpoint-title { color:var(--amber-hi); }
+  .bk-endpoint .bk-note strong { color:var(--text); }
+  .bk-endpoint-host { background:var(--bg-card); color:var(--amber-hi); }
 
   /* 底部主按钮 */
   .bk-foot { display:flex; justify-content:flex-end; }

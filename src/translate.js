@@ -146,7 +146,4 @@ function translateCurrentContent() {
 
 export {
   translateCurrentContent,
-  validateConfig,
-  langName,
-  TRANSLATE_TIMEOUT_MS,
 };

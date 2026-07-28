@@ -4,18 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Composer</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<!-- 主题 bootstrap：必须在样式表生效前同步执行（非 module 的普通脚本会阻塞解析），
+     逻辑见 theme-boot.js；不再内联是为了让 CSP 的 script-src 不需要 'unsafe-inline'。
+     与浮窗 float.html 共用同一份文件。 -->
+<script src="theme-boot.js"></script>
+<!-- 本地字体（取代原来指向 fonts.googleapis.com / fonts.gstatic.com 的运行时请求，
+     详见 src/fonts/README.md 与 src/fonts.css 顶部注释）；放在主样式表之前。 -->
+<link rel="stylesheet" href="fonts.css" />
 <link rel="stylesheet" href="styles.css" />
-<script>
-  /* 在渲染前应用主题，避免首屏闪烁；默认深色 */
-  (function () {
-    var t = 'dark';
-    try { t = localStorage.getItem('composer-theme') || 'dark'; } catch (e) {}
-    if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
-  })();
-</script>
 </head>
 <body>
 
@@ -137,6 +133,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="events.js"></script>
+<script type="module" src="main.js"></script>
 </body>
 </html>

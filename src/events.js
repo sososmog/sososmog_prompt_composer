@@ -3,7 +3,9 @@
  *              检查更新、汇总渲染 renderAll，以及启动引导
  * ------------------------------------------------------------
  * 主窗口最上层：装配各按钮/全局事件，import 其余模块的能力。
- * 文件末尾执行启动逻辑（restoreState + 延迟检查更新）。
+ * 启动逻辑（restoreState + 延迟检查更新）已收进 bootstrap()，
+ * 不再是模块顶层的裸执行语句——由 main.js 在模块图装配完成后调用，
+ * 好让本文件能被安全 import（含单测）而不触发真实启动链路。
  * ============================================================ */
 import { icon, escapeHtml, TRANSLATE_PROVIDERS, TRANSLATE_PROVIDER_BY_ID, normalizeTranslateSettings } from './core.js';
 import { translateCurrentContent } from './translate.js';
@@ -439,7 +441,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
               '</div>' +
               '<div class="st-field">' +
                 '<span class="st-label">导入 / 导出自学习数据</span>' +
-                '<span class="st-desc">把学到的片段单独导出成一个文件，用于备份或迁移到另一台电脑；导出内容是你写过的原文，注意隐私。</span>' +
+                '<span class="st-desc">把学到的内容单独导出成一个文件，用于备份或迁移到另一台电脑。导出的是你完整用过的原始行（片段由它现算），因此文件里是你写过的原文，注意隐私。</span>' +
                 '<div class="st-update-row">' +
                   '<button type="button" class="st-update-btn" id="stLearningExport">' + icon('upload') + '<span>导出为文件…</span></button>' +
                   '<button type="button" class="st-update-btn" id="stLearningImport">' + icon('download') + '<span>从文件导入…</span></button>' +
@@ -807,8 +809,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   }
 
   function doExportLearning() {
-    // 导出的是「整行提炼的 learned 语料」（见 buildLearningExportBundle），与面板里
-    // 读时片段列表口径不同，故直接看 bundle 是否有内容，而非片段列表长度。
+    // 导出的是整份语料（rawCounts，即你完整用过的原始行）。候选片段是读时从语料
+    // 现切的，落盘不存片段——导语料才能在新机器上重算出同样的片段，所以这里的
+    // 空判断也看语料条数。
     var bundle = exportLearningBundle();
     if (!bundle || !bundle.rawCounts || Object.keys(bundle.rawCounts).length === 0) {
       showToast('目前没有可导出的学习数据'); return;
@@ -927,15 +930,21 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       renderTranslateSettings();
     });
 
-    $trKey.addEventListener('change', function () {
+    // 这三个用 input（而非 change）：change 要失焦才触发，粘贴进 Key 还没来得及
+    // 失焦时，若这期间触发了一次 renderSettingsPanel（比如按了 Ctrl+L 切语言），
+    // renderTranslateSettings 会用 state 里的旧值把输入框内容整个覆盖掉，
+    // 相当于刚粘的 Key 被吞掉。改成 input 让每次按键都即时写回 state，不会再有
+    // “已经打进框里但还没提交”的中间态可丢。scheduleSave 本身有防抖，输入频率
+    // 不会因此增加写盘次数。
+    $trKey.addEventListener('input', function () {
       state.settings.translation.apiKey = $trKey.value.trim();
       saveTranslateSettings();
     });
-    $trModel.addEventListener('change', function () {
+    $trModel.addEventListener('input', function () {
       state.settings.translation.model = $trModel.value.trim();
       saveTranslateSettings();
     });
-    $trBase.addEventListener('change', function () {
+    $trBase.addEventListener('input', function () {
       state.settings.translation.baseUrl = $trBase.value.trim();
       saveTranslateSettings();
     });
@@ -1174,6 +1183,19 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   /* ============================================================
    * 11. 快捷键
    * ============================================================ */
+  // 弹窗（设置面板 / 常用句管理 / 快速段落管理 / 导入导出）都用 .sm-overlay 这个
+  // class，打开时带 .show。焦点落在其中任意输入框时，l/s/p/c 这几个全局快捷键
+  // 在弹窗语境下没有对应语义（比如设置面板里没有“下载 .md”这回事），继续抢键
+  // 只会打断用户在弹窗里的操作（典型案例：翻译设置里粘贴 API Key 时按了 Ctrl+L，
+  // 组合键落到这里触发切换语言 → renderAll → 弹窗内容被 state 旧值覆盖）。
+  // activeElement 可能为 null，也可能是不支持 closest 的节点（如 document 本身），
+  // 两种都要防御。
+  function isInsideOpenDialog() {
+    var ae = document.activeElement;
+    if (!ae || typeof ae.closest !== 'function') return false;
+    return !!ae.closest('.sm-overlay.show');
+  }
+
   document.addEventListener('keydown', function (e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     var key = e.key.toLowerCase();
@@ -1190,6 +1212,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       if (key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
       if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); doRedo(); return; }
     }
+    // 只针对弹窗内让位：正文里的块 textarea 仍要照常响应 Ctrl+S/Ctrl+L/Ctrl+P/Ctrl+C
+    // ——footer 提示文案明确宣传了这几个快捷键在编辑正文时可用，不能连带禁掉。
+    if ((key === 'l' || key === 's' || key === 'p' || key === 'c') && isInsideOpenDialog()) return;
     if (key === 'l') { e.preventDefault(); toggleLang(); }
     else if (key === 's') { e.preventDefault(); doDownload(); }
     else if (key === 'p') { e.preventDefault(); toggleView(); }
@@ -1242,21 +1267,39 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if ($stOverlay && $stOverlay.classList.contains('show')) renderSettingsPanel();
   }
 
-  // 状态恢复 + 首次 renderAll 完成后，按需自动弹出新手引导
-  // （此时演示数据卡片等 DOM 已渲染，引导高亮定位才准确）。
-  Promise.resolve(restoreState()).then(function () {
-    maybeStartTourOnBoot();
-  });
-  setTimeout(function () { checkForUpdate(false); }, 3000);
+  /* ============================================================
+   * 14. 启动引导（bootstrap）
+   * ------------------------------------------------------------
+   * 为什么把“启动动作”从模块顶层的裸执行语句里拎出来：这两行一旦在
+   * import 阶段就跑，import 这个文件本身就等于启动一次真实应用（读
+   * 存档、可能弹新手引导、3 秒后联网查更新）——vitest 里没法只 import
+   * 拿这堆函数当逻辑用，一 import 就会真的跑起来。拆成具名函数后，
+   * 何时触发启动交给调用方决定：真实运行时由 main.js 在整张模块图
+   * 装配完成后调用一次；测试里则完全不必调用它，直接测 renderAll()
+   * 等具体行为即可，不必每个用例都被迫走一遍“存档恢复 + 引导 + 查
+   * 更新”的完整链路。
+   *
+   * 注意：本文件模块顶层仍然保留大量 $xxx.addEventListener(...) 之类
+   * 的 DOM 绑定，这次重构刻意没有把它们挪进函数——绑定本身不是“启动
+   * 副作用”，只是在引用真实 DOM 节点；只要测试先把 index.html 的
+   * <body> 灌进 jsdom、再动态 import 本模块，这些绑定就能照常挂到
+   * 真实节点上。真正需要拎出来的，只有下面这两行会主动触发外部效果
+   * （文件 I/O、全局引导层、网络请求）的启动动作。
+   * ============================================================ */
+  function bootstrap() {
+    // 状态恢复 + 首次 renderAll 完成后，按需自动弹出新手引导
+    // （此时演示数据卡片等 DOM 已渲染，引导高亮定位才准确）。
+    Promise.resolve(restoreState()).then(function () {
+      maybeStartTourOnBoot();
+    });
+    setTimeout(function () { checkForUpdate(false); }, 3000);
+  }
 
   export {
-    setLang, toggleLang, renderLangSeg,
-    setView, toggleView, renderViewSeg,
-    doCopy, fallbackCopy, doDownload,
-    formatInvokeError, codeToMainKey, formatAccelerator,
-    ensureSettingsPanel, renderSettingsPanel, startRecordingShortcut,
-    applyToggleShortcut, applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
-    checkForUpdate, renderAll,
-    doUndo, doRedo,
-    $stOverlay,
+    setLang,
+    setView,
+    applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
+    renderAll,
+    doUndo,
+    bootstrap,
   };

@@ -4,6 +4,7 @@ import { loadComposer } from './setup.js';
 const {
   buildExportBundle, validateImportBundle, mergeState, summarizeImport,
   defaultState, normalizeState, EXPORT_SCHEMA_VERSION,
+  translateHostOf, isPresetTranslateHost,
 } = loadComposer();
 
 // 造一个带自定义素材 + 已填 Key 的 state（不依赖 id 生成器的具体值）
@@ -233,6 +234,170 @@ describe('mergeState - 偏好合并与 apiKey 边界', () => {
     const src = defaultState(); // tourDone: false
     const next = mergeState(target, bundleFrom(src, ['preferences']), {});
     expect(next.settings.onboarding.tourDone).toBe(true);
+  });
+});
+
+/* ============================================================
+ * 翻译端点重定向闸门
+ * ------------------------------------------------------------
+ * 威胁：导入文件里的 baseUrl 若被静默采用，一份外来配置就能把「本机 Key +
+ * 整篇正文」发到攻击者的服务器（Key 不在文件里，但请求头带的是本机 Key）。
+ * 规则：预设服务商 host 直接采用；其它 host 必须 options.importEndpoint===true。
+ * ============================================================ */
+function bundleWithBaseUrl(baseUrl, extra) {
+  const src = defaultState();
+  src.settings.translation.provider = 'custom';
+  src.settings.translation.protocol = 'openai';
+  src.settings.translation.baseUrl = baseUrl;
+  src.settings.translation.model = 'evil-model';
+  if (extra) Object.assign(src.settings.translation, extra);
+  return bundleFrom(src, ['preferences']);
+}
+
+function localTranslateState() {
+  const s = defaultState();
+  s.settings.translation.apiKey = 'MY-LOCAL-KEY';
+  s.settings.translation.provider = 'glm';
+  s.settings.translation.protocol = 'openai';
+  s.settings.translation.baseUrl = 'https://open.bigmodel.cn/api/paas/v4';
+  s.settings.translation.model = 'glm-4-flash';
+  return s;
+}
+
+describe('translateHostOf - host 提取（闸门的判据，不许被绕过）', () => {
+  it('普通 https 地址', () => {
+    expect(translateHostOf('https://api.groq.com/openai/v1')).toBe('api.groq.com');
+  });
+  it('大小写归一 + 端口保留', () => {
+    expect(translateHostOf('HTTPS://API.Groq.COM:8443/v1')).toBe('api.groq.com:8443');
+  });
+  it('userinfo 里塞可信域名骗不过去：取最后一个 @ 之后的部分', () => {
+    // 浏览器实际连接的是 evil.example.com
+    expect(translateHostOf('https://api.groq.com@evil.example.com/v1')).toBe('evil.example.com');
+    expect(translateHostOf('https://a@b@evil.example.com/v1')).toBe('evil.example.com');
+  });
+  it('反斜杠与 / 一样终止 authority（对齐浏览器解析）', () => {
+    expect(translateHostOf('https://evil.example.com\\@api.groq.com/v1')).toBe('evil.example.com');
+  });
+  it('查询串 / 片段不进 host', () => {
+    expect(translateHostOf('https://evil.example.com?x=api.groq.com')).toBe('evil.example.com');
+    expect(translateHostOf('https://evil.example.com#api.groq.com')).toBe('evil.example.com');
+  });
+  it('非法 / 空输入返回空串', () => {
+    ['', null, undefined, 'not a url', '/relative/path', 'api.groq.com/v1'].forEach((v) => {
+      expect(translateHostOf(v)).toBe('');
+    });
+  });
+});
+
+describe('isPresetTranslateHost', () => {
+  it('四个内置服务商的 host 都可信', () => {
+    ['generativelanguage.googleapis.com', 'open.bigmodel.cn', 'api.groq.com', 'openrouter.ai']
+      .forEach((h) => expect(isPresetTranslateHost(h)).toBe(true));
+  });
+  it('子域名 / 后缀拼接不算可信', () => {
+    ['evil.api.groq.com', 'api.groq.com.evil.com', 'apigroq.com', '', null]
+      .forEach((h) => expect(isPresetTranslateHost(h)).toBe(false));
+  });
+  it('custom 预设的空 baseUrl 不会把空 host 变成可信', () => {
+    expect(isPresetTranslateHost('')).toBe(false);
+  });
+});
+
+describe('mergeState - 翻译端点闸门', () => {
+  it('陌生 host：默认不导入端点，保留本机 baseUrl/provider/model', () => {
+    const target = localTranslateState();
+    const next = mergeState(target, bundleWithBaseUrl('https://evil.example.com/v1'), {});
+    expect(next.settings.translation.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+    expect(next.settings.translation.provider).toBe('glm');
+    expect(next.settings.translation.model).toBe('glm-4-flash');
+    expect(next.settings.translation.apiKey).toBe('MY-LOCAL-KEY');
+  });
+
+  it('陌生 host + 用户显式确认（importEndpoint）：才写入导入的端点', () => {
+    const target = localTranslateState();
+    const next = mergeState(target, bundleWithBaseUrl('https://evil.example.com/v1'), { importEndpoint: true });
+    expect(next.settings.translation.baseUrl).toBe('https://evil.example.com/v1');
+    expect(next.settings.translation.model).toBe('evil-model');
+    expect(next.settings.translation.apiKey).toBe('MY-LOCAL-KEY'); // Key 依旧不动
+  });
+
+  it('预设 host：无需确认即可导入（换服务商这种正常用法不受影响）', () => {
+    const target = localTranslateState();
+    const src = defaultState();
+    src.settings.translation.provider = 'groq';
+    src.settings.translation.protocol = 'openai';
+    src.settings.translation.baseUrl = 'https://api.groq.com/openai/v1';
+    src.settings.translation.model = 'llama-3.3-70b-versatile';
+    const next = mergeState(target, bundleFrom(src, ['preferences']), {});
+    expect(next.settings.translation.baseUrl).toBe('https://api.groq.com/openai/v1');
+    expect(next.settings.translation.provider).toBe('groq');
+  });
+
+  it('userinfo 伪装成可信域名也拦得住', () => {
+    const target = localTranslateState();
+    const next = mergeState(target, bundleWithBaseUrl('https://api.groq.com@evil.example.com/v1'), {});
+    expect(next.settings.translation.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+  });
+
+  it('端点被拦下时，overwrite 等纯本地开关照常导入', () => {
+    const target = localTranslateState();
+    target.settings.translation.overwrite = true;
+    const next = mergeState(target, bundleWithBaseUrl('https://evil.example.com/v1', { overwrite: false }), {});
+    expect(next.settings.translation.overwrite).toBe(false);
+    expect(next.settings.translation.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+  });
+
+  it('覆盖模式（replace）同样受闸门管控', () => {
+    const target = localTranslateState();
+    const next = mergeState(target, bundleWithBaseUrl('https://evil.example.com/v1'), { mode: 'replace' });
+    expect(next.settings.translation.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+  });
+
+  it('normalizeState 收尾后端点仍是本机的（闸门不被归一化绕过）', () => {
+    const target = localTranslateState();
+    const next = normalizeState(mergeState(target, bundleWithBaseUrl('https://evil.example.com/v1'), {}));
+    expect(next.settings.translation.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+    expect(next.settings.translation.apiKey).toBe('MY-LOCAL-KEY');
+  });
+});
+
+describe('summarizeImport - 翻译端点预览（预览必须与实际结果一致）', () => {
+  it('陌生 host：给出 host、trusted=false、willImport=false', () => {
+    const sum = summarizeImport(localTranslateState(), bundleWithBaseUrl('https://evil.example.com/v1'), {});
+    expect(sum.preferences.translation).toMatchObject({
+      host: 'evil.example.com', trusted: false, willImport: false, model: 'evil-model',
+    });
+  });
+
+  it('陌生 host + importEndpoint：willImport 跟着变 true', () => {
+    const sum = summarizeImport(localTranslateState(), bundleWithBaseUrl('https://evil.example.com/v1'), { importEndpoint: true });
+    expect(sum.preferences.translation.willImport).toBe(true);
+  });
+
+  it('预设 host：trusted=true 且 willImport=true', () => {
+    const src = defaultState();
+    src.settings.translation.baseUrl = 'https://api.groq.com/openai/v1';
+    const sum = summarizeImport(localTranslateState(), bundleFrom(src, ['preferences']), {});
+    expect(sum.preferences.translation).toMatchObject({ host: 'api.groq.com', trusted: true, willImport: true });
+  });
+
+  it('预览的 willImport 与 mergeState 的实际行为逐一对齐', () => {
+    const cases = [
+      ['https://api.groq.com/openai/v1', {}],
+      ['https://evil.example.com/v1', {}],
+      ['https://evil.example.com/v1', { importEndpoint: true }],
+      ['https://api.groq.com@evil.example.com/v1', {}],
+      ['', {}],
+    ];
+    for (const [baseUrl, opts] of cases) {
+      const target = localTranslateState();
+      const bundle = bundleWithBaseUrl(baseUrl);
+      const sum = summarizeImport(target, bundle, opts);
+      const next = mergeState(target, bundle, opts);
+      const actuallyImported = next.settings.translation.baseUrl === baseUrl;
+      expect(sum.preferences.translation.willImport).toBe(actuallyImported);
+    }
   });
 });
 

@@ -4,28 +4,30 @@
  * 主窗口最底层模块：持有可变状态（state / view）、Tauri API 句柄、
  * DOM 引用、toast、块模型的正文回写与片段插入。纯逻辑从 core.js
  * import。渲染函数由 render.js 提供（运行时调用，ESM 循环依赖安全）。
+ *
+ * ⚠ 求值顺序约束（本文件与 events.js 是 ESM 循环依赖）：
+ * **整张模块图必须以 events.js 为入口**（生产环境由 main.js 保证，
+ * 测试里动态 import 时也必须先 import events.js）。原因：events.js 顶层
+ * 有一批 `$xxx.addEventListener(...)` 语句，它们引用的 $xxx 是本文件下面
+ * 那些 `var $foo = document.getElementById(...)`。函数声明会整体提升，
+ * 但 var 赋值不会——若反过来以本文件为入口，本文件顶层对 events.js 的
+ * import 会先把 events.js 求值一遍，那时 $langSegmented 等还是 undefined，
+ * 直接抛 "Cannot read properties of undefined (reading 'addEventListener')"。
+ * 以 events.js 为入口时，本文件会被完整求值（var 全部就绪）之后才轮到
+ * events.js 自己的顶层语句，因而安全。
+ * 想彻底消掉这个隐形约束，需要把 events.js 顶层的事件绑定收进一个
+ * bindEvents() 由 bootstrap() 调用；那是一次面较大的改动，目前靠这段注释
+ * 加 mainWindow.test.js 里的 import 顺序注释显式化。
  * ============================================================ */
 import {
   INSERT_MODULES,
-  MODULE_BY_ID,
   BUILTIN_SNIPPETS,
-  BUILTIN_BY_ID,
   demoContent,
   defaultState,
-  newSnippetId,
-  newModuleId,
-  newQuickGroupId,
-  newQuickItemId,
-  modulesToText,
   normalizeState,
   estimateTokens,
-  escapeHtml,
-  ICON_PATHS,
-  icon,
   parseBlocks,
   createHistory,
-  learn,
-  learnedFragments,
   learnedFragmentsForManage,
   blockLearnedFragment,
   clearLearning,
@@ -39,6 +41,10 @@ import {
   refreshStat,
 } from './render.js';
 import { renderAll, applyStartupShortcut } from './events.js';
+import { STATE_FILE, readState } from './statefile.js';
+import { insertTextAtCaret } from './edit.js';
+import { completionEnabled as poolCompletionEnabled, completionPool as poolCompletionPool, commitLearningText } from './pool.js';
+import { createStateSync } from './sync.js';
 
   /* ============================================================
    * 0. Tauri API 安全获取（浏览器中预览时降级）
@@ -54,7 +60,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
   var coreApi = TAURI && TAURI.core;
 
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
-  var STATE_FILE = 'composer-state.json';
+  // STATE_FILE 由 statefile.js 统一定义（正档 / .tmp / 坏档备份三个名字在一处）
   function tauriAvailable() { return !!(TAURI && fsApi && BaseDirectory); }
 
   /* ============================================================
@@ -68,21 +74,12 @@ import { renderAll, applyStartupShortcut } from './events.js';
    * ============================================================ */
   var state = defaultState();
   var view = 'write'; // 'write' | 'preview'
-  var saveTimer = null;
-  var suppressBroadcast = false; // 收到浮窗广播触发的本地更新，不再二次广播（防回声循环）
-  // Tauri 的 emit 会把事件回送给发送方自己。本窗口不该被自己刚保存的广播
-  // 反过来打断（尤其正在编辑时会暂存进 pendingRemoteState，失焦时 flush 触发
-  // 全量 renderAll，恰好打断“插入模块后紧接着的第二次插入”）。记住最近若干条
-  // 自己广播出去的 payload 序列化，listen 收到内容命中的即判为自我回声、跳过。
-  // 用队列而非单值：回声到达时机不定，两次连续保存会让单值被后者覆盖、漏过滤。
-  var recentBroadcasts = [];
-  var RECENT_BROADCAST_MAX = 6;
 
   /* ============================================================
    * 2.1 结构级 Undo/Redo：历史栈实例 + 捕获/恢复接口
    * ------------------------------------------------------------
    * 栈只存在运行时内存（core.js 的 createHistory），不进 state、
-   * 不进 persistState，重启即清空。捕获时机：每个结构操作“即将改变
+   * 不落盘持久化，重启即清空。捕获时机：每个结构操作“即将改变
    * state.content 之前”调 captureHistory()。撤销/重做走 doUndo/doRedo
    * （在 events.js 里接快捷键），恢复内容后由 applyContentSnapshot
    * 重渲染块视图并防抖保存。
@@ -125,51 +122,13 @@ import { renderAll, applyStartupShortcut } from './events.js';
     }
   }
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    emitSaveStatus('saving');
-    saveTimer = setTimeout(persistState, 300);
-  }
-
-  var appDataEnsured = false;
-  function ensureAppDataDir() {
-    if (appDataEnsured || !fsApi.mkdir) return Promise.resolve();
-    return fsApi.mkdir('.', { baseDir: BaseDirectory.AppData, recursive: true })
-      .then(function () { appDataEnsured = true; })
-      .catch(function () { appDataEnsured = true; });
-  }
-
-  function persistState() {
-    // 非 Tauri（浏览器预览）无盘可写，直接视作“已保存”以免状态字卡在“保存中…”。
-    if (!tauriAvailable()) { emitSaveStatus('saved'); return; }
-    var payload = JSON.stringify(state, null, 2);
-    ensureAppDataDir().then(function () {
-      return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
-    }).then(function () {
-      if (eventApi && eventApi.emit && !suppressBroadcast) {
-        // 记录本次广播指纹，供 listen 端滤掉自我回声
-        recentBroadcasts.push(payload);
-        if (recentBroadcasts.length > RECENT_BROADCAST_MAX) recentBroadcasts.shift();
-        eventApi.emit('composer-state-changed', state).catch(function () {});
-      }
-      emitSaveStatus('saved');
-    }).catch(function (err) { console.warn('持久化失败:', err); emitSaveStatus('error'); });
-  }
-
-  /* ---------- 实时双向同步：监听浮窗（或另一端）广播的 state ----------
-   * 协议：任一窗口在 state 变更并防抖保存落盘后，emit 'composer-state-changed'
-   * 事件，payload 为完整的最新 state。另一端 listen 到后以事件携带的 state
-   * 为准整体替换本地内存 state 并重渲染——不去反过来读盘，避免与对端写盘竞态。
-   *
-   * 关键保护：若本窗口此刻正在编辑（焦点在某个输入框/文本域），立即整体替换 +
-   * 重渲染会打断输入、丢失光标，且会用远端 state 冲掉本地尚未防抖保存的输入。
-   * 因此正在编辑时不立即应用，而是把最新 payload 暂存到 pendingRemoteState，
-   * 等本窗口失去输入焦点后再 flush 应用。这样只同步“没在编辑的那一端”。
-   *
-   * suppressBroadcast 确保远端更新触发的本地渲染不会再次广播，避免 A→B→A 回声。
+  /* ---------- 持久化 + 双向同步：委托给 sync.js ----------
+   * 防抖写盘 / emit-listen 广播 / 回声过滤 / 正在编辑时暂存远端更新，这套逻辑
+   * 主窗口与浮窗此前各写一份、容易漂移（sync.js 头部注释记录了已修的时序 bug）。
+   * 现在两边共用 createStateSync 工厂，这里只负责注入本窗口的依赖：
+   * fs 句柄、getState/setState 读写本模块的 state 变量、onApply 触发 renderAll、
+   * isEditing 判断是否正在编辑、onStatus/onError 对接下面的保存状态广播与 toast。
    * ============================================================ */
-  var pendingRemoteState = null;
-
   function isEditingLocally() {
     var el = document.activeElement;
     if (!el) return false;
@@ -177,72 +136,80 @@ import { renderAll, applyStartupShortcut } from './events.js';
     return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
   }
 
-  function applyRemoteState(payload) {
-    suppressBroadcast = true;
-    state = normalizeState(payload);
-    renderAll();
-    suppressBroadcast = false;
-  }
-
-  // 本地主动整体替换内存 state（如配置导入）。与 applyRemoteState 的区别：
-  // 不置 suppressBroadcast——导入是本窗口发起的变更，落盘后应正常
-  // emit('composer-state-changed') 把新 state 广播给浮窗。调用方拿到后需自行
-  // scheduleSave()（触发写盘+广播）和 renderAll()（本窗口重渲染）。
+  // 本地主动整体替换内存 state（如配置导入、sync 应用远端更新）。
+  // 与远端应用的区别在调用方：backup.js 直接调用时不置 suppressBroadcast——
+  // 导入是本窗口发起的变更，落盘后应正常 emit('composer-state-changed')
+  // 把新 state 广播给浮窗；调用方需自行 scheduleSave() + renderAll()。
+  // sync.js 内部调用（应用远端广播）时，suppressBroadcast 由 sync.js 自己
+  // 在调用前后置位，本函数不用关心。
   function setState(nextRaw) {
     state = normalizeState(nextRaw);
   }
 
-  function flushPendingRemoteState() {
-    if (pendingRemoteState && !isEditingLocally()) {
-      var payload = pendingRemoteState;
-      pendingRemoteState = null;
-      applyRemoteState(payload);
-    }
-  }
+  // emitSaveStatus('error') 唯一的消费者是 events.js 的 refreshFootHint，而它只在设置面板
+  // 停在“管理”类 tab 时才把文案显示出来——平时写盘失败（磁盘满/权限/文件被占用）用户完全
+  // 看不到，会误以为已经保存。这个标记只用来防刷屏：同一轮连续失败（每 300ms 防抖重试一次）
+  // 只弹一次 toast，成功一次后复位，下次再失败还能再弹。
+  var lastPersistFailed = false;
 
-  // 主动丢弃暂存的远端 state（本地正在发起编辑时调用）。
-  function discardPendingRemoteState() { pendingRemoteState = null; }
+  var sync = createStateSync({
+    fs: fsApi,
+    baseDir: BaseDirectory && BaseDirectory.AppData,
+    eventApi: eventApi,
+    getState: function () { return state; },
+    setState: setState,
+    // 包一层而不是直接传 renderAll：renderAll 来自 events.js，与本模块是 ESM
+    // 循环依赖。虽然函数声明在链接阶段就已初始化、直接传值目前也能拿到，但
+    // 「求值时刻取到的那个值」这种依赖过于隐晦；惰性调用与其它循环依赖处
+    // （applyContentSnapshot 收 rerender 回调）的做法保持一致。
+    onApply: function () { renderAll(); },
+    isEditing: isEditingLocally,
+    onStatus: function (status) {
+      if (status === 'saved') lastPersistFailed = false; // 写盘恢复正常，下次再失败可以再次提醒
+      emitSaveStatus(status);
+    },
+    onError: function (err) {
+      console.warn('持久化失败:', err);
+      emitSaveStatus('error');
+      // 只在“从非 error 转入 error”这一刻弹一次；连续失败不会每 300ms 刷一条 toast。
+      if (!lastPersistFailed) {
+        lastPersistFailed = true;
+        showToast('保存失败，改动可能丢失。请检查磁盘空间或配置文件是否被占用', true);
+      }
+    },
+  });
+  sync.start();
 
-  if (eventApi && eventApi.listen) {
-    eventApi.listen('composer-state-changed', function (evt) {
-      var payload = evt && evt.payload;
-      if (!payload || typeof payload !== 'object') return;
-      // 过滤自我回声：命中本窗口近期广播过的任一指纹即忽略（是自己发的，本地
-      // state 已经是它，无需再 apply，更不能在编辑中暂存后打断后续操作）。
-      var fp = JSON.stringify(payload, null, 2);
-      var hitIdx = recentBroadcasts.indexOf(fp);
-      if (hitIdx !== -1) {
-        recentBroadcasts.splice(hitIdx, 1); // 消费掉，避免误吃后续同内容的真实更新
-        return;
-      }
-      if (isEditingLocally()) {
-        // 正在编辑：暂存最新一份，待失焦后应用（后到的覆盖先到的，只保留最新）
-        pendingRemoteState = payload;
-        return;
-      }
-      applyRemoteState(payload);
-    }).catch(function () {});
-    // 失焦后把暂存的远端 state flush 掉；用捕获阶段确保 activeElement 已更新
-    document.addEventListener('focusout', function () {
-      // focusout 触发时 activeElement 可能尚未切换，延到下一微/宏任务再判断
-      setTimeout(flushPendingRemoteState, 0);
-    });
-  }
+  function scheduleSave() { sync.scheduleSave(); }
+  // 主动丢弃暂存的远端 state（本地正在发起编辑时调用，如 insertSnippet）。
+  function discardPendingRemoteState() { sync.discardPending(); }
 
   // 返回 Promise，state 就绪并首次 renderAll 完成后 resolve；
   // events.js 据此在正确时机触发新手引导（此时演示数据卡片已渲染）。
   function restoreState() {
     if (!tauriAvailable()) { renderAll(); return Promise.resolve(); }
-    return fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
-      .then(function (exists) {
-        if (!exists) throw new Error('no-state-file');
-        return fsApi.readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
+    return readState(fsApi, BaseDirectory.AppData)
+      .then(function (res) {
+        if (res.status === 'ok' || res.status === 'recovered') {
+          state = normalizeState(res.data);
+        } else {
+          state = defaultState();
+        }
+        // 存档异常必须让用户知道：以前这里是静默 defaultState()，用户下一次编辑
+        // 就把默认值写回正档、原数据彻底消失还毫无提示。延后一拍再弹，等首帧
+        // renderAll 之后 toast 才不会被启动渲染盖掉。
+        if (res.status === 'recovered') {
+          setTimeout(function () {
+            showToast('上次退出时存档未写完，已从临时文件恢复' + (res.backup ? '（坏档已备份为 ' + res.backup + '）' : ''), true);
+          }, 400);
+        } else if (res.status === 'corrupt') {
+          setTimeout(function () {
+            showToast(res.backup
+              ? '存档文件已损坏，已备份为 ' + res.backup + '，本次以默认配置启动'
+              : '存档文件已损坏且无法备份，本次以默认配置启动', true);
+          }, 400);
+        }
       })
-      .then(function (text) {
-        var parsed = JSON.parse(text);
-        if (parsed && typeof parsed === 'object') state = normalizeState(parsed);
-      })
-      .catch(function () { state = defaultState(); })
       .then(function () {
         renderAll();
         // state 就绪后，把持久化的自定义热键应用到 Rust 侧。只有主窗口做这件事
@@ -279,6 +246,11 @@ import { renderAll, applyStartupShortcut } from './events.js';
    * ============================================================ */
   var toastTimer = null;
   function showToast(msg, isErr) {
+    // 上面 createStateSync 的 onError 回调定义在本文件更靠前的位置且调用了
+    // showToast——函数声明整体提升，运行期没问题（onError 只会在真正发生写盘
+    // 失败时才被调用，那时 $toast 早已取到）。这里仍加一层兜底：万一将来有
+    // 模块加载阶段就调用 showToast 的路径，避免直接抛错。
+    if (!$toast) return;
     $toast.textContent = msg;
     $toast.classList.toggle('err', !!isErr);
     $toast.classList.add('show');
@@ -304,7 +276,29 @@ import { renderAll, applyStartupShortcut } from './events.js';
    * parseBlocks 纯函数已抽离到 core.js。
    * ============================================================ */
 
-  // 从 DOM 中所有块 textarea 收集文本，拼成正文并写回 state。
+  /* 从 DOM 中所有块 textarea 收集文本，拼成正文并写回 state。
+   *
+   * 「块 → 文本」这一步是**刻意做归一化的**，不是无损还原，契约如下
+   *（有测试钉住，见 blockRoundTrip.test.js —— 改动这里会让那些用例失败，
+   *  这是有意的提醒，不是误报）：
+   *   1. 每块去掉尾部空白；
+   *   2. 块之间一律用恰好一个空行（'\n\n'）连接；
+   *   3. 整块全是空白的块被丢弃。
+   * 于是：段落间原本有 3 个空行会被压成 1 个，原本只用单换行分隔的两个
+   * "## 标题" 之间会多出一个空行。
+   *
+   * 为什么不做无损保留（试过，结论是得不偿失）：parseBlocks 把「块之间的
+   * 空行」归属到**前一块的尾部**，也就是说间距是跟着「位置」而不是跟着
+   * 「块本身」的。若为了保真而让每块带上自己的尾部空行，拖拽排序后这些
+   * 空行会跟着块一起搬走 —— 把 A(后面有空行) B(后面没有) 换成 B A，结果
+   * 是 B 和 A 之间没有空行、而文档末尾多出一个空行，段落间距肉眼错乱。
+   * 相比之下「段落间距恒为一个空行」是可预期的、也符合这个工具的用途
+   * （产出提示词），并且天然避免了「渲染→回写」反复循环时空行不断累积。
+   *
+   * 真正会篡改内容的那个 bug（不认 ``` 围栏、把代码块拦腰切成两块并往围栏里
+   * 插空行）已单独修掉，见 core.js 的 parseBlocks —— 围栏内的文本现在整块
+   * 落在同一个 textarea 里，上面的规则 1 只作用于块的最末尾，不会伸进围栏。
+   */
   function collectText() {
     var areas = $blocks.querySelectorAll('.block-textarea');
     var parts = [];
@@ -320,7 +314,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
   // 在当前聚焦块的光标处插入片段；无聚焦块则新建一个块（追加到末尾）。
   function insertSnippet(snippet) {
     // 用户正在主动插入内容：丢弃任何尚未 apply 的远端 state（自我回声或浮窗的
-    // 旧更新都已过时）。否则失焦时 flushPendingRemoteState 会用它 renderAll，
+    // 旧更新都已过时）。否则失焦时 sync.js 的 flushPending 会用它 renderAll，
     // 覆盖掉这次插入——表现为“插了却跳走、像没插入、要再点一次”。插入后本窗口
     // 自己会 scheduleSave 广播最新态，浮窗照常同步，方向正确。
     discardPendingRemoteState();
@@ -332,19 +326,22 @@ import { renderAll, applyStartupShortcut } from './events.js';
     if (isBlockArea && !isModuleTemplate) {
       // 短句：插入到当前块光标处
       var el = active;
-      var start = el.selectionStart, end = el.selectionEnd;
-      var before = el.value.slice(0, start);
+      var before = el.value.slice(0, el.selectionStart);
       var pre = (before.length > 0 && !before.endsWith('\n')) ? '\n' : '';
-      var insertText = pre + snippet;
-      el.value = before + insertText + el.value.slice(end);
-      var caret = before.length + insertText.length;
-      el.focus();
-      el.setSelectionRange(caret, caret);
-      // 直接改 textarea.value 不会触发 input 事件，而块的高亮 overlay / 自适应
-      // 高度 / 内容回写都挂在 input handler 上（见 render.js buildBlockCard）。
-      // 派发一次 input 让那套逻辑跑起来，否则新插入文字因 overlay 未重画而“隐形”
-      // （透明 textarea 上没上色，仅选中态可见）。
-      el.dispatchEvent(new Event('input', { bubbles: true }));
+
+      // 先把 DOM 里的现值收回 state 再入栈，快照才是"插入之前"的完整内容。
+      // 以前这条路径完全不入栈，而程序化改 value 又会清空原生撤销栈，导致
+      // 「点常用句插入」既没有结构级撤销、也没有原生撤销 —— 彻底撤不回来。
+      collectText();
+      captureHistory();
+
+      // insertTextAtCaret 优先走 execCommand('insertText')：插入会进入原生撤销栈，
+      // 且由浏览器自行派发 input。降级路径直接改 value，需要我们手动派发 ——
+      // 块的高亮 overlay / 自适应高度 / 内容回写全挂在 input handler 上
+      // （见 render.js buildBlockCard），不派发的话新插入的字会因 overlay 未重画
+      // 而"隐形"（透明 textarea 上没上色，仅选中态可见）。
+      var mode = insertTextAtCaret(el, pre + snippet);
+      if (mode !== 'native') el.dispatchEvent(new Event('input', { bubbles: true }));
       scrollBlockIntoView(el);
     } else {
       // 模块模板，或未聚焦任何块：作为新块追加
@@ -402,56 +399,13 @@ import { renderAll, applyStartupShortcut } from './events.js';
 
   /* ============================================================
    * 2.5 行内补全：候选池合成 + 学习数据读写（供 completion.js 注入）
-   * ------------------------------------------------------------
-   * 把三处素材（快速段落 / 常用句含内置+自定义 / 已提炼 learned 片段）
-   * 按当前语言摊平成 [{ key, text, source }] 候选池。key 带语言前缀
-   * （learnKey 同款：'zh'/'en' +  + 文本），与学习数据的 key 一致，
-   * 保证 shown/accepted/bigram 能正确对上号。
    * ============================================================ */
-  function completionEnabled() {
-    return !!(state.settings && state.settings.completion && state.settings.completion.enabled);
-  }
+  // 候选池合成（快速段落 / 常用句含内置+自定义 / 已提炼 learned 片段摊平成
+  // [{ key, text, source }]、key 统一用 learnKey 归一化）已抽到 pool.js，
+  // 与浮窗共用；这里的两个函数是薄包装，只负责把 state 传进去。
+  function completionEnabled() { return poolCompletionEnabled(state); }
 
-  function completionPool() {
-    if (!completionEnabled()) return []; // 总开关关闭：不展示候选，也就不会再产生新的 shown/accepted 记账
-    var lang = state.lang;
-    var pfx = (lang === 'en' ? 'en' : 'zh') + '';
-    var seen = {};
-    var pool = [];
-    // explicitKey：learned 片段传入其归一化学习 key（与 L.snippets 里的统计
-    // key 一致），使 scoreCandidate / learn('shown'|'accepted') 能对上历史账。
-    // preset 不传，仍按原文重算 key（preset 全程用原文 key，自洽）。
-    function add(text, source, explicitKey) {
-      if (typeof text !== 'string') return;
-      var t = text;
-      if (t.trim() === '') return;
-      var key = explicitKey != null ? explicitKey : pfx + t;
-      if (seen[key]) return;
-      seen[key] = true;
-      pool.push({ key: key, text: t, source: source });
-    }
-    // 快速段落
-    (state.quickGroups || []).forEach(function (g) {
-      (g.items || []).forEach(function (it) {
-        var tx = it.text || {};
-        add(tx[lang] || tx.zh || tx.en, 'preset');
-      });
-    });
-    // 常用句：内置（含 patch 后的当前值）+ 自定义
-    BUILTIN_SNIPPETS.forEach(function (b) {
-      var p = (state.builtinPatches && state.builtinPatches[b.id]) || {};
-      if (p.hidden) return;
-      add((p[lang] !== undefined ? p[lang] : b[lang]) || b.zh || b.en, 'preset');
-    });
-    (state.customSnippets || []).forEach(function (c) {
-      if (c.hidden) return;
-      add(c[lang] || c.zh || c.en, 'preset');
-    });
-    // 自学习片段（读时从整行 rawCounts 现切；key 为片段归一化 learnKey，与统计对齐）
-    var segMode = (state.settings && state.settings.completion && state.settings.completion.segMode) || 'clause';
-    learnedFragments(state.learning, lang, { mode: segMode }).forEach(function (s) { add(s.text, 'learned', s.key); });
-    return pool;
-  }
+  function completionPool() { return poolCompletionPool(state); }
 
   // 给 completion.js 用的依赖对象：读候选池 / 读写学习数据 / 读当前语言 /
   // 复用 render 的高亮重绘（由调用方在 render.js 里注入，避免 store→render 循环）。
@@ -466,11 +420,12 @@ import { renderAll, applyStartupShortcut } from './events.js';
   }
 
   // 用户“完整用过一句”（复制/下载正文）时喂给学习引擎，累计 rawCounts、
-  // 达阈值自动提炼。由 events.js 的 doCopy/doDownload 调用。
+  // 达阈值自动提炼。由 events.js 的 doCopy/doDownload 调用。commitLearningText
+  // （pool.js）总开关关闭时原样返回入参 learning，据此判断是否需要保存。
   function commitLearningFromText(text) {
-    if (!completionEnabled()) return; // 总开关关闭：不再记账
-    var lines = String(text == null ? '' : text).split('\n');
-    state.learning = learn('commit', { lang: state.lang, lines: lines }, state.learning);
+    var next = commitLearningText(state, text);
+    if (next === state.learning) return;
+    state.learning = next;
     scheduleSave();
   }
 
@@ -512,19 +467,18 @@ import { renderAll, applyStartupShortcut } from './events.js';
 
   export {
     // Tauri 句柄与环境
-    TAURI, fsApi, dialogApi, clipboardApi, updaterApi, processApi,
-    eventApi, webviewWindowApi, coreApi, BaseDirectory, STATE_FILE, tauriAvailable,
+    fsApi, dialogApi, clipboardApi, updaterApi, processApi,
+    eventApi, webviewWindowApi, coreApi, STATE_FILE, tauriAvailable,
     // 可变状态
     state, view, setViewValue,
     // 持久化 / 同步
-    scheduleSave, persistState, restoreState, onSaveStatus,
-    isEditingLocally, applyRemoteState, flushPendingRemoteState, setState,
+    scheduleSave, restoreState, onSaveStatus, setState,
     // 结构级 Undo/Redo
     history, captureHistory, applyContentSnapshot,
     // DOM 引用
     $insertGrid, $snippetWrap, $quickWrap, $langSegmented, $viewSeg,
     $etLabel, $editorStat, $blocks, $preview,
-    $btnCopy, $btnDownload, $btnClearAll, $toast,
+    $btnCopy, $btnDownload, $btnClearAll,
     // 工具 / 块模型
     showToast, collectText, insertSnippet, preserveBlockFocus,
     // 行内补全（v0.2）
@@ -533,8 +487,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
     getLearnedFragmentsForManage, blockLearnedFragmentByKey, clearAllLearning,
     exportLearningBundle, importLearningBundle,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
-    INSERT_MODULES, MODULE_BY_ID, BUILTIN_SNIPPETS, BUILTIN_BY_ID,
-    demoContent, defaultState, newSnippetId, newModuleId,
-    newQuickGroupId, newQuickItemId, modulesToText, normalizeState,
-    estimateTokens, escapeHtml, ICON_PATHS, icon, parseBlocks,
+    INSERT_MODULES, BUILTIN_SNIPPETS,
+    demoContent, defaultState,
+    normalizeState, estimateTokens, parseBlocks,
   };

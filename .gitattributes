@@ -5,3 +5,6 @@
 # Windows 批处理脚本仍需 CRLF 才能可靠运行。
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# 字体是二进制，显式声明避免 text=auto 万一误判而做行尾转换、破坏文件。
+*.woff2 binary

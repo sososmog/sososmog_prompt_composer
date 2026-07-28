@@ -10,7 +10,12 @@
     "build": "npm run tauri build",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "fonts": "node scripts/fetch-fonts.mjs",
+    "smoke": "node src/__tests__/frontend.smoke.mjs",
+    "smoke:csp": "node src/__tests__/frontend.smoke.mjs --csp",
+    "version:check": "node scripts/sync-version.mjs",
+    "version:set": "node scripts/sync-version.mjs --set"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -26,6 +31,7 @@
     "@tauri-apps/cli": "^2.0.0",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.19.0",
+    "globals": "^14.0.0",
     "jsdom": "^29.1.1",
     "vitest": "^4.1.10"
   }

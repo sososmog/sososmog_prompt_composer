@@ -143,6 +143,41 @@
   var TRANSLATE_PROVIDER_BY_ID = {};
   TRANSLATE_PROVIDERS.forEach(function (p) { TRANSLATE_PROVIDER_BY_ID[p.id] = p; });
 
+  /* ------------------------------------------------------------
+   * 翻译端点的信任判定（配置导入的安全闸门）
+   * ------------------------------------------------------------
+   * baseUrl 决定「API Key 和整篇正文会被发到哪台服务器」。配置导入会写入
+   * 偏好设置，若连 baseUrl 一起悄悄换掉，一份别人给的配置文件就能把本机的
+   * Key 与正文重定向到任意主机（Key 本身不在文件里，但请求头带的是本机 Key）。
+   * 因此把「预设服务商的 host」列为可信，其余 host 一律需要用户在导入预览里
+   * 显式勾选确认（见 mergePreferences 的 options.importEndpoint）。
+   * ---------------------------------------------------------- */
+
+  // 从 baseUrl 取出实际会被连接的 host（含端口，小写）。取不出返回 ''。
+  // 刻意不用 URL 构造器：core.js 要保持无环境依赖，且畸形输入不应抛异常。
+  // 关键点：authority 里有 '@' 时取最后一个之后的部分——https://api.groq.com@evil.com/
+  // 实际连的是 evil.com，取错就等于把闸门开了。'\' 与 '/' 同样终止 authority（对齐浏览器）。
+  function translateHostOf(baseUrl) {
+    var s = String(baseUrl == null ? '' : baseUrl).trim();
+    var m = s.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/\\?#]*)/);
+    if (!m) return '';
+    var authority = m[1];
+    var at = authority.lastIndexOf('@');
+    if (at !== -1) authority = authority.slice(at + 1);
+    return authority.toLowerCase();
+  }
+
+  // 预设服务商的 host 集合（由 TRANSLATE_PROVIDERS 派生，改预设即自动同步）
+  var PRESET_TRANSLATE_HOSTS = {};
+  TRANSLATE_PROVIDERS.forEach(function (p) {
+    var h = translateHostOf(p.baseUrl);
+    if (h) PRESET_TRANSLATE_HOSTS[h] = true;
+  });
+
+  function isPresetTranslateHost(host) {
+    return !!(host && PRESET_TRANSLATE_HOSTS[String(host).toLowerCase()] === true);
+  }
+
   function defaultTranslateSettings() {
     var g = TRANSLATE_PROVIDER_BY_ID.glm;
     return {
@@ -166,6 +201,15 @@
 
   function defaultOnboarding() {
     return { tourDone: false, hintsSeen: {} };
+  }
+
+  // “浮窗随叫随到”提示的文案：快捷键是用户可在设置里改的（state.settings.toggleShortcut），
+  // 提示文案不能写死默认值，否则改过快捷键的用户会看到一句错误的提示。
+  // 抽成纯函数是为了能在不启动 DOM/Tauri 副作用的前提下单测（guide.js 依赖 store.js，
+  // store.js 加载即执行副作用，vitest 里无法直接 import guide.js）。
+  function floatWindowHintBody(shortcut) {
+    var key = (shortcut && String(shortcut).trim()) || 'Ctrl+Alt+C';
+    return '浮窗会始终置顶。按 ' + key + ' 可随时全局呼出/收起；开启「点击即粘贴」后，点一下素材就能直接粘到别的程序里。';
   }
 
   /* ============================================================
@@ -223,6 +267,20 @@
   var LEARN_RECENCY_HALFLIFE_MS = 14 * 24 * 60 * 60 * 1000; // 新近度半衰期 14 天
   var LEARN_PROMOTE_THRESHOLD = 3; // 原始整行重复达到此次数，提炼成 learned 片段
   var LEARN_VERSION = 2;           // v2：key 改用归一化文本，同一句的空白/标点/大小写差异合并计数
+
+  // rawCounts / blocked 都只增不减：learn('commit') 只会往 rawCounts 里加，
+  // blockLearnedFragment 只会往 blocked 里加。日积月累后会拖慢“每次按键都要读”的
+  // 候选池合成（pool.js 的 learnedFragments 遍历整份 rawCounts）、拖大存盘/IPC 广播体积。
+  // LEARN_RAW_MAX=2000：基准脚本实测 2000 条互不相同的语料行，learning 整体序列化
+  // 体积约 600KB 量级（视句子长短有出入，但同数量级）——一年高强度使用也很难越过
+  // 这个上限，同时把最坏情况的候选池合成开销钉死在“2000 行语料”这个常数上，不再
+  // 随使用年限无限增长（基准脚本实测 2000 行、word 模式下单次合成约 200ms 出头，
+  // 若不加上限会随语料继续线性变慢；有 pool.js 的缓存兜底，这只在语料真正变化时
+  // 触发一次，不是每次按键都要付的成本）。
+  // LEARN_BLOCKED_MAX=500：拉黑是用户手动操作，远比 commit 稀疏，单条几十字节，
+  // 500 条同样只是为了不让这张表本身也无限膨胀，不是当前的性能瓶颈。
+  var LEARN_RAW_MAX = 2000;
+  var LEARN_BLOCKED_MAX = 500;
 
   // 读时切分（片段补全）可调参数：片段进池的长度 / 跨行复用 / 单行高频阈值。
   var LEARN_FRAG_MIN_LEN = 4;      // 片段字符数下限（过短命中噪声大）
@@ -306,10 +364,14 @@
         if (Object.keys(clean).length) out.bigrams[pk] = clean;
       });
     }
-    // blocked：仅收 value===true 的 key（对象、非数组）；缺失即空
+    // blocked：value 是拉黑时刻的时间戳（数字），供超限淘汰时按“加入先后”排序；
+    // 老存档里是 value===true（没有时间戳概念的旧格式），兼容处理成时间戳 0——
+    // 即“最早加入”，容量超限时最先被淘汰。其余脏值丢弃。缺失即空。
     if (raw.blocked && typeof raw.blocked === 'object' && !Array.isArray(raw.blocked)) {
       Object.keys(raw.blocked).forEach(function (bk) {
-        if (raw.blocked[bk] === true) out.blocked[bk] = true;
+        var bv = raw.blocked[bk];
+        if (bv === true) out.blocked[bk] = 0;
+        else if (typeof bv === 'number' && isFinite(bv)) out.blocked[bk] = bv;
       });
     }
     if (raw.rawCounts && typeof raw.rawCounts === 'object') {
@@ -319,7 +381,8 @@
         out.rawCounts[rk] = {
           text: r.text,
           count: numOr(r.count, 0),
-          lang: r.lang === 'en' ? 'en' : 'zh'
+          lang: r.lang === 'en' ? 'en' : 'zh',
+          at: numOr(r.at, 0) // 最近一次命中（写入/更新）的时间戳；additive 字段，老存档缺失即 0
         };
       });
     }
@@ -344,14 +407,15 @@
       return nk;
     }
 
-    // rawCounts：同新 key 计数相加；text 保留最先遇到的原文（展示更自然），lang 沿用。
+    // rawCounts：同新 key 计数相加；text 保留最先遇到的原文（展示更自然），lang 沿用，
+    // at 取较大值（合并后代表这个 key 最近一次被命中的时间，供容量淘汰按新近度排序）。
     Object.keys(v1.rawCounts).forEach(function (ok) {
       var nk = newKeyOf(ok);
       if (!nk) return;
       var r = v1.rawCounts[ok];
       var tgt = out.rawCounts[nk];
-      if (!tgt) out.rawCounts[nk] = { text: r.text, count: r.count, lang: r.lang };
-      else tgt.count += r.count;
+      if (!tgt) out.rawCounts[nk] = { text: r.text, count: r.count, lang: r.lang, at: numOr(r.at, 0) };
+      else { tgt.count += r.count; tgt.at = Math.max(tgt.at, numOr(r.at, 0)); }
     });
 
     // snippets：同新 key，shown/accepted 相加、lastUsedAt 取 max、source 有 learned 则 learned。
@@ -591,16 +655,64 @@
         // 落到同一个「空内容」key 上被错误合并计数、提炼成无意义候选。
         if (normalizeLearnText(text) === '') return;
         var rk = learnKey(lang, text);
-        var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang };
+        var r = L.rawCounts[rk] || { text: text, count: 0, lang: lang, at: 0 };
         r.count += 1;
+        r.at = now; // 记最近一次命中时间（用调用方传入的 now，不直接调 Date.now()，便于单测控制），供容量淘汰按新近度排序
         L.rawCounts[rk] = r;
         // 达阈值：提炼成 learned 片段（用同一 key，进候选池与预设平起平坐）
         if (r.count >= LEARN_PROMOTE_THRESHOLD && !L.snippets[rk]) {
           L.snippets[rk] = { shown: 0, accepted: 0, lastUsedAt: now, source: 'learned' };
         }
       });
+      capRawCounts(L); // rawCounts 只增不减，见 LEARN_RAW_MAX 注释；导入大文件的裁剪见 mergeLearningImport
     }
     return L;
+  }
+
+  /* ============================================================
+   * 2.0.1b 容量上限 + 淘汰
+   * ------------------------------------------------------------
+   * rawCounts 超过 LEARN_RAW_MAX、blocked 超过 LEARN_BLOCKED_MAX 时才触发，
+   * 平时是一次 O(表大小) 的长度检查，不排序、不淘汰，开销可忽略。
+   * ============================================================ */
+
+  // 按 rawCounts key 级联清理：该 key 对应的 snippets 记录、bigrams 中以它为
+  // prefixKey 的整条、以及各 prefixKey 下以它为 candKey 的项，一并清掉——
+  // 否则残留的统计会指向已被淘汰、不复存在的语料。
+  function cascadeRemoveRawKey(L, key) {
+    delete L.rawCounts[key];
+    delete L.snippets[key];
+    delete L.bigrams[key]; // 该 key 自身作为 prefixKey 的整条 bigram 记录
+    Object.keys(L.bigrams).forEach(function (pk) {
+      var m = L.bigrams[pk];
+      if (m && m[key] !== undefined) {
+        delete m[key];
+        if (Object.keys(m).length === 0) delete L.bigrams[pk];
+      }
+    });
+  }
+
+  // rawCounts 超过 LEARN_RAW_MAX 时，按“价值”升序淘汰到刚好不超限：
+  // 价值先看 count（重复次数越少越该丢），count 相同再看 at（越久未用越该丢）。
+  function capRawCounts(L) {
+    var keys = Object.keys(L.rawCounts);
+    if (keys.length <= LEARN_RAW_MAX) return;
+    keys.sort(function (a, b) {
+      var ra = L.rawCounts[a], rb = L.rawCounts[b];
+      if (ra.count !== rb.count) return ra.count - rb.count;
+      return numOr(ra.at, 0) - numOr(rb.at, 0);
+    });
+    var overflow = keys.length - LEARN_RAW_MAX;
+    for (var i = 0; i < overflow; i++) cascadeRemoveRawKey(L, keys[i]);
+  }
+
+  // blocked 超过 LEARN_BLOCKED_MAX 时丢最早加入的（value 即拉黑时刻的时间戳）。
+  function capBlocked(L) {
+    var keys = Object.keys(L.blocked);
+    if (keys.length <= LEARN_BLOCKED_MAX) return;
+    keys.sort(function (a, b) { return numOr(L.blocked[a], 0) - numOr(L.blocked[b], 0); });
+    var overflow = keys.length - LEARN_BLOCKED_MAX;
+    for (var i = 0; i < overflow; i++) delete L.blocked[keys[i]];
   }
 
   // 判断光标（在 textBeforeCaret 末尾处）是否处于 Markdown 代码区，
@@ -616,19 +728,6 @@
     var ticks = curLine.match(/`/g);
     if (ticks && ticks.length % 2 === 1) return true;
     return false;
-  }
-
-  // 收集所有已提炼的 learned 片段文本（供 UI 合成候选池时取用）。
-  function learnedSnippets(learning, lang) {
-    var L = normalizeLearning(learning);
-    var want = lang === 'en' ? 'en' : 'zh';
-    var out = [];
-    Object.keys(L.snippets).forEach(function (k) {
-      if (L.snippets[k].source !== 'learned') return;
-      var r = L.rawCounts[k];
-      if (r && r.lang === want) out.push({ key: k, text: r.text, source: 'learned' });
-    });
-    return out;
   }
 
   // 读时片段池：遍历 rawCounts（按 lang 过滤）把每行 segmentText 切成片段，
@@ -658,7 +757,10 @@
         if (frag.length < minLen) return;
         if (normalizeLearnText(frag) === '') return; // 归一化后为空（纯标点等）不进池
         var fk = learnKey(want, frag);
-        if (blocked[fk]) return;
+        // 用 hasOwnProperty 而非真值判断：blocked[fk] 可能是时间戳 0（老存档的
+        // true 迁移而来，是最常见的情况——旧数据全部没有时间戳）。0 是 falsy，
+        // 若写成 `if (blocked[fk])` 这些老拉黑记录会被判定为“未拉黑”，拉黑静默失效。
+        if (Object.prototype.hasOwnProperty.call(blocked, fk)) return;
         var a = agg[fk] || (agg[fk] = { key: fk, text: frag, lines: 0, count: 0 });
         a.count += lineCount;                        // 加权频次：累加所在行的 count
         if (!seenInLine[fk]) { seenInLine[fk] = true; a.lines += 1; } // 行内去重后计不同行数
@@ -695,10 +797,14 @@
   // learnedFragments 读取时跳过。级联清掉该 key 的 shown/accepted 统计，以及 bigrams 中
   // 以它为**候选(candKey)**的项（某 prefixKey 下清空则连 prefixKey 一起删）。
   // 不动 rawCounts —— 整行语料仍在，其它片段不受影响。
-  function blockLearnedFragment(learning, key) {
+  // now 可选（默认 Date.now()）：拉黑时刻的时间戳，写进 blocked[key]，供
+  // LEARN_BLOCKED_MAX 超限淘汰时按“加入先后”排序；不传时兜底取当前时间，
+  // 兼容既有调用方（store.js 只传 (learning, key) 两个参数）。
+  function blockLearnedFragment(learning, key, now) {
     var L = normalizeLearning(learning);
     if (key == null) return L;
-    L.blocked[key] = true;
+    now = numOr(now, Date.now());
+    L.blocked[key] = now;
     delete L.snippets[key];
     Object.keys(L.bigrams).forEach(function (pk) {
       var m = L.bigrams[pk];
@@ -707,41 +813,7 @@
         if (Object.keys(m).length === 0) delete L.bigrams[pk];
       }
     });
-    return L;
-  }
-
-  // 收集所有已提炼的 learned 片段 + 统计信息（供设置面板「自学习」列表展示/管理）。
-  // 不区分语言，按最近使用时间降序，供用户查看/逐条删除。
-  function learnedSnippetsForManage(learning) {
-    var L = normalizeLearning(learning);
-    var out = [];
-    Object.keys(L.snippets).forEach(function (k) {
-      var s = L.snippets[k];
-      if (s.source !== 'learned') return;
-      var r = L.rawCounts[k];
-      if (!r) return;
-      out.push({
-        key: k, text: r.text, lang: r.lang,
-        shown: s.shown, accepted: s.accepted, lastUsedAt: s.lastUsedAt
-      });
-    });
-    out.sort(function (a, b) { return b.lastUsedAt - a.lastUsedAt; });
-    return out;
-  }
-
-  // 删除单条 learned 片段：级联清掉 snippets 记录、rawCounts 原始计数、
-  // bigrams 中以它为候选词的项——否则残留的 rawCounts 计数会在下次达阈值时被重新提炼。
-  function removeLearnedSnippet(learning, key) {
-    var L = normalizeLearning(learning);
-    delete L.snippets[key];
-    delete L.rawCounts[key];
-    Object.keys(L.bigrams).forEach(function (pk) {
-      var m = L.bigrams[pk];
-      if (m && m[key] !== undefined) {
-        delete m[key];
-        if (Object.keys(m).length === 0) delete L.bigrams[pk];
-      }
-    });
+    capBlocked(L); // blocked 同样只增不减，见 LEARN_BLOCKED_MAX 注释
     return L;
   }
 
@@ -753,10 +825,17 @@
   /* ============================================================
    * 2.0.2 自学习数据的独立导入 / 导出（与配置导入导出完全分离）
    * ------------------------------------------------------------
-   * 导出：只含 learned 片段（snippets 中 source==='learned' 的）及其
-   * rawCounts 原始文本/计数，不含 bigrams（上下文关联对迁移无意义、
-   * 且体积会随词表膨胀）。导入：同 key（语言+文本）直接把计数相加，
-   * lastUsedAt 取较大值；复用 normalizeLearning 兜底脏值。
+   * 导出：整份 rawCounts（用户完整用过的原始行 + 频次），外加这些 key 上
+   * 已有的行为统计（shown/accepted/lastUsedAt）。不含 bigrams（上下文关联
+   * 对迁移无意义、且体积会随词表膨胀）。导入：按 learnKey 重算 key 后计数
+   * 相加、lastUsedAt 取较大值；复用 normalizeLearning 兜底脏值。
+   *
+   * 为什么导的是 rawCounts 而不是"已提炼的片段"：候选片段是**读时**由
+   * learnedFragments 从 rawCounts 现切出来的，落盘里根本不存片段。早先这里
+   * 只导 snippets 里 source==='learned' 的条目（即重复≥3 次的整行），于是
+   * 「某短语出现在 2 个不同行」这类靠 lines 信号进池的片段完全导不出去——
+   * 管理列表明明看得见，点导出却提示"没有可导出的学习数据"。语料是唯一的
+   * 真相源，导它才能在新机器上重算出同样的片段。
    * ============================================================ */
   var LEARNING_EXPORT_KIND = 'composer-learning';
 
@@ -764,13 +843,10 @@
     var L = normalizeLearning(learning);
     var snippets = {};
     var rawCounts = {};
-    Object.keys(L.snippets).forEach(function (k) {
-      var s = L.snippets[k];
-      if (s.source !== 'learned') return;
-      var r = L.rawCounts[k];
-      if (!r) return;
-      snippets[k] = s;
-      rawCounts[k] = r;
+    Object.keys(L.rawCounts).forEach(function (k) {
+      rawCounts[k] = L.rawCounts[k];
+      // 行为统计是可选附带：有就带上（新机器能沿用接受率/新近度），没有也不影响
+      if (L.snippets[k]) snippets[k] = L.snippets[k];
     });
     return { kind: LEARNING_EXPORT_KIND, version: LEARN_VERSION, exportedAt: new Date().toISOString(), snippets: snippets, rawCounts: rawCounts };
   }
@@ -805,19 +881,26 @@
       L.rawCounts[nk] = {
         text: existingR ? existingR.text : ir.text,   // 保留本地已有原文，否则用导入原文
         count: (existingR ? existingR.count : 0) + numOr(ir.count, 0),
-        lang: lang
+        lang: lang,
+        at: Math.max(existingR ? numOr(existingR.at, 0) : 0, numOr(ir.at, 0)) // 取较新的时间戳
       };
 
-      var is = incomingSnippets[k] || { shown: 0, accepted: 0, lastUsedAt: 0, source: 'learned' };
+      // 行为统计只在「导入文件带了」或「本机已有」时才写 snippets。导出改成全量
+      // rawCounts 后，绝大多数行是没有统计的纯语料，凭空给它们建一条全 0 记录
+      // 只会白白撑大存档（scoreCandidate 对「无记录」和「shown===0」的处理完全一样）。
+      var is = incomingSnippets[k];
       var existingS = L.snippets[nk];
-      L.snippets[nk] = {
-        shown: (existingS ? existingS.shown : 0) + numOr(is.shown, 0),
-        accepted: (existingS ? existingS.accepted : 0) + numOr(is.accepted, 0),
-        lastUsedAt: Math.max(existingS ? existingS.lastUsedAt : 0, numOr(is.lastUsedAt, 0)),
-        source: 'learned'
-      };
+      if (is || existingS) {
+        L.snippets[nk] = {
+          shown: (existingS ? existingS.shown : 0) + numOr(is && is.shown, 0),
+          accepted: (existingS ? existingS.accepted : 0) + numOr(is && is.accepted, 0),
+          lastUsedAt: Math.max(existingS ? existingS.lastUsedAt : 0, numOr(is && is.lastUsedAt, 0)),
+          source: (existingS && existingS.source === 'preset' && !is) ? 'preset' : 'learned'
+        };
+      }
       importedCount++;
     });
+    capRawCounts(L); // 导入一份大文件也不能突破容量上限（见 LEARN_RAW_MAX 注释）
     return { learning: L, importedCount: importedCount };
   }
 
@@ -1260,20 +1343,34 @@
    *   parseBlocks(text) 把文本按 "## " 开头切成块（首个 ## 之前的
    *   内容作为一个无标题“前言块”）。
    * ============================================================ */
+  // 代码围栏行（``` 开头，允许前置空白）。parseBlocks 与 highlightMarkdown
+  // 共用这一个判定，两处的围栏感知不许各写一份、日后漂移。
+  function isFenceLine(line) { return /^\s*```/.test(line); }
+
+  // 块标题行：`## 标题` 或裸 `##`。
+  function isBlockHeadingLine(line) { return /^##\s/.test(line) || /^##$/.test(line); }
+
   function parseBlocks(text) {
     text = text || '';
     if (!text.trim()) return [];
     var lines = text.split('\n');
     var blocks = [];
     var cur = null;
+    var inFence = false;
     lines.forEach(function (line) {
-      if (/^##\s/.test(line) || /^##$/.test(line)) {
+      var fence = isFenceLine(line);
+      // 只有围栏之外的 "## " 才算块边界。提示词正文里经常带 Markdown 示例，
+      // 以前不认围栏，会把一段代码块拦腰切成两张卡片（删掉其中一张就静默截断
+      // 代码），而 collectText 回写时按 \n\n 拼接，还会往围栏里插进一个空行 ——
+      // 属于直接篡改用户内容。
+      if (!inFence && !fence && isBlockHeadingLine(line)) {
         if (cur !== null) blocks.push(cur);
         cur = line;
       } else {
         if (cur === null) cur = line;            // 前言块
         else cur += '\n' + line;
       }
+      if (fence) inFence = !inFence;
     });
     if (cur !== null) blocks.push(cur);
     // 去掉纯空白块（多为块间的空行）
@@ -1320,8 +1417,8 @@
     var lines = text.split('\n');
     var inFence = false;
     var out = lines.map(function (line) {
-      // 代码块围栏 ```
-      if (/^\s*```/.test(line)) {
+      // 代码块围栏 ```（判定与 parseBlocks 共用 isFenceLine）
+      if (isFenceLine(line)) {
         inFence = !inFence;
         return '<span class="hl-fence">' + hlEscape(line) + '</span>';
       }
@@ -1545,7 +1642,7 @@
     }
 
     if (sections.indexOf('preferences') !== -1 && payload.preferences) {
-      mergePreferences(next, payload.preferences, mode);
+      mergePreferences(next, payload.preferences, mode, options);
     }
 
     if (sections.indexOf('content') !== -1 && payload.content) {
@@ -1729,8 +1826,17 @@
     return out;
   }
 
+  // 决定「Key 和正文发往哪台服务器」的一组字段。只有这组受信任闸门管控，
+  // overwrite 之类的纯本地开关不涉及外发，照常合并。
+  var TRANSLATE_ENDPOINT_FIELDS = ['provider', 'protocol', 'baseUrl', 'model'];
+
   // 偏好合并：标量字段导入值存在则采用；apiKey 永远保留本机（导入文件本就无 Key）。
-  function mergePreferences(next, prefs, mode) {
+  // 翻译端点（provider/protocol/baseUrl/model）另有闸门：仅当 host 是预设服务商，
+  // 或调用方显式传 options.importEndpoint===true（用户在导入预览里勾了确认框）时才采用；
+  // 否则保留本机端点设置，其余偏好照常导入——不然一份外来配置就能把本机 Key 与正文
+  // 重定向到任意主机。
+  function mergePreferences(next, prefs, mode, options) {
+    options = options || {};
     var s = next.settings || (next.settings = {});
     if (typeof prefs.toggleShortcut === 'string' && prefs.toggleShortcut.trim() !== '') {
       s.toggleShortcut = prefs.toggleShortcut;
@@ -1739,9 +1845,19 @@
       s.pasteDelayMs = prefs.pasteDelayMs;
     }
     if (prefs.translation && typeof prefs.translation === 'object') {
-      var localKey = (s.translation && s.translation.apiKey) || '';
-      var tr = deepClone(prefs.translation);
-      tr.apiKey = localKey; // 铁律：导入不改本机 Key
+      var local = (s.translation && typeof s.translation === 'object') ? s.translation : {};
+      var incoming = prefs.translation;
+      var trusted = isPresetTranslateHost(translateHostOf(incoming.baseUrl));
+      var takeEndpoint = trusted || options.importEndpoint === true;
+
+      var tr = deepClone(local) || {};
+      if (takeEndpoint) {
+        TRANSLATE_ENDPOINT_FIELDS.forEach(function (f) {
+          if (incoming[f] !== undefined) tr[f] = deepClone(incoming[f]);
+        });
+      }
+      if (incoming.overwrite !== undefined) tr.overwrite = incoming.overwrite;
+      tr.apiKey = local.apiKey || ''; // 铁律：导入不改本机 Key
       s.translation = tr;
     }
     // theme 不在 state（localStorage），由 UI 层从 payload 单独应用。
@@ -1772,7 +1888,23 @@
       };
     }
     if (sections.indexOf('preferences') !== -1 && payload.preferences) {
-      out.preferences = { includesApiKey: false, keptLocalApiKey: true };
+      out.preferences = { includesApiKey: false, keptLocalApiKey: true, translation: null };
+      // 把「这份文件想把翻译请求发到哪」摊到预览里——以前预览只说"不含 API Key"，
+      // 用户看不到 baseUrl 会被换掉，等于闭眼确认。
+      var ptr = payload.preferences.translation;
+      if (ptr && typeof ptr === 'object') {
+        var host = translateHostOf(ptr.baseUrl);
+        var trusted = isPresetTranslateHost(host);
+        out.preferences.translation = {
+          provider: typeof ptr.provider === 'string' ? ptr.provider : '',
+          baseUrl: typeof ptr.baseUrl === 'string' ? ptr.baseUrl : '',
+          model: typeof ptr.model === 'string' ? ptr.model : '',
+          host: host,
+          trusted: trusted,
+          // 与 mergePreferences 的闸门保持同一判据，预览与实际结果不许不一致
+          willImport: trusted || options.importEndpoint === true
+        };
+      }
     }
     if (sections.indexOf('content') !== -1 && payload.content) {
       var c = payload.content.content || {};
@@ -1804,6 +1936,9 @@
     normalizeLearning,
     normalizeLearnText,
     learnKey,
+    LEARN_RAW_MAX,
+    LEARN_BLOCKED_MAX,
+    LEARN_PROMOTE_THRESHOLD,
     // 读时切分（片段补全）
     segmentClause,
     segmentText,
@@ -1815,53 +1950,42 @@
     scoreCandidate,
     rankCandidates,
     learn,
-    learnedSnippets,
-    learnedSnippetsForManage,
-    removeLearnedSnippet,
     clearLearning,
     buildLearningExportBundle,
     validateLearningImportBundle,
     mergeLearningImport,
     isInCodeContext,
-    defaultCompletionSettings,
     TRANSLATE_PROVIDERS,
     TRANSLATE_PROVIDER_BY_ID,
+    translateHostOf,
+    isPresetTranslateHost,
     defaultTranslateSettings,
     normalizeTranslateSettings,
-    defaultOnboarding,
-    ONBOARDING_HINT_KEYS,
+    floatWindowHintBody,
     maskCode,
     unmaskCode,
-    translateSystemPrompt,
     buildTranslatePayload,
     extractModelText,
     parseTranslateResponse,
     demoContent,
     defaultState,
-    defaultQuickGroups,
     newSnippetId,
     newModuleId,
     newQuickGroupId,
     newQuickItemId,
-    modulesToText,
     normalizeState,
     estimateTokens,
+    isFenceLine,
+    isBlockHeadingLine,
     parseBlocks,
     patchBuiltinSnippet,
     patchBuiltinModule,
     escapeHtml,
-    ICON_PATHS,
     icon,
-    hlEscape,
-    highlightInline,
     highlightMarkdown,
     createHistory,
     // 配置导入导出（纯逻辑）
     EXPORT_SCHEMA_VERSION,
-    EXPORT_APP_ID,
-    EXPORT_FILE_TYPE,
-    EXPORT_SECTIONS,
-    MATERIAL_FIELDS,
     buildExportBundle,
     validateImportBundle,
     mergeState,
