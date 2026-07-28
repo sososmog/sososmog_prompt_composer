@@ -16,9 +16,10 @@
 import {
   parseBlocks,
   maskCode,
-  unmaskCode,
   buildTranslatePayload,
   parseTranslateResponse,
+  validateTranslateConfig,
+  assembleTranslatedBlocks,
 } from './core.js';
 import {
   state,
@@ -76,15 +77,6 @@ function requestWithRetry(payload) {
   });
 }
 
-// 校验配置是否可用。返回 null 表示 OK，否则返回错误提示字符串。
-function validateConfig(cfg) {
-  if (!cfg) return '翻译未配置';
-  if (!cfg.apiKey || !cfg.apiKey.trim()) return 'need-key';
-  if (!cfg.baseUrl || !cfg.baseUrl.trim()) return '请先在设置里填写 baseURL';
-  if (!cfg.model || !cfg.model.trim()) return '请先在设置里填写模型名';
-  return null;
-}
-
 /* ------------------------------------------------------------
  * 主流程：把当前语言正文翻译到另一种语言。
  * 返回 Promise，resolve 一个结果对象供 UI 决定 toast 文案：
@@ -94,7 +86,7 @@ function validateConfig(cfg) {
  * ------------------------------------------------------------ */
 function translateCurrentContent() {
   var cfg = state.settings && state.settings.translation;
-  var cfgErr = validateConfig(cfg);
+  var cfgErr = validateTranslateConfig(cfg);
   if (cfgErr === 'need-key') return Promise.resolve({ ok: false, reason: 'need-key' });
   if (cfgErr) return Promise.resolve({ ok: false, reason: cfgErr });
 
@@ -128,19 +120,13 @@ function translateCurrentContent() {
       throw new Error('返回内容不是预期的 JSON 结构');
     }
 
-    // 按顺序还原遮罩并拼回。长度对不齐时，对不齐的块保持“原文块”不变，
-    // 并标记 partial 由 UI 提示部分失败（约束：不改动对不齐项的目标值——
-    // 这里目标是新生成的整篇，对不齐项以源块原文回填，等价于该块未翻译）。
-    var partial = translations.length !== blocks.length;
-    var outBlocks = blocks.map(function (srcBlock, i) {
-      var t = translations[i];
-      var block = (typeof t !== 'string' || t.trim() === '') ? srcBlock : unmaskCode(t, tokensList[i]);
-      return block.replace(/\s+$/, ''); // 去块尾空白，避免以 \n\n 拼接后累积空行
-    });
+    // 按序还原遮罩并拼回（以源块为基准逐位取译文，缺项回填源块原文，
+    // 保证块数不减——细节与不变量见 core.js 的 assembleTranslatedBlocks）
+    var out = assembleTranslatedBlocks(blocks, translations, tokensList);
 
-    state.content[target] = outBlocks.join('\n\n');
+    state.content[target] = out.text;
     scheduleSave();
-    return { ok: true, target: target, count: blocks.length, partial: partial };
+    return { ok: true, target: target, count: out.count, partial: out.partial };
   });
 }
 
