@@ -94,8 +94,12 @@ mod win32 {
 
 // ============================================================
 // macOS 专属：粘贴到外部窗口的底层实现。
-// ⚠️ 本模块未在本机（Windows）编译或运行过，仅按 API 文档尽力编写，
-// 未经任何验证——细节可能与实际的 objc2 / objc2-app-kit API 不完全一致。
+// ⚠️ API 用法已对照 objc2-app-kit 0.2.2 的实际生成代码（NSRunningApplication.rs /
+// NSWorkspace.rs）核实修正：processIdentifier / runningApplicationWithProcessIdentifier
+// 都存在，但二者在 objc2-app-kit 里都挂在 `#[cfg(feature = "libc")]` 之下，Cargo.toml 需要
+// 显式打开 objc2-app-kit 的 "libc" feature 才能编译通过（此前缺失，是 CI 报错的根因）。
+// 但本模块仍未在真机 macOS 上跑过，行为（例如 activateWithOptions 传空 options 是否真的
+// 能把目标 App 带到前台）是否符合预期未知，仍需真机验证。
 // 思路与 Windows 分支一致：一条后台线程持续追踪“最近一个非本应用的
 // 前台 App”的 pid，粘贴时重新激活该 App 再模拟 Cmd+V。
 // 用户需在系统「隐私与安全性 → 辅助功能」中为本 App 授权，
@@ -165,9 +169,10 @@ mod macos {
             if !running.isFinishedLaunching() || running.isTerminated() {
                 return Err("目标窗口已关闭".to_string());
             }
-            // activateWithOptions: 在较新 SDK 上是首选 API；具体可用的 options 常量
-            // 需要对照 objc2-app-kit 当前版本核实，这里传空 options 做最基本的激活。
-            // NOTE: 未验证——不同 objc2-app-kit 版本此方法的签名可能不同。
+            // activateWithOptions: 已对照 objc2-app-kit 0.2.2 生成代码确认签名为
+            // `fn activateWithOptions(&self, options: NSApplicationActivationOptions) -> bool`，
+            // 与此处调用一致；返回值表示是否发起激活成功，这里暂不关心，用 `let _` 丢弃。
+            // NSApplicationActivationOptions(0) 即不设置任何 flag 的最基本激活，仍未真机验证效果。
             let _ = running.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions(0));
         }
 
