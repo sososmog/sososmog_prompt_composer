@@ -53,3 +53,34 @@ jobs:
       - name: Test
         working-directory: src-tauri
         run: cargo test
+
+  # lib.rs 里剪贴板自动粘贴的核心功能全部包在平台 cfg 里：
+  # #[cfg(windows)] 用 windows-sys + enigo（Windows 上最核心的功能）；
+  # #[cfg(target_os = "macos")] 用 objc2 / objc2-app-kit（代码注释里写明未在本机编译或运行过，仅按文档尽力编写）；
+  # 上面的 rust job 跑在 ubuntu-latest，只会编译 #[cfg(not(any(windows, macos)))] 的"暂不支持"分支，
+  # 两份真正干活的代码从来没被 CI 编译过，只有发版时（release.yml 跑 windows-latest）才第一次编译，
+  # macOS 那份至今没有任何机器编译过。
+  # 这个 job 的用意就是让 Windows / macOS 各自 cfg 分支的编译问题在 PR 阶段就暴露出来，而不是等到发版才发现。
+  # 用 cargo check 而不是 build：只做类型检查和 cfg 分支编译，不产出二进制，更快；
+  # 也不需要跑 clippy，lint 已经由上面的 ubuntu rust job 负责。
+  # macOS 分支很可能真的 check 不过（未经验证的代码），这是预期之内的，不需要为了让它变绿去改 lib.rs。
+  rust-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check
+        working-directory: src-tauri
+        run: cargo check --all-targets
