@@ -7,6 +7,7 @@
 import {
   escapeHtml,
   icon,
+  isFenceLine,
   parseBlocks,
   estimateTokens,
   highlightMarkdown,
@@ -498,10 +499,13 @@ import { attachCompletion } from './completion.js';
       return;
     }
 
-    // 按行渲染：## 开头的行做标题色，其余作为纯文本
+    // 按行渲染：围栏之外以 ## 开头的行做标题色，其余作为纯文本。
+    // 认围栏与 parseBlocks 同理——代码示例里的 ## 不是标题。
     var lines = raw.split('\n');
+    var inFence = false;
     lines.forEach(function (line, i) {
-      if (/^##\s?/.test(line)) {
+      var fence = isFenceLine(line);
+      if (!inFence && !fence && /^##\s?/.test(line)) {
         var h = document.createElement('span');
         h.className = 'pv-h';
         h.textContent = line;
@@ -509,6 +513,7 @@ import { attachCompletion } from './completion.js';
       } else {
         $preview.appendChild(document.createTextNode(line));
       }
+      if (fence) inFence = !inFence;
       if (i < lines.length - 1) $preview.appendChild(document.createTextNode('\n'));
     });
   }

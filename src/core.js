@@ -1304,20 +1304,34 @@
    *   parseBlocks(text) 把文本按 "## " 开头切成块（首个 ## 之前的
    *   内容作为一个无标题“前言块”）。
    * ============================================================ */
+  // 代码围栏行（``` 开头，允许前置空白）。parseBlocks 与 highlightMarkdown
+  // 共用这一个判定，两处的围栏感知不许各写一份、日后漂移。
+  function isFenceLine(line) { return /^\s*```/.test(line); }
+
+  // 块标题行：`## 标题` 或裸 `##`。
+  function isBlockHeadingLine(line) { return /^##\s/.test(line) || /^##$/.test(line); }
+
   function parseBlocks(text) {
     text = text || '';
     if (!text.trim()) return [];
     var lines = text.split('\n');
     var blocks = [];
     var cur = null;
+    var inFence = false;
     lines.forEach(function (line) {
-      if (/^##\s/.test(line) || /^##$/.test(line)) {
+      var fence = isFenceLine(line);
+      // 只有围栏之外的 "## " 才算块边界。提示词正文里经常带 Markdown 示例，
+      // 以前不认围栏，会把一段代码块拦腰切成两张卡片（删掉其中一张就静默截断
+      // 代码），而 collectText 回写时按 \n\n 拼接，还会往围栏里插进一个空行 ——
+      // 属于直接篡改用户内容。
+      if (!inFence && !fence && isBlockHeadingLine(line)) {
         if (cur !== null) blocks.push(cur);
         cur = line;
       } else {
         if (cur === null) cur = line;            // 前言块
         else cur += '\n' + line;
       }
+      if (fence) inFence = !inFence;
     });
     if (cur !== null) blocks.push(cur);
     // 去掉纯空白块（多为块间的空行）
@@ -1364,8 +1378,8 @@
     var lines = text.split('\n');
     var inFence = false;
     var out = lines.map(function (line) {
-      // 代码块围栏 ```
-      if (/^\s*```/.test(line)) {
+      // 代码块围栏 ```（判定与 parseBlocks 共用 isFenceLine）
+      if (isFenceLine(line)) {
         inFence = !inFence;
         return '<span class="hl-fence">' + hlEscape(line) + '</span>';
       }
@@ -1928,6 +1942,8 @@
     modulesToText,
     normalizeState,
     estimateTokens,
+    isFenceLine,
+    isBlockHeadingLine,
     parseBlocks,
     patchBuiltinSnippet,
     patchBuiltinModule,
