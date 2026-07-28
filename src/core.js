@@ -788,10 +788,17 @@
   /* ============================================================
    * 2.0.2 自学习数据的独立导入 / 导出（与配置导入导出完全分离）
    * ------------------------------------------------------------
-   * 导出：只含 learned 片段（snippets 中 source==='learned' 的）及其
-   * rawCounts 原始文本/计数，不含 bigrams（上下文关联对迁移无意义、
-   * 且体积会随词表膨胀）。导入：同 key（语言+文本）直接把计数相加，
-   * lastUsedAt 取较大值；复用 normalizeLearning 兜底脏值。
+   * 导出：整份 rawCounts（用户完整用过的原始行 + 频次），外加这些 key 上
+   * 已有的行为统计（shown/accepted/lastUsedAt）。不含 bigrams（上下文关联
+   * 对迁移无意义、且体积会随词表膨胀）。导入：按 learnKey 重算 key 后计数
+   * 相加、lastUsedAt 取较大值；复用 normalizeLearning 兜底脏值。
+   *
+   * 为什么导的是 rawCounts 而不是"已提炼的片段"：候选片段是**读时**由
+   * learnedFragments 从 rawCounts 现切出来的，落盘里根本不存片段。早先这里
+   * 只导 snippets 里 source==='learned' 的条目（即重复≥3 次的整行），于是
+   * 「某短语出现在 2 个不同行」这类靠 lines 信号进池的片段完全导不出去——
+   * 管理列表明明看得见，点导出却提示"没有可导出的学习数据"。语料是唯一的
+   * 真相源，导它才能在新机器上重算出同样的片段。
    * ============================================================ */
   var LEARNING_EXPORT_KIND = 'composer-learning';
 
@@ -799,13 +806,10 @@
     var L = normalizeLearning(learning);
     var snippets = {};
     var rawCounts = {};
-    Object.keys(L.snippets).forEach(function (k) {
-      var s = L.snippets[k];
-      if (s.source !== 'learned') return;
-      var r = L.rawCounts[k];
-      if (!r) return;
-      snippets[k] = s;
-      rawCounts[k] = r;
+    Object.keys(L.rawCounts).forEach(function (k) {
+      rawCounts[k] = L.rawCounts[k];
+      // 行为统计是可选附带：有就带上（新机器能沿用接受率/新近度），没有也不影响
+      if (L.snippets[k]) snippets[k] = L.snippets[k];
     });
     return { kind: LEARNING_EXPORT_KIND, version: LEARN_VERSION, exportedAt: new Date().toISOString(), snippets: snippets, rawCounts: rawCounts };
   }
@@ -843,14 +847,19 @@
         lang: lang
       };
 
-      var is = incomingSnippets[k] || { shown: 0, accepted: 0, lastUsedAt: 0, source: 'learned' };
+      // 行为统计只在「导入文件带了」或「本机已有」时才写 snippets。导出改成全量
+      // rawCounts 后，绝大多数行是没有统计的纯语料，凭空给它们建一条全 0 记录
+      // 只会白白撑大存档（scoreCandidate 对「无记录」和「shown===0」的处理完全一样）。
+      var is = incomingSnippets[k];
       var existingS = L.snippets[nk];
-      L.snippets[nk] = {
-        shown: (existingS ? existingS.shown : 0) + numOr(is.shown, 0),
-        accepted: (existingS ? existingS.accepted : 0) + numOr(is.accepted, 0),
-        lastUsedAt: Math.max(existingS ? existingS.lastUsedAt : 0, numOr(is.lastUsedAt, 0)),
-        source: 'learned'
-      };
+      if (is || existingS) {
+        L.snippets[nk] = {
+          shown: (existingS ? existingS.shown : 0) + numOr(is && is.shown, 0),
+          accepted: (existingS ? existingS.accepted : 0) + numOr(is && is.accepted, 0),
+          lastUsedAt: Math.max(existingS ? existingS.lastUsedAt : 0, numOr(is && is.lastUsedAt, 0)),
+          source: (existingS && existingS.source === 'preset' && !is) ? 'preset' : 'learned'
+        };
+      }
       importedCount++;
     });
     return { learning: L, importedCount: importedCount };

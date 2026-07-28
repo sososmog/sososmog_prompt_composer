@@ -439,7 +439,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
               '</div>' +
               '<div class="st-field">' +
                 '<span class="st-label">导入 / 导出自学习数据</span>' +
-                '<span class="st-desc">把学到的片段单独导出成一个文件，用于备份或迁移到另一台电脑；导出内容是你写过的原文，注意隐私。</span>' +
+                '<span class="st-desc">把学到的内容单独导出成一个文件，用于备份或迁移到另一台电脑。导出的是你完整用过的原始行（片段由它现算），因此文件里是你写过的原文，注意隐私。</span>' +
                 '<div class="st-update-row">' +
                   '<button type="button" class="st-update-btn" id="stLearningExport">' + icon('upload') + '<span>导出为文件…</span></button>' +
                   '<button type="button" class="st-update-btn" id="stLearningImport">' + icon('download') + '<span>从文件导入…</span></button>' +
@@ -807,8 +807,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   }
 
   function doExportLearning() {
-    // 导出的是「整行提炼的 learned 语料」（见 buildLearningExportBundle），与面板里
-    // 读时片段列表口径不同，故直接看 bundle 是否有内容，而非片段列表长度。
+    // 导出的是整份语料（rawCounts，即你完整用过的原始行）。候选片段是读时从语料
+    // 现切的，落盘不存片段——导语料才能在新机器上重算出同样的片段，所以这里的
+    // 空判断也看语料条数。
     var bundle = exportLearningBundle();
     if (!bundle || !bundle.rawCounts || Object.keys(bundle.rawCounts).length === 0) {
       showToast('目前没有可导出的学习数据'); return;
