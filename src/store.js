@@ -4,6 +4,20 @@
  * 主窗口最底层模块：持有可变状态（state / view）、Tauri API 句柄、
  * DOM 引用、toast、块模型的正文回写与片段插入。纯逻辑从 core.js
  * import。渲染函数由 render.js 提供（运行时调用，ESM 循环依赖安全）。
+ *
+ * ⚠ 求值顺序约束（本文件与 events.js 是 ESM 循环依赖）：
+ * **整张模块图必须以 events.js 为入口**（生产环境由 main.js 保证，
+ * 测试里动态 import 时也必须先 import events.js）。原因：events.js 顶层
+ * 有一批 `$xxx.addEventListener(...)` 语句，它们引用的 $xxx 是本文件下面
+ * 那些 `var $foo = document.getElementById(...)`。函数声明会整体提升，
+ * 但 var 赋值不会——若反过来以本文件为入口，本文件顶层对 events.js 的
+ * import 会先把 events.js 求值一遍，那时 $langSegmented 等还是 undefined，
+ * 直接抛 "Cannot read properties of undefined (reading 'addEventListener')"。
+ * 以 events.js 为入口时，本文件会被完整求值（var 全部就绪）之后才轮到
+ * events.js 自己的顶层语句，因而安全。
+ * 想彻底消掉这个隐形约束，需要把 events.js 顶层的事件绑定收进一个
+ * bindEvents() 由 bootstrap() 调用；那是一次面较大的改动，目前靠这段注释
+ * 加 mainWindow.test.js 里的 import 顺序注释显式化。
  * ============================================================ */
 import {
   INSERT_MODULES,

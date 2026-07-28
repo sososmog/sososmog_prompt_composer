@@ -3,7 +3,9 @@
  *              检查更新、汇总渲染 renderAll，以及启动引导
  * ------------------------------------------------------------
  * 主窗口最上层：装配各按钮/全局事件，import 其余模块的能力。
- * 文件末尾执行启动逻辑（restoreState + 延迟检查更新）。
+ * 启动逻辑（restoreState + 延迟检查更新）已收进 bootstrap()，
+ * 不再是模块顶层的裸执行语句——由 main.js 在模块图装配完成后调用，
+ * 好让本文件能被安全 import（含单测）而不触发真实启动链路。
  * ============================================================ */
 import { icon, escapeHtml, TRANSLATE_PROVIDERS, TRANSLATE_PROVIDER_BY_ID, normalizeTranslateSettings } from './core.js';
 import { translateCurrentContent } from './translate.js';
@@ -1265,12 +1267,33 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if ($stOverlay && $stOverlay.classList.contains('show')) renderSettingsPanel();
   }
 
-  // 状态恢复 + 首次 renderAll 完成后，按需自动弹出新手引导
-  // （此时演示数据卡片等 DOM 已渲染，引导高亮定位才准确）。
-  Promise.resolve(restoreState()).then(function () {
-    maybeStartTourOnBoot();
-  });
-  setTimeout(function () { checkForUpdate(false); }, 3000);
+  /* ============================================================
+   * 14. 启动引导（bootstrap）
+   * ------------------------------------------------------------
+   * 为什么把“启动动作”从模块顶层的裸执行语句里拎出来：这两行一旦在
+   * import 阶段就跑，import 这个文件本身就等于启动一次真实应用（读
+   * 存档、可能弹新手引导、3 秒后联网查更新）——vitest 里没法只 import
+   * 拿这堆函数当逻辑用，一 import 就会真的跑起来。拆成具名函数后，
+   * 何时触发启动交给调用方决定：真实运行时由 main.js 在整张模块图
+   * 装配完成后调用一次；测试里则完全不必调用它，直接测 renderAll()
+   * 等具体行为即可，不必每个用例都被迫走一遍“存档恢复 + 引导 + 查
+   * 更新”的完整链路。
+   *
+   * 注意：本文件模块顶层仍然保留大量 $xxx.addEventListener(...) 之类
+   * 的 DOM 绑定，这次重构刻意没有把它们挪进函数——绑定本身不是“启动
+   * 副作用”，只是在引用真实 DOM 节点；只要测试先把 index.html 的
+   * <body> 灌进 jsdom、再动态 import 本模块，这些绑定就能照常挂到
+   * 真实节点上。真正需要拎出来的，只有下面这两行会主动触发外部效果
+   * （文件 I/O、全局引导层、网络请求）的启动动作。
+   * ============================================================ */
+  function bootstrap() {
+    // 状态恢复 + 首次 renderAll 完成后，按需自动弹出新手引导
+    // （此时演示数据卡片等 DOM 已渲染，引导高亮定位才准确）。
+    Promise.resolve(restoreState()).then(function () {
+      maybeStartTourOnBoot();
+    });
+    setTimeout(function () { checkForUpdate(false); }, 3000);
+  }
 
   export {
     setLang, toggleLang, renderLangSeg,
@@ -1281,5 +1304,6 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     applyToggleShortcut, applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
     checkForUpdate, renderAll,
     doUndo, doRedo,
+    bootstrap,
     $stOverlay,
   };
