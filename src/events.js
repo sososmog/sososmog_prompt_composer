@@ -97,10 +97,12 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     });
     updateTranslateDir();
   }
-  $langSegmented.addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-lang]');
-    if (b) setLang(b.dataset.lang);
-  });
+  function bindLangSeg() {
+    $langSegmented.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-lang]');
+      if (b) setLang(b.dataset.lang);
+    });
+  }
 
   /* ============================================================
    * 9.1 一键翻译（⇄）：把当前语言正文翻译到另一种语言
@@ -109,7 +111,10 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
    * 切换语言后方向随之翻转（renderLangSeg 里调 updateTranslateDir）。
    * 翻译中 ⇄ 进入加载/禁用态；完成后自动切到目标语言看结果，短暂提示。
    * ============================================================ */
-  var $btnTranslate = document.getElementById('btnTranslate');
+  // 只声明不取值：取值要等 DOM 就绪，统一在 bindEvents() 里做。下面
+  // updateTranslateDir / setTranslating / doTranslate 都闭包引用这个模块级
+  // 变量，所以声明必须留在这里，不能一起挪进绑定函数。
+  var $btnTranslate = null;
   var isTranslating = false;
 
   function langLabel(code) { return code === 'zh' ? '中文' : 'English'; }
@@ -184,9 +189,12 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     });
   }
 
-  if ($btnTranslate) {
-    $btnTranslate.addEventListener('click', doTranslate);
-    updateTranslateDir();
+  function bindTranslate() {
+    $btnTranslate = document.getElementById('btnTranslate');
+    if ($btnTranslate) {
+      $btnTranslate.addEventListener('click', doTranslate);
+      updateTranslateDir();
+    }
   }
 
   function setView(v) {
@@ -218,10 +226,12 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       b.setAttribute('aria-pressed', b.dataset.view === view ? 'true' : 'false');
     });
   }
-  $viewSeg.addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-view]');
-    if (b) setView(b.dataset.view);
-  });
+  function bindViewSeg() {
+    $viewSeg.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-view]');
+      if (b) setView(b.dataset.view);
+    });
+  }
 
   /* ============================================================
    * 10. 输出：复制 / 下载 / 示例 / 清空
@@ -267,15 +277,18 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     }
   }
 
-  $btnCopy.addEventListener('click', doCopy);
-  $btnDownload.addEventListener('click', doDownload);
+  function bindOutputButtons() {
+    $btnCopy.addEventListener('click', doCopy);
+    $btnDownload.addEventListener('click', doDownload);
 
-  var $btnManageSnippets = document.getElementById('btnManageSnippets');
-  if ($btnManageSnippets) $btnManageSnippets.addEventListener('click', openSnippetManager);
-  var $btnManageModules = document.getElementById('btnManageModules');
-  if ($btnManageModules) $btnManageModules.addEventListener('click', openModuleManager);
-  var $btnManageQuick = document.getElementById('btnManageQuick');
-  if ($btnManageQuick) $btnManageQuick.addEventListener('click', openQuickManager);
+    // 这三个按钮只在绑定处用到，不需要模块级变量
+    var $btnManageSnippets = document.getElementById('btnManageSnippets');
+    if ($btnManageSnippets) $btnManageSnippets.addEventListener('click', openSnippetManager);
+    var $btnManageModules = document.getElementById('btnManageModules');
+    if ($btnManageModules) $btnManageModules.addEventListener('click', openModuleManager);
+    var $btnManageQuick = document.getElementById('btnManageQuick');
+    if ($btnManageQuick) $btnManageQuick.addEventListener('click', openQuickManager);
+  }
 
   /* ============================================================
    * 12.0 设置面板：快捷键录制（项1） + 粘贴前等待 ms（项2）
@@ -1055,8 +1068,10 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if (stKeyHandler) { document.removeEventListener('keydown', stKeyHandler); stKeyHandler = null; }
   }
 
-  var $btnEditorSettings = document.getElementById('btnEditorSettings');
-  if ($btnEditorSettings) $btnEditorSettings.addEventListener('click', openSettingsPanel);
+  function bindSettingsButton() {
+    var $btnEditorSettings = document.getElementById('btnEditorSettings');
+    if ($btnEditorSettings) $btnEditorSettings.addEventListener('click', openSettingsPanel);
+  }
 
   /* ============================================================
    * 12.1 浮窗 toggle：显示/隐藏 label 为 'float' 的窗口
@@ -1068,7 +1083,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
    *   - 主窗口重新获得焦点时（覆盖快捷键切换 / 浮窗自关后用户切回主窗）
    *   - 浮窗关闭键广播 'composer-float-visibility' 时（无需切焦点即时更新）
    * ============================================================ */
-  var $btnFloatWindow = document.getElementById('btnFloatWindow');
+  // 同 $btnTranslate：setFloatActive 闭包引用它，声明留在模块级，
+  // 取值与绑定在 bindFloatWindow() 里做。
+  var $btnFloatWindow = null;
 
   function setFloatActive(active) {
     if (!$btnFloatWindow) return;
@@ -1095,7 +1112,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     }).catch(function () {});
   }
 
-  if ($btnFloatWindow) {
+  function bindFloatWindow() {
+    $btnFloatWindow = document.getElementById('btnFloatWindow');
+    if (!$btnFloatWindow) return;
     if (webviewWindowApi && webviewWindowApi.WebviewWindow) {
       $btnFloatWindow.addEventListener('click', function () {
         // 第一次进入浮窗：说明全局快捷键与“点击即粘贴”
@@ -1134,31 +1153,36 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     }
   }
 
-  var $themeToggle = document.getElementById('themeToggle');
-  $themeToggle.addEventListener('click', function () {
-    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    var newTheme = dark ? 'light' : 'dark';
-    if (dark) {
-      document.documentElement.removeAttribute('data-theme');
-    } else {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    }
-    try { localStorage.setItem('composer-theme', newTheme); } catch (e) { /* 存储不可用，主题仍已生效于当前会话 */ }
-    // 广播给浮窗，让其即时跟随主题切换
-    if (eventApi && eventApi.emit) {
-      eventApi.emit('composer-theme-changed', { theme: newTheme }).catch(function () {});
-    }
-  });
+  function bindThemeToggle() {
+    var $themeToggle = document.getElementById('themeToggle');
+    if (!$themeToggle) return;
+    $themeToggle.addEventListener('click', function () {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      var newTheme = dark ? 'light' : 'dark';
+      if (dark) {
+        document.documentElement.removeAttribute('data-theme');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+      try { localStorage.setItem('composer-theme', newTheme); } catch (e) { /* 存储不可用，主题仍已生效于当前会话 */ }
+      // 广播给浮窗，让其即时跟随主题切换
+      if (eventApi && eventApi.emit) {
+        eventApi.emit('composer-theme-changed', { theme: newTheme }).catch(function () {});
+      }
+    });
+  }
 
-  $btnClearAll.addEventListener('click', function () {
-    if (!(state.content[state.lang] || '').trim()) { showToast('当前语言正文已经是空的'); return; }
-    captureHistory(); // 结构操作（清空正文）：改动前存旧快照
-    state.content[state.lang] = '';
-    if (view === 'preview') setView('write');
-    renderAll();
-    scheduleSave();
-    showToast('已清空' + (state.lang === 'zh' ? '中文' : 'English') + '正文');
-  });
+  function bindClearAll() {
+    $btnClearAll.addEventListener('click', function () {
+      if (!(state.content[state.lang] || '').trim()) { showToast('当前语言正文已经是空的'); return; }
+      captureHistory(); // 结构操作（清空正文）：改动前存旧快照
+      state.content[state.lang] = '';
+      if (view === 'preview') setView('write');
+      renderAll();
+      scheduleSave();
+      showToast('已清空' + (state.lang === 'zh' ? '中文' : 'English') + '正文');
+    });
+  }
 
   /* ============================================================
    * 10.1 结构级 Undo / Redo
@@ -1196,7 +1220,11 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     return !!ae.closest('.sm-overlay.show');
   }
 
-  document.addEventListener('keydown', function (e) {
+  function bindGlobalShortcuts() {
+    document.addEventListener('keydown', onGlobalKeydown);
+  }
+
+  function onGlobalKeydown(e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     var key = e.key.toLowerCase();
     // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z：结构级撤销/重做。
@@ -1224,7 +1252,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       var inField = tag === 'INPUT' || tag === 'TEXTAREA';
       if (!sel && !inField) { e.preventDefault(); doCopy(); }
     }
-  });
+  }
 
   /* ============================================================
    * 12. 检查更新
@@ -1268,6 +1296,32 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   }
 
   /* ============================================================
+   * 13.1 事件绑定
+   * ------------------------------------------------------------
+   * 这些 addEventListener 以前是模块顶层的裸执行语句，于是 events.js 与
+   * store.js 之间多了一条隐蔽的求值顺序耦合：谁先被 import，谁顶层的语句
+   * 就先跑。两个文件互相 import，若先 import store.js，它顶层那句
+   * `import './events.js'` 会立刻触发 events.js 求值，而此时 store.js 自己
+   * 那行 `var $langSegmented = document.getElementById(...)` 还没执行到——
+   * events.js 顶层的 $langSegmented.addEventListener 就拿着 undefined 直接
+   * TypeError。以前只能靠"必须以 events.js 为入口"这条口头约束绕开。
+   *
+   * 收进函数后，两个文件的顶层都只剩声明，谁先谁后都不会出错；绑定时机
+   * 由 bootstrap() 显式决定，模块图装配完成后才跑。
+   * ============================================================ */
+  function bindEvents() {
+    bindLangSeg();
+    bindTranslate();
+    bindViewSeg();
+    bindOutputButtons();
+    bindSettingsButton();
+    bindFloatWindow();
+    bindThemeToggle();
+    bindClearAll();
+    bindGlobalShortcuts();
+  }
+
+  /* ============================================================
    * 14. 启动引导（bootstrap）
    * ------------------------------------------------------------
    * 为什么把“启动动作”从模块顶层的裸执行语句里拎出来：这两行一旦在
@@ -1279,14 +1333,16 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
    * 等具体行为即可，不必每个用例都被迫走一遍“存档恢复 + 引导 + 查
    * 更新”的完整链路。
    *
-   * 注意：本文件模块顶层仍然保留大量 $xxx.addEventListener(...) 之类
-   * 的 DOM 绑定，这次重构刻意没有把它们挪进函数——绑定本身不是“启动
-   * 副作用”，只是在引用真实 DOM 节点；只要测试先把 index.html 的
-   * <body> 灌进 jsdom、再动态 import 本模块，这些绑定就能照常挂到
-   * 真实节点上。真正需要拎出来的，只有下面这两行会主动触发外部效果
-   * （文件 I/O、全局引导层、网络请求）的启动动作。
+   * 事件绑定同理，现在也由这里统一触发（见 §13.1 bindEvents）：绑定语句
+   * 留在模块顶层时，events.js 与 store.js 的顶层代码会互相依赖对方的求值
+   * 进度，只能靠"必须以 events.js 为入口"这条约束绕开。收进函数后模块图
+   * 谁先谁后都无所谓，测试也可以按任意顺序 import。
    * ============================================================ */
   function bootstrap() {
+    // 先接线再启动：restoreState 完成后会 renderAll，那时按钮上的监听
+    // 得已经挂好。
+    bindEvents();
+
     // 状态恢复 + 首次 renderAll 完成后，按需自动弹出新手引导
     // （此时演示数据卡片等 DOM 已渲染，引导高亮定位才准确）。
     Promise.resolve(restoreState()).then(function () {
@@ -1301,5 +1357,6 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
     renderAll,
     doUndo,
+    bindEvents,
     bootstrap,
   };

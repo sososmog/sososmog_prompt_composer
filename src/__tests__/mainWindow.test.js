@@ -1,18 +1,14 @@
 /* ============================================================
  * mainWindow.test.js —— 主窗口 UI 层的 DOM 层测试
  * ------------------------------------------------------------
- * 为什么现在才有这份测试：events.js 以前在模块顶层直接跑启动逻辑
- * （restoreState + 3 秒后查更新），import 这个文件本身就等于启动一次
- * 真实应用；events.js 顶层还有大量 $xxx.addEventListener(...)，
- * jsdom 里没有真实 DOM 时 document.getElementById 拿到 null，一 import
- * 就 TypeError。events.js 的启动动作已被拆到 bootstrap()（不再是裸执行
- * 语句），但模块顶层的 DOM 绑定语句本身没有动——所以这里的策略是：
- * 先在 jsdom 里把真实 index.html 的 <body> 灌好，再用**动态** import，
- * 让顶层那些 addEventListener 绑到真实节点上，而不必把几十处绑定
- * 挪进函数、把改动面扩大好几倍。
+ * events.js 的启动动作在 bootstrap() 里、事件绑定在 bindEvents() 里，
+ * 模块顶层只剩声明，所以 import 它不再等于"启动一次真实应用"。测试只需
+ * 先把真实 DOM 灌好，import 之后显式调一次 bindEvents() 接线，
+ * 不必调 bootstrap()（那会连存档恢复、新手引导、查更新一起跑）。
  *
  * DOM 来源：直接读 src/index.html 并抓取 <body> 内容，不手写一份假
  * DOM——手写的迟早会跟真实页面结构漂移，等于测了个不存在的页面。
+ * 仍然用动态 import：DOM 必须先就位，store.js 顶层要按 id 取节点。
  * ============================================================ */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -64,24 +60,21 @@ beforeEach(async function () {
   // 默认 stub 成"确认"，需要测"取消"分支的用例自行覆盖成 () => false。
   window.confirm = vi.fn(function () { return true; });
 
-  // 顶层还有大量 $xxx.addEventListener 的绑定语句（这次重构刻意没动），
-  // 必须等 DOM 就绪后才动态 import，绑定才能挂到上面刚灌好的真实节点上。
-  //
-  // 导入顺序有讲究，必须先 import events.js（与生产环境一致：main.js
-  // 只 import events.js 作为入口）。events.js ⇄ store.js 是循环依赖：
-  // 若反过来先 import store.js，store.js 顶层对 events.js 的 import 会
-  // 触发 events.js 求值，而 events.js 顶层的 $langSegmented.addEventListener
-  // 会在 store.js 自己那句 `var $langSegmented = document.getElementById(...)`
-  // 真正执行之前就跑到——此时 $langSegmented 还是 undefined，直接 TypeError。
-  // 以 events.js 为入口时，store.js 的循环 import 靠"函数声明整体提升"
-  // 安全接住（renderAll/applyStartupShortcut 是 function 声明，未执行到
-  // 也已可调用），$langSegmented 这类 var 赋值则会在 events.js 自己的顶层
-  // 语句跑到之前，随着 store.js 完整求值一次性就绪。
+  // store.js 顶层按 id 取节点，所以必须等 DOM 灌好之后才动态 import。
+  // events.js ⇄ store.js 仍是 ESM 循环依赖，但两边顶层现在都只有声明
+  // （绑定收进了 bindEvents），谁先 import 都不会踩到"对方的 var 还没
+  // 赋值"——这里沿用与生产一致的顺序（main.js 以 events.js 为入口），
+  // 但不再是硬约束。
   // render.js 不需要单独 import：它已经在 store.js 的顶层 import 链路里
   // 被一并带入（本文件只通过 store/events 暴露的接口驱动交互，render.js
   // 的渲染函数都由它们内部调用，测试代码不必直接持有 render 的命名空间）。
   events = await import('../events.js');
   store = await import('../store.js');
+
+  // 事件绑定现在收在 bindEvents() 里（不再是模块顶层的裸执行语句），
+  // 要测点击/快捷键就得显式接线一次。仍然不调 bootstrap()：那会连
+  // 存档恢复、新手引导、查更新一起跑起来。
+  events.bindEvents();
 });
 
 describe('主窗口 DOM 层：渲染', function () {
