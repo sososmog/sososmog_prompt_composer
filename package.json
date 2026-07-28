@@ -26,6 +26,7 @@
     "@tauri-apps/cli": "^2.0.0",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.19.0",
+    "globals": "^14.0.0",
     "jsdom": "^29.1.1",
     "vitest": "^4.1.10"
   }

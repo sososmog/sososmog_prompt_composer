@@ -42,6 +42,12 @@ export function splitTail(textBeforeCaret, lang) {
  */
 export function attachCompletion(area, overlay, deps) {
   var current = null; // 当前展示的候选 { key, remainder }
+  // 最近一次「记过账」的候选 key。recompute 挂在 input 上，每敲一个字符都会跑，
+  // 若每次都记 learn('shown') 就会把同一次展示重复计数 N 次（N≈已输入前缀长度），
+  // 于是接受率 = accepted/shown 被摊薄到 1/N，比新片段的乐观初始值
+  // LEARN_OPTIMISTIC(0.4) 还低 —— 越常用的片段排得越靠后，信号是反的。
+  // 因此只在「候选换人了」时才记一次展示：一次展示会话 = 一次 shown。
+  var lastShownKey = null;
 
   function clearGhost() {
     if (!current) return;
@@ -60,36 +66,51 @@ export function attachCompletion(area, overlay, deps) {
     overlay.appendChild(span);
   }
 
+  // 算出此刻该展示的候选；没有可展示的一律返回 null（单一出口，便于统一处理记账）。
+  function pickCandidate() {
+    var value = area.value;
+    var caret = area.selectionStart;
+    // 仅当无选区、且光标在文本末尾时提示
+    if (caret !== area.selectionEnd) return null;
+    if (caret !== value.length) return null;
+
+    var before = value.slice(0, caret);
+    if (isInCodeContext(before)) return null; // 代码区不打扰
+
+    var lang = deps.getLang();
+    var parts = splitTail(before, lang);
+    if (!parts.tail) return null;
+
+    var pool = deps.getPool() || [];
+    var cands = getCandidates(parts.tail, pool);
+    if (cands.length === 0) return null;
+
+    var ranked = rankCandidates(cands, parts.prefixKey || '', deps.getLearning(), Date.now());
+    var top = ranked[0];
+    if (!top || !top.remainder) return null;
+    return { key: top.key, remainder: top.remainder, prefixKey: parts.prefixKey || '' };
+  }
+
   function recompute() {
     // 先清旧 ghost（renderHighlight 会重绘正文，顺带抹掉上次的 ghost span）
     deps.renderHighlight(area, overlay);
     current = null;
 
-    var value = area.value;
-    var caret = area.selectionStart;
-    // 仅当无选区、且光标在文本末尾时提示
-    if (caret !== area.selectionEnd) return;
-    if (caret !== value.length) return;
+    var top = pickCandidate();
+    if (!top) {
+      // 候选真的消失了（打的字不再匹配 / 离开行尾 / 进了代码区）：结束本次展示会话，
+      // 下次它再出现时算一次新的展示。
+      lastShownKey = null;
+      return;
+    }
 
-    var before = value.slice(0, caret);
-    if (isInCodeContext(before)) return; // 代码区不打扰
-
-    var lang = deps.getLang();
-    var parts = splitTail(before, lang);
-    if (!parts.tail) return;
-
-    var pool = deps.getPool() || [];
-    var cands = getCandidates(parts.tail, pool);
-    if (cands.length === 0) return;
-
-    var ranked = rankCandidates(cands, parts.prefixKey || '', deps.getLearning(), Date.now());
-    var top = ranked[0];
-    if (!top || !top.remainder) return;
-
-    current = { key: top.key, remainder: top.remainder, prefixKey: parts.prefixKey || '' };
+    current = top;
     showGhost(top.remainder);
-    // 记一次展示
-    deps.onLearn(learn('shown', { candKey: top.key }, deps.getLearning()));
+    // 只有换了候选才记账；同一条候选在连续打字过程中只算一次展示
+    if (lastShownKey !== top.key) {
+      lastShownKey = top.key;
+      deps.onLearn(learn('shown', { candKey: top.key }, deps.getLearning()));
+    }
   }
 
   function accept() {
@@ -104,6 +125,8 @@ export function attachCompletion(area, overlay, deps) {
     area.value = area.value.slice(0, caret) + remainder + area.value.slice(caret);
     var newCaret = caret + remainder.length;
     area.setSelectionRange(newCaret, newCaret);
+    // 这次展示已被消费：清掉去重标记，之后同一条候选再出现算新的一次展示
+    lastShownKey = null;
     // 派发 input，走既有的 autosize / 高亮重绘 / 回写 state / 保存链路
     area.dispatchEvent(new Event('input', { bubbles: true }));
 
@@ -115,7 +138,8 @@ export function attachCompletion(area, overlay, deps) {
   area.addEventListener('input', recompute);
   // 光标移动（点击/方向键）也要重算：光标离开末尾就该撤掉 ghost
   area.addEventListener('click', recompute);
-  area.addEventListener('blur', clearGhost);
+  // 失焦：结束本次展示会话（回来重新聚焦后同一条候选算新的一次展示）
+  area.addEventListener('blur', function () { lastShownKey = null; clearGhost(); });
 
   area.addEventListener('keydown', function (e) {
     // Alt+↑/↓ 是移动块，交给现有 handler，别抢
