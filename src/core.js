@@ -678,7 +678,7 @@
 
   // 按 rawCounts key 级联清理：该 key 对应的 snippets 记录、bigrams 中以它为
   // prefixKey 的整条、以及各 prefixKey 下以它为 candKey 的项，一并清掉——
-  // 否则残留的统计会指向已被淘汰、不复存在的语料（与 removeLearnedSnippet 同一思路）。
+  // 否则残留的统计会指向已被淘汰、不复存在的语料。
   function cascadeRemoveRawKey(L, key) {
     delete L.rawCounts[key];
     delete L.snippets[key];
@@ -827,41 +827,6 @@
       }
     });
     capBlocked(L); // blocked 同样只增不减，见 LEARN_BLOCKED_MAX 注释
-    return L;
-  }
-
-  // 收集所有已提炼的 learned 片段 + 统计信息（供设置面板「自学习」列表展示/管理）。
-  // 不区分语言，按最近使用时间降序，供用户查看/逐条删除。
-  function learnedSnippetsForManage(learning) {
-    var L = normalizeLearning(learning);
-    var out = [];
-    Object.keys(L.snippets).forEach(function (k) {
-      var s = L.snippets[k];
-      if (s.source !== 'learned') return;
-      var r = L.rawCounts[k];
-      if (!r) return;
-      out.push({
-        key: k, text: r.text, lang: r.lang,
-        shown: s.shown, accepted: s.accepted, lastUsedAt: s.lastUsedAt
-      });
-    });
-    out.sort(function (a, b) { return b.lastUsedAt - a.lastUsedAt; });
-    return out;
-  }
-
-  // 删除单条 learned 片段：级联清掉 snippets 记录、rawCounts 原始计数、
-  // bigrams 中以它为候选词的项——否则残留的 rawCounts 计数会在下次达阈值时被重新提炼。
-  function removeLearnedSnippet(learning, key) {
-    var L = normalizeLearning(learning);
-    delete L.snippets[key];
-    delete L.rawCounts[key];
-    Object.keys(L.bigrams).forEach(function (pk) {
-      var m = L.bigrams[pk];
-      if (m && m[key] !== undefined) {
-        delete m[key];
-        if (Object.keys(m).length === 0) delete L.bigrams[pk];
-      }
-    });
     return L;
   }
 
@@ -1999,38 +1964,29 @@
     rankCandidates,
     learn,
     learnedSnippets,
-    learnedSnippetsForManage,
-    removeLearnedSnippet,
     clearLearning,
     buildLearningExportBundle,
     validateLearningImportBundle,
     mergeLearningImport,
     isInCodeContext,
-    defaultCompletionSettings,
     TRANSLATE_PROVIDERS,
     TRANSLATE_PROVIDER_BY_ID,
-    PRESET_TRANSLATE_HOSTS,
     translateHostOf,
     isPresetTranslateHost,
     defaultTranslateSettings,
     normalizeTranslateSettings,
-    defaultOnboarding,
-    ONBOARDING_HINT_KEYS,
     floatWindowHintBody,
     maskCode,
     unmaskCode,
-    translateSystemPrompt,
     buildTranslatePayload,
     extractModelText,
     parseTranslateResponse,
     demoContent,
     defaultState,
-    defaultQuickGroups,
     newSnippetId,
     newModuleId,
     newQuickGroupId,
     newQuickItemId,
-    modulesToText,
     normalizeState,
     estimateTokens,
     isFenceLine,
@@ -2039,18 +1995,11 @@
     patchBuiltinSnippet,
     patchBuiltinModule,
     escapeHtml,
-    ICON_PATHS,
     icon,
-    hlEscape,
-    highlightInline,
     highlightMarkdown,
     createHistory,
     // 配置导入导出（纯逻辑）
     EXPORT_SCHEMA_VERSION,
-    EXPORT_APP_ID,
-    EXPORT_FILE_TYPE,
-    EXPORT_SECTIONS,
-    MATERIAL_FIELDS,
     buildExportBundle,
     validateImportBundle,
     mergeState,

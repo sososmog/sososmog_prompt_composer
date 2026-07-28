@@ -111,7 +111,8 @@ function materialsSignature(state) {
 var poolCache = null;
 
 // 供将来在素材改动处（比如 quick.js）显式调用；当前实现的正确性不依赖它，
-// 见文件头“候选池缓存”注释。
+// 见文件头“候选池缓存”注释。目前仅测试使用（poolCache.test.js），生产代码
+// 依赖素材签名比对自动失效，尚未在任何素材改动点接入这个显式失效口子。
 function invalidateCompletionPool() {
   poolCache = null;
 }

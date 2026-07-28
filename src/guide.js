@@ -446,7 +446,6 @@ function resetHints() {
 }
 
 export {
-  startTour,
   maybeStartTourOnBoot,
   maybeShowHint,
   replayTour,

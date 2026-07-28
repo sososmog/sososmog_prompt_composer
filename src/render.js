@@ -476,10 +476,9 @@ import { attachCompletion } from './completion.js';
   export {
     // 左栏
     resolveModule, orderedModules, visibleModules, renderInsertGrid,
-    resolveSnippet, orderedSnippets, allSnippets, renderSnippets,
+    resolveSnippet, orderedSnippets, renderSnippets,
     // 编辑器 / 块
-    renderEditor, autosize, renderBlocks, appendAddBlockButton,
-    markLastBlockAsNew, buildBlockCard, renderHighlight, syncOverlayScroll,
-    onBlocksChanged, deleteBlock, moveBlock, attachDrag, flipReorder,
-    startBlockDrag, refreshStat, renderPreview,
+    renderEditor, renderBlocks,
+    markLastBlockAsNew,
+    refreshStat, renderPreview,
   };

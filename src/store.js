@@ -21,21 +21,11 @@
  * ============================================================ */
 import {
   INSERT_MODULES,
-  MODULE_BY_ID,
   BUILTIN_SNIPPETS,
-  BUILTIN_BY_ID,
   demoContent,
   defaultState,
-  newSnippetId,
-  newModuleId,
-  newQuickGroupId,
-  newQuickItemId,
-  modulesToText,
   normalizeState,
   estimateTokens,
-  escapeHtml,
-  ICON_PATHS,
-  icon,
   parseBlocks,
   createHistory,
   learnedFragmentsForManage,
@@ -89,7 +79,7 @@ import { createStateSync } from './sync.js';
    * 2.1 结构级 Undo/Redo：历史栈实例 + 捕获/恢复接口
    * ------------------------------------------------------------
    * 栈只存在运行时内存（core.js 的 createHistory），不进 state、
-   * 不进 persistState，重启即清空。捕获时机：每个结构操作“即将改变
+   * 不落盘持久化，重启即清空。捕获时机：每个结构操作“即将改变
    * state.content 之前”调 captureHistory()。撤销/重做走 doUndo/doRedo
    * （在 events.js 里接快捷键），恢复内容后由 applyContentSnapshot
    * 重渲染块视图并防抖保存。
@@ -191,9 +181,6 @@ import { createStateSync } from './sync.js';
   sync.start();
 
   function scheduleSave() { sync.scheduleSave(); }
-  function persistState() { return sync.persistNow(); }
-  function applyRemoteState(payload) { sync.applyRemoteState(payload); }
-  function flushPendingRemoteState() { sync.flushPending(); }
   // 主动丢弃暂存的远端 state（本地正在发起编辑时调用，如 insertSnippet）。
   function discardPendingRemoteState() { sync.discardPending(); }
 
@@ -259,9 +246,10 @@ import { createStateSync } from './sync.js';
    * ============================================================ */
   var toastTimer = null;
   function showToast(msg, isErr) {
-    // persistState 定义在本文件更靠前的位置且调用了 showToast——函数声明整体提升，
-    // 运行期没问题（persistState 只会在启动之后才被真正调用，那时 $toast 早已取到）。
-    // 这里仍加一层兜底：万一将来有模块加载阶段就调用 showToast 的路径，避免直接抛错。
+    // 上面 createStateSync 的 onError 回调定义在本文件更靠前的位置且调用了
+    // showToast——函数声明整体提升，运行期没问题（onError 只会在真正发生写盘
+    // 失败时才被调用，那时 $toast 早已取到）。这里仍加一层兜底：万一将来有
+    // 模块加载阶段就调用 showToast 的路径，避免直接抛错。
     if (!$toast) return;
     $toast.textContent = msg;
     $toast.classList.toggle('err', !!isErr);
@@ -304,7 +292,7 @@ import { createStateSync } from './sync.js';
   // 在当前聚焦块的光标处插入片段；无聚焦块则新建一个块（追加到末尾）。
   function insertSnippet(snippet) {
     // 用户正在主动插入内容：丢弃任何尚未 apply 的远端 state（自我回声或浮窗的
-    // 旧更新都已过时）。否则失焦时 flushPendingRemoteState 会用它 renderAll，
+    // 旧更新都已过时）。否则失焦时 sync.js 的 flushPending 会用它 renderAll，
     // 覆盖掉这次插入——表现为“插了却跳走、像没插入、要再点一次”。插入后本窗口
     // 自己会 scheduleSave 广播最新态，浮窗照常同步，方向正确。
     discardPendingRemoteState();
@@ -457,20 +445,18 @@ import { createStateSync } from './sync.js';
 
   export {
     // Tauri 句柄与环境
-    TAURI, fsApi, dialogApi, clipboardApi, updaterApi, processApi,
-    eventApi, webviewWindowApi, coreApi, BaseDirectory, STATE_FILE, tauriAvailable,
+    fsApi, dialogApi, clipboardApi, updaterApi, processApi,
+    eventApi, webviewWindowApi, coreApi, STATE_FILE, tauriAvailable,
     // 可变状态
     state, view, setViewValue,
     // 持久化 / 同步
-    scheduleSave, persistState, restoreState, onSaveStatus,
-    isEditingLocally, applyRemoteState, flushPendingRemoteState,
-    discardPendingRemoteState, setState,
+    scheduleSave, restoreState, onSaveStatus, setState,
     // 结构级 Undo/Redo
     history, captureHistory, applyContentSnapshot,
     // DOM 引用
     $insertGrid, $snippetWrap, $quickWrap, $langSegmented, $viewSeg,
     $etLabel, $editorStat, $blocks, $preview,
-    $btnCopy, $btnDownload, $btnClearAll, $toast,
+    $btnCopy, $btnDownload, $btnClearAll,
     // 工具 / 块模型
     showToast, collectText, insertSnippet, preserveBlockFocus,
     // 行内补全（v0.2）
@@ -479,8 +465,7 @@ import { createStateSync } from './sync.js';
     getLearnedFragmentsForManage, blockLearnedFragmentByKey, clearAllLearning,
     exportLearningBundle, importLearningBundle,
     // 从 core 透传（供下游模块复用，避免各处重复 import 同一批）
-    INSERT_MODULES, MODULE_BY_ID, BUILTIN_SNIPPETS, BUILTIN_BY_ID,
-    demoContent, defaultState, newSnippetId, newModuleId,
-    newQuickGroupId, newQuickItemId, modulesToText, normalizeState,
-    estimateTokens, escapeHtml, ICON_PATHS, icon, parseBlocks,
+    INSERT_MODULES, BUILTIN_SNIPPETS,
+    demoContent, defaultState,
+    normalizeState, estimateTokens, parseBlocks,
   };

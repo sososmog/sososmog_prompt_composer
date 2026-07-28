@@ -731,14 +731,10 @@ import {
     // 快速段落（左栏）
     renderQuick,
     // 通用管理浮窗
-    ensureSnippetManager, snippetAdapter, moduleAdapter, focusLastRow, renderLeft,
-    patchBuiltinSnippet, updateCustomSnippetField, patchBuiltinModule,
-    updateCustomModuleField, updateCustomModuleHidden,
-    openSnippetManager, openModuleManager, openManager, closeSnippetManager,
-    moveManagerItem, renderSnippetManager, mkOpBtn, autosizeSm,
+    patchBuiltinSnippet, patchBuiltinModule,
+    openSnippetManager, openModuleManager, renderSnippetManager,
     // 快速段落管理浮窗
-    moveInArray, afterQuickChange, ensureQuickManager, renderQuickManager,
-    openQuickManager, closeQuickManager,
+    renderQuickManager, openQuickManager,
     // overlay 引用（renderAll 判断是否需要重渲染）
     $smOverlay, $qmOverlay,
   };

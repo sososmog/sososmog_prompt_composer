@@ -147,16 +147,16 @@ function createStateSync(opts) {
     });
   }
 
+  // applyRemoteState 刻意**不**放到返回对象上：suppressBroadcast 是本模块的私有
+  // 闭包变量，「替换 state + 重渲染 + 期间不回声广播」这套组合只能由本模块自己
+  // 驱动（listen 回调与 flushPending）。外部若能单独调它，很容易在忘记配套处理
+  // suppressBroadcast 的情况下引出 A→B→A 回声。
   return {
     scheduleSave: scheduleSave,
     persistNow: persistNow,
     discardPending: discardPending,
     flushPending: flushPending,
     start: start,
-    // 未在原设计草图里列出，但 store.js 需要保留可独立调用的 applyRemoteState
-    // 导出名（历史 API 面），且 suppressBroadcast 是本模块私有闭包变量，只能
-    // 由本模块自己驱动这套"设置+渲染"的组合，故一并导出。
-    applyRemoteState: applyRemoteState,
   };
 }
 

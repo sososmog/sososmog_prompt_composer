@@ -1296,14 +1296,10 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   }
 
   export {
-    setLang, toggleLang, renderLangSeg,
-    setView, toggleView, renderViewSeg,
-    doCopy, fallbackCopy, doDownload,
-    formatInvokeError, codeToMainKey, formatAccelerator,
-    ensureSettingsPanel, renderSettingsPanel, startRecordingShortcut,
-    applyToggleShortcut, applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
-    checkForUpdate, renderAll,
-    doUndo, doRedo,
+    setLang,
+    setView,
+    applyStartupShortcut, openSettingsPanel, closeSettingsPanel,
+    renderAll,
+    doUndo,
     bootstrap,
-    $stOverlay,
   };
