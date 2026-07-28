@@ -26,6 +26,7 @@ export default [
       'src/store.js', 'src/render.js', 'src/quick.js', 'src/events.js',
       'src/translate.js', 'src/guide.js', 'src/backup.js',
       'src/completion.js', 'src/statefile.js', 'src/edit.js',
+      'src/materials.js', 'src/pool.js', 'src/sync.js', 'src/float.js',
     ],
     languageOptions: {
       ecmaVersion: 2021,

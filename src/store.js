@@ -24,8 +24,6 @@ import {
   icon,
   parseBlocks,
   createHistory,
-  learn,
-  learnedFragments,
   learnedFragmentsForManage,
   blockLearnedFragment,
   clearLearning,
@@ -39,8 +37,10 @@ import {
   refreshStat,
 } from './render.js';
 import { renderAll, applyStartupShortcut } from './events.js';
-import { STATE_FILE, writeStateAtomic, readState } from './statefile.js';
+import { STATE_FILE, readState } from './statefile.js';
 import { insertTextAtCaret } from './edit.js';
+import { completionEnabled as poolCompletionEnabled, completionPool as poolCompletionPool, commitLearningText } from './pool.js';
+import { createStateSync } from './sync.js';
 
   /* ============================================================
    * 0. Tauri API 安全获取（浏览器中预览时降级）
@@ -70,15 +70,6 @@ import { insertTextAtCaret } from './edit.js';
    * ============================================================ */
   var state = defaultState();
   var view = 'write'; // 'write' | 'preview'
-  var saveTimer = null;
-  var suppressBroadcast = false; // 收到浮窗广播触发的本地更新，不再二次广播（防回声循环）
-  // Tauri 的 emit 会把事件回送给发送方自己。本窗口不该被自己刚保存的广播
-  // 反过来打断（尤其正在编辑时会暂存进 pendingRemoteState，失焦时 flush 触发
-  // 全量 renderAll，恰好打断“插入模块后紧接着的第二次插入”）。记住最近若干条
-  // 自己广播出去的 payload 序列化，listen 收到内容命中的即判为自我回声、跳过。
-  // 用队列而非单值：回声到达时机不定，两次连续保存会让单值被后者覆盖、漏过滤。
-  var recentBroadcasts = [];
-  var RECENT_BROADCAST_MAX = 6;
 
   /* ============================================================
    * 2.1 结构级 Undo/Redo：历史栈实例 + 捕获/恢复接口
@@ -127,18 +118,28 @@ import { insertTextAtCaret } from './edit.js';
     }
   }
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    emitSaveStatus('saving');
-    saveTimer = setTimeout(persistState, 300);
+  /* ---------- 持久化 + 双向同步：委托给 sync.js ----------
+   * 防抖写盘 / emit-listen 广播 / 回声过滤 / 正在编辑时暂存远端更新，这套逻辑
+   * 主窗口与浮窗此前各写一份、容易漂移（sync.js 头部注释记录了已修的时序 bug）。
+   * 现在两边共用 createStateSync 工厂，这里只负责注入本窗口的依赖：
+   * fs 句柄、getState/setState 读写本模块的 state 变量、onApply 触发 renderAll、
+   * isEditing 判断是否正在编辑、onStatus/onError 对接下面的保存状态广播与 toast。
+   * ============================================================ */
+  function isEditingLocally() {
+    var el = document.activeElement;
+    if (!el) return false;
+    var tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
   }
 
-  var appDataEnsured = false;
-  function ensureAppDataDir() {
-    if (appDataEnsured || !fsApi.mkdir) return Promise.resolve();
-    return fsApi.mkdir('.', { baseDir: BaseDirectory.AppData, recursive: true })
-      .then(function () { appDataEnsured = true; })
-      .catch(function () { appDataEnsured = true; });
+  // 本地主动整体替换内存 state（如配置导入、sync 应用远端更新）。
+  // 与远端应用的区别在调用方：backup.js 直接调用时不置 suppressBroadcast——
+  // 导入是本窗口发起的变更，落盘后应正常 emit('composer-state-changed')
+  // 把新 state 广播给浮窗；调用方需自行 scheduleSave() + renderAll()。
+  // sync.js 内部调用（应用远端广播）时，suppressBroadcast 由 sync.js 自己
+  // 在调用前后置位，本函数不用关心。
+  function setState(nextRaw) {
+    state = normalizeState(nextRaw);
   }
 
   // emitSaveStatus('error') 唯一的消费者是 events.js 的 refreshFootHint，而它只在设置面板
@@ -147,23 +148,23 @@ import { insertTextAtCaret } from './edit.js';
   // 只弹一次 toast，成功一次后复位，下次再失败还能再弹。
   var lastPersistFailed = false;
 
-  function persistState() {
-    // 非 Tauri（浏览器预览）无盘可写，直接视作“已保存”以免状态字卡在“保存中…”。
-    if (!tauriAvailable()) { emitSaveStatus('saved'); return; }
-    var payload = JSON.stringify(state, null, 2);
-    ensureAppDataDir().then(function () {
-      // 原子写：先写 .tmp 再 rename 覆盖正档，避免写盘中途崩溃留下截断的 JSON
-      return writeStateAtomic(fsApi, BaseDirectory.AppData, payload);
-    }).then(function () {
-      if (eventApi && eventApi.emit && !suppressBroadcast) {
-        // 记录本次广播指纹，供 listen 端滤掉自我回声
-        recentBroadcasts.push(payload);
-        if (recentBroadcasts.length > RECENT_BROADCAST_MAX) recentBroadcasts.shift();
-        eventApi.emit('composer-state-changed', state).catch(function () {});
-      }
-      lastPersistFailed = false; // 写盘恢复正常，下次再失败可以再次提醒
-      emitSaveStatus('saved');
-    }).catch(function (err) {
+  var sync = createStateSync({
+    fs: fsApi,
+    baseDir: BaseDirectory && BaseDirectory.AppData,
+    eventApi: eventApi,
+    getState: function () { return state; },
+    setState: setState,
+    // 包一层而不是直接传 renderAll：renderAll 来自 events.js，与本模块是 ESM
+    // 循环依赖。虽然函数声明在链接阶段就已初始化、直接传值目前也能拿到，但
+    // 「求值时刻取到的那个值」这种依赖过于隐晦；惰性调用与其它循环依赖处
+    // （applyContentSnapshot 收 rerender 回调）的做法保持一致。
+    onApply: function () { renderAll(); },
+    isEditing: isEditingLocally,
+    onStatus: function (status) {
+      if (status === 'saved') lastPersistFailed = false; // 写盘恢复正常，下次再失败可以再次提醒
+      emitSaveStatus(status);
+    },
+    onError: function (err) {
       console.warn('持久化失败:', err);
       emitSaveStatus('error');
       // 只在“从非 error 转入 error”这一刻弹一次；连续失败不会每 300ms 刷一条 toast。
@@ -171,81 +172,16 @@ import { insertTextAtCaret } from './edit.js';
         lastPersistFailed = true;
         showToast('保存失败，改动可能丢失。请检查磁盘空间或配置文件是否被占用', true);
       }
-    });
-  }
+    },
+  });
+  sync.start();
 
-  /* ---------- 实时双向同步：监听浮窗（或另一端）广播的 state ----------
-   * 协议：任一窗口在 state 变更并防抖保存落盘后，emit 'composer-state-changed'
-   * 事件，payload 为完整的最新 state。另一端 listen 到后以事件携带的 state
-   * 为准整体替换本地内存 state 并重渲染——不去反过来读盘，避免与对端写盘竞态。
-   *
-   * 关键保护：若本窗口此刻正在编辑（焦点在某个输入框/文本域），立即整体替换 +
-   * 重渲染会打断输入、丢失光标，且会用远端 state 冲掉本地尚未防抖保存的输入。
-   * 因此正在编辑时不立即应用，而是把最新 payload 暂存到 pendingRemoteState，
-   * 等本窗口失去输入焦点后再 flush 应用。这样只同步“没在编辑的那一端”。
-   *
-   * suppressBroadcast 确保远端更新触发的本地渲染不会再次广播，避免 A→B→A 回声。
-   * ============================================================ */
-  var pendingRemoteState = null;
-
-  function isEditingLocally() {
-    var el = document.activeElement;
-    if (!el) return false;
-    var tag = el.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
-  }
-
-  function applyRemoteState(payload) {
-    suppressBroadcast = true;
-    state = normalizeState(payload);
-    renderAll();
-    suppressBroadcast = false;
-  }
-
-  // 本地主动整体替换内存 state（如配置导入）。与 applyRemoteState 的区别：
-  // 不置 suppressBroadcast——导入是本窗口发起的变更，落盘后应正常
-  // emit('composer-state-changed') 把新 state 广播给浮窗。调用方拿到后需自行
-  // scheduleSave()（触发写盘+广播）和 renderAll()（本窗口重渲染）。
-  function setState(nextRaw) {
-    state = normalizeState(nextRaw);
-  }
-
-  function flushPendingRemoteState() {
-    if (pendingRemoteState && !isEditingLocally()) {
-      var payload = pendingRemoteState;
-      pendingRemoteState = null;
-      applyRemoteState(payload);
-    }
-  }
-
-  // 主动丢弃暂存的远端 state（本地正在发起编辑时调用）。
-  function discardPendingRemoteState() { pendingRemoteState = null; }
-
-  if (eventApi && eventApi.listen) {
-    eventApi.listen('composer-state-changed', function (evt) {
-      var payload = evt && evt.payload;
-      if (!payload || typeof payload !== 'object') return;
-      // 过滤自我回声：命中本窗口近期广播过的任一指纹即忽略（是自己发的，本地
-      // state 已经是它，无需再 apply，更不能在编辑中暂存后打断后续操作）。
-      var fp = JSON.stringify(payload, null, 2);
-      var hitIdx = recentBroadcasts.indexOf(fp);
-      if (hitIdx !== -1) {
-        recentBroadcasts.splice(hitIdx, 1); // 消费掉，避免误吃后续同内容的真实更新
-        return;
-      }
-      if (isEditingLocally()) {
-        // 正在编辑：暂存最新一份，待失焦后应用（后到的覆盖先到的，只保留最新）
-        pendingRemoteState = payload;
-        return;
-      }
-      applyRemoteState(payload);
-    }).catch(function () {});
-    // 失焦后把暂存的远端 state flush 掉；用捕获阶段确保 activeElement 已更新
-    document.addEventListener('focusout', function () {
-      // focusout 触发时 activeElement 可能尚未切换，延到下一微/宏任务再判断
-      setTimeout(flushPendingRemoteState, 0);
-    });
-  }
+  function scheduleSave() { sync.scheduleSave(); }
+  function persistState() { return sync.persistNow(); }
+  function applyRemoteState(payload) { sync.applyRemoteState(payload); }
+  function flushPendingRemoteState() { sync.flushPending(); }
+  // 主动丢弃暂存的远端 state（本地正在发起编辑时调用，如 insertSnippet）。
+  function discardPendingRemoteState() { sync.discardPending(); }
 
   // 返回 Promise，state 就绪并首次 renderAll 完成后 resolve；
   // events.js 据此在正确时机触发新手引导（此时演示数据卡片已渲染）。
@@ -439,56 +375,13 @@ import { insertTextAtCaret } from './edit.js';
 
   /* ============================================================
    * 2.5 行内补全：候选池合成 + 学习数据读写（供 completion.js 注入）
-   * ------------------------------------------------------------
-   * 把三处素材（快速段落 / 常用句含内置+自定义 / 已提炼 learned 片段）
-   * 按当前语言摊平成 [{ key, text, source }] 候选池。key 带语言前缀
-   * （learnKey 同款：'zh'/'en' +  + 文本），与学习数据的 key 一致，
-   * 保证 shown/accepted/bigram 能正确对上号。
    * ============================================================ */
-  function completionEnabled() {
-    return !!(state.settings && state.settings.completion && state.settings.completion.enabled);
-  }
+  // 候选池合成（快速段落 / 常用句含内置+自定义 / 已提炼 learned 片段摊平成
+  // [{ key, text, source }]、key 统一用 learnKey 归一化）已抽到 pool.js，
+  // 与浮窗共用；这里的两个函数是薄包装，只负责把 state 传进去。
+  function completionEnabled() { return poolCompletionEnabled(state); }
 
-  function completionPool() {
-    if (!completionEnabled()) return []; // 总开关关闭：不展示候选，也就不会再产生新的 shown/accepted 记账
-    var lang = state.lang;
-    var pfx = (lang === 'en' ? 'en' : 'zh') + '';
-    var seen = {};
-    var pool = [];
-    // explicitKey：learned 片段传入其归一化学习 key（与 L.snippets 里的统计
-    // key 一致），使 scoreCandidate / learn('shown'|'accepted') 能对上历史账。
-    // preset 不传，仍按原文重算 key（preset 全程用原文 key，自洽）。
-    function add(text, source, explicitKey) {
-      if (typeof text !== 'string') return;
-      var t = text;
-      if (t.trim() === '') return;
-      var key = explicitKey != null ? explicitKey : pfx + t;
-      if (seen[key]) return;
-      seen[key] = true;
-      pool.push({ key: key, text: t, source: source });
-    }
-    // 快速段落
-    (state.quickGroups || []).forEach(function (g) {
-      (g.items || []).forEach(function (it) {
-        var tx = it.text || {};
-        add(tx[lang] || tx.zh || tx.en, 'preset');
-      });
-    });
-    // 常用句：内置（含 patch 后的当前值）+ 自定义
-    BUILTIN_SNIPPETS.forEach(function (b) {
-      var p = (state.builtinPatches && state.builtinPatches[b.id]) || {};
-      if (p.hidden) return;
-      add((p[lang] !== undefined ? p[lang] : b[lang]) || b.zh || b.en, 'preset');
-    });
-    (state.customSnippets || []).forEach(function (c) {
-      if (c.hidden) return;
-      add(c[lang] || c.zh || c.en, 'preset');
-    });
-    // 自学习片段（读时从整行 rawCounts 现切；key 为片段归一化 learnKey，与统计对齐）
-    var segMode = (state.settings && state.settings.completion && state.settings.completion.segMode) || 'clause';
-    learnedFragments(state.learning, lang, { mode: segMode }).forEach(function (s) { add(s.text, 'learned', s.key); });
-    return pool;
-  }
+  function completionPool() { return poolCompletionPool(state); }
 
   // 给 completion.js 用的依赖对象：读候选池 / 读写学习数据 / 读当前语言 /
   // 复用 render 的高亮重绘（由调用方在 render.js 里注入，避免 store→render 循环）。
@@ -503,11 +396,12 @@ import { insertTextAtCaret } from './edit.js';
   }
 
   // 用户“完整用过一句”（复制/下载正文）时喂给学习引擎，累计 rawCounts、
-  // 达阈值自动提炼。由 events.js 的 doCopy/doDownload 调用。
+  // 达阈值自动提炼。由 events.js 的 doCopy/doDownload 调用。commitLearningText
+  // （pool.js）总开关关闭时原样返回入参 learning，据此判断是否需要保存。
   function commitLearningFromText(text) {
-    if (!completionEnabled()) return; // 总开关关闭：不再记账
-    var lines = String(text == null ? '' : text).split('\n');
-    state.learning = learn('commit', { lang: state.lang, lines: lines }, state.learning);
+    var next = commitLearningText(state, text);
+    if (next === state.learning) return;
+    state.learning = next;
     scheduleSave();
   }
 
@@ -555,7 +449,8 @@ import { insertTextAtCaret } from './edit.js';
     state, view, setViewValue,
     // 持久化 / 同步
     scheduleSave, persistState, restoreState, onSaveStatus,
-    isEditingLocally, applyRemoteState, flushPendingRemoteState, setState,
+    isEditingLocally, applyRemoteState, flushPendingRemoteState,
+    discardPendingRemoteState, setState,
     // 结构级 Undo/Redo
     history, captureHistory, applyContentSnapshot,
     // DOM 引用
