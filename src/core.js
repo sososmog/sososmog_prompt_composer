@@ -203,6 +203,15 @@
     return { tourDone: false, hintsSeen: {} };
   }
 
+  // “浮窗随叫随到”提示的文案：快捷键是用户可在设置里改的（state.settings.toggleShortcut），
+  // 提示文案不能写死默认值，否则改过快捷键的用户会看到一句错误的提示。
+  // 抽成纯函数是为了能在不启动 DOM/Tauri 副作用的前提下单测（guide.js 依赖 store.js，
+  // store.js 加载即执行副作用，vitest 里无法直接 import guide.js）。
+  function floatWindowHintBody(shortcut) {
+    var key = (shortcut && String(shortcut).trim()) || 'Ctrl+Alt+C';
+    return '浮窗会始终置顶。按 ' + key + ' 可随时全局呼出/收起；开启「点击即粘贴」后，点一下素材就能直接粘到别的程序里。';
+  }
+
   /* ============================================================
    * 1.3 行内补全总开关（默认开）
    * ============================================================ */
@@ -1926,6 +1935,7 @@
     normalizeTranslateSettings,
     defaultOnboarding,
     ONBOARDING_HINT_KEYS,
+    floatWindowHintBody,
     maskCode,
     unmaskCode,
     translateSystemPrompt,

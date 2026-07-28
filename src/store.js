@@ -141,6 +141,12 @@ import { insertTextAtCaret } from './edit.js';
       .catch(function () { appDataEnsured = true; });
   }
 
+  // emitSaveStatus('error') 唯一的消费者是 events.js 的 refreshFootHint，而它只在设置面板
+  // 停在“管理”类 tab 时才把文案显示出来——平时写盘失败（磁盘满/权限/文件被占用）用户完全
+  // 看不到，会误以为已经保存。这个标记只用来防刷屏：同一轮连续失败（每 300ms 防抖重试一次）
+  // 只弹一次 toast，成功一次后复位，下次再失败还能再弹。
+  var lastPersistFailed = false;
+
   function persistState() {
     // 非 Tauri（浏览器预览）无盘可写，直接视作“已保存”以免状态字卡在“保存中…”。
     if (!tauriAvailable()) { emitSaveStatus('saved'); return; }
@@ -155,8 +161,17 @@ import { insertTextAtCaret } from './edit.js';
         if (recentBroadcasts.length > RECENT_BROADCAST_MAX) recentBroadcasts.shift();
         eventApi.emit('composer-state-changed', state).catch(function () {});
       }
+      lastPersistFailed = false; // 写盘恢复正常，下次再失败可以再次提醒
       emitSaveStatus('saved');
-    }).catch(function (err) { console.warn('持久化失败:', err); emitSaveStatus('error'); });
+    }).catch(function (err) {
+      console.warn('持久化失败:', err);
+      emitSaveStatus('error');
+      // 只在“从非 error 转入 error”这一刻弹一次；连续失败不会每 300ms 刷一条 toast。
+      if (!lastPersistFailed) {
+        lastPersistFailed = true;
+        showToast('保存失败，改动可能丢失。请检查磁盘空间或配置文件是否被占用', true);
+      }
+    });
   }
 
   /* ---------- 实时双向同步：监听浮窗（或另一端）广播的 state ----------
@@ -294,6 +309,10 @@ import { insertTextAtCaret } from './edit.js';
    * ============================================================ */
   var toastTimer = null;
   function showToast(msg, isErr) {
+    // persistState 定义在本文件更靠前的位置且调用了 showToast——函数声明整体提升，
+    // 运行期没问题（persistState 只会在启动之后才被真正调用，那时 $toast 早已取到）。
+    // 这里仍加一层兜底：万一将来有模块加载阶段就调用 showToast 的路径，避免直接抛错。
+    if (!$toast) return;
     $toast.textContent = msg;
     $toast.classList.toggle('err', !!isErr);
     $toast.classList.add('show');

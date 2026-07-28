@@ -928,15 +928,21 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       renderTranslateSettings();
     });
 
-    $trKey.addEventListener('change', function () {
+    // 这三个用 input（而非 change）：change 要失焦才触发，粘贴进 Key 还没来得及
+    // 失焦时，若这期间触发了一次 renderSettingsPanel（比如按了 Ctrl+L 切语言），
+    // renderTranslateSettings 会用 state 里的旧值把输入框内容整个覆盖掉，
+    // 相当于刚粘的 Key 被吞掉。改成 input 让每次按键都即时写回 state，不会再有
+    // “已经打进框里但还没提交”的中间态可丢。scheduleSave 本身有防抖，输入频率
+    // 不会因此增加写盘次数。
+    $trKey.addEventListener('input', function () {
       state.settings.translation.apiKey = $trKey.value.trim();
       saveTranslateSettings();
     });
-    $trModel.addEventListener('change', function () {
+    $trModel.addEventListener('input', function () {
       state.settings.translation.model = $trModel.value.trim();
       saveTranslateSettings();
     });
-    $trBase.addEventListener('change', function () {
+    $trBase.addEventListener('input', function () {
       state.settings.translation.baseUrl = $trBase.value.trim();
       saveTranslateSettings();
     });
@@ -1175,6 +1181,19 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
   /* ============================================================
    * 11. 快捷键
    * ============================================================ */
+  // 弹窗（设置面板 / 常用句管理 / 快速段落管理 / 导入导出）都用 .sm-overlay 这个
+  // class，打开时带 .show。焦点落在其中任意输入框时，l/s/p/c 这几个全局快捷键
+  // 在弹窗语境下没有对应语义（比如设置面板里没有“下载 .md”这回事），继续抢键
+  // 只会打断用户在弹窗里的操作（典型案例：翻译设置里粘贴 API Key 时按了 Ctrl+L，
+  // 组合键落到这里触发切换语言 → renderAll → 弹窗内容被 state 旧值覆盖）。
+  // activeElement 可能为 null，也可能是不支持 closest 的节点（如 document 本身），
+  // 两种都要防御。
+  function isInsideOpenDialog() {
+    var ae = document.activeElement;
+    if (!ae || typeof ae.closest !== 'function') return false;
+    return !!ae.closest('.sm-overlay.show');
+  }
+
   document.addEventListener('keydown', function (e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     var key = e.key.toLowerCase();
@@ -1191,6 +1210,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       if (key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
       if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); doRedo(); return; }
     }
+    // 只针对弹窗内让位：正文里的块 textarea 仍要照常响应 Ctrl+S/Ctrl+L/Ctrl+P/Ctrl+C
+    // ——footer 提示文案明确宣传了这几个快捷键在编辑正文时可用，不能连带禁掉。
+    if ((key === 'l' || key === 's' || key === 'p' || key === 'c') && isInsideOpenDialog()) return;
     if (key === 'l') { e.preventDefault(); toggleLang(); }
     else if (key === 's') { e.preventDefault(); doDownload(); }
     else if (key === 'p') { e.preventDefault(); toggleView(); }

@@ -13,6 +13,7 @@
  * 高于设置面板遮罩（1000）与 toast（999）。
  * ============================================================ */
 import { state, scheduleSave } from './store.js';
+import { floatWindowHintBody } from './core.js';
 
 /* ------------------------------------------------------------
  * 读写 onboarding 标记
@@ -323,7 +324,9 @@ var HINTS = {
   floatWindow: {
     target: '#btnFloatWindow',
     title: '浮窗随叫随到',
-    body: '浮窗会始终置顶。按 Ctrl+Alt+C 可随时全局呼出/收起；开启「点击即粘贴」后，点一下素材就能直接粘到别的程序里。'
+    // body 用函数而非固定字符串：快捷键可在设置里改，写死的文案在改过之后就是错的。
+    // showHint() 里会判断 typeof body === 'function' 并调用取值。
+    body: function () { return floatWindowHintBody(state.settings && state.settings.toggleShortcut); }
   },
   translateKey: {
     target: '#btnTranslate',
@@ -367,7 +370,8 @@ function showHint(def) {
     '<div class="gd-hint-title"></div>' +
     '<div class="gd-hint-body"></div>';
   el.querySelector('.gd-hint-title').textContent = def.title;
-  el.querySelector('.gd-hint-body').textContent = def.body;
+  // body 支持函数形式（如 floatWindow 要读当前快捷键配置），字符串则原样展示
+  el.querySelector('.gd-hint-body').textContent = typeof def.body === 'function' ? def.body() : def.body;
   document.body.appendChild(el);
 
   activeHint = {
