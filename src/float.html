@@ -397,6 +397,7 @@ import {
   learn,
 } from './core.js';
 import { attachCompletion } from './completion.js';
+import { writeStateAtomic, readState } from './statefile.js';
 
 (function () {
   'use strict';
@@ -411,7 +412,6 @@ import { attachCompletion } from './completion.js';
   var webviewWindowApi = TAURI && TAURI.webviewWindow;
   var coreApi = TAURI && TAURI.core;
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
-  var STATE_FILE = 'composer-state.json';
   function tauriAvailable() { return !!(TAURI && fsApi && BaseDirectory); }
 
   var currentWin = null;
@@ -474,7 +474,8 @@ import { attachCompletion } from './completion.js';
     if (!tauriAvailable()) return;
     var payload = JSON.stringify(state, null, 2);
     ensureAppDataDir().then(function () {
-      return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
+      // 原子写（与主窗口共用 statefile.js）：避免写盘中途崩溃留下截断的 JSON
+      return writeStateAtomic(fsApi, BaseDirectory.AppData, payload);
     }).then(function () {
       if (eventApi && eventApi.emit && !suppressBroadcast) {
         // 记录本次广播指纹（payload 即 JSON.stringify(state,null,2)），供 listen 端滤掉自我回声
@@ -487,17 +488,15 @@ import { attachCompletion } from './completion.js';
 
   function restoreState() {
     if (!tauriAvailable()) { renderAll(); return; }
-    fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
-      .then(function (exists) {
-        if (!exists) throw new Error('no-state-file');
-        return fsApi.readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
-      })
-      .then(function (text) {
-        var parsed = JSON.parse(text);
-        if (parsed && typeof parsed === 'object') state = normalizeState(parsed);
-      })
-      .catch(function () { state = defaultState(); })
-      .then(function () { renderAll(); });
+    readState(fsApi, BaseDirectory.AppData).then(function (res) {
+      if (res.status === 'ok' || res.status === 'recovered') state = normalizeState(res.data);
+      else state = defaultState();
+      renderAll();
+      // 坏档提示只由主窗口负责（它带备份文件名、文案更完整），浮窗仅在自己是
+      // 唯一可见窗口时也给一句短提示，避免用户以为浮窗内容被无故清空。
+      if (res.status === 'corrupt') showToast('存档已损坏，已按默认配置启动');
+      else if (res.status === 'recovered') showToast('已从临时文件恢复上次存档');
+    });
   }
 
   /* ---------- 实时双向同步：监听主窗口（或另一端）广播的 state ----------

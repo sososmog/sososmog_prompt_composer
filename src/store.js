@@ -39,6 +39,7 @@ import {
   refreshStat,
 } from './render.js';
 import { renderAll, applyStartupShortcut } from './events.js';
+import { STATE_FILE, writeStateAtomic, readState } from './statefile.js';
 
   /* ============================================================
    * 0. Tauri API 安全获取（浏览器中预览时降级）
@@ -54,7 +55,7 @@ import { renderAll, applyStartupShortcut } from './events.js';
   var coreApi = TAURI && TAURI.core;
 
   var BaseDirectory = fsApi && fsApi.BaseDirectory;
-  var STATE_FILE = 'composer-state.json';
+  // STATE_FILE 由 statefile.js 统一定义（正档 / .tmp / 坏档备份三个名字在一处）
   function tauriAvailable() { return !!(TAURI && fsApi && BaseDirectory); }
 
   /* ============================================================
@@ -144,7 +145,8 @@ import { renderAll, applyStartupShortcut } from './events.js';
     if (!tauriAvailable()) { emitSaveStatus('saved'); return; }
     var payload = JSON.stringify(state, null, 2);
     ensureAppDataDir().then(function () {
-      return fsApi.writeTextFile(STATE_FILE, payload, { baseDir: BaseDirectory.AppData });
+      // 原子写：先写 .tmp 再 rename 覆盖正档，避免写盘中途崩溃留下截断的 JSON
+      return writeStateAtomic(fsApi, BaseDirectory.AppData, payload);
     }).then(function () {
       if (eventApi && eventApi.emit && !suppressBroadcast) {
         // 记录本次广播指纹，供 listen 端滤掉自我回声
@@ -233,16 +235,28 @@ import { renderAll, applyStartupShortcut } from './events.js';
   // events.js 据此在正确时机触发新手引导（此时演示数据卡片已渲染）。
   function restoreState() {
     if (!tauriAvailable()) { renderAll(); return Promise.resolve(); }
-    return fsApi.exists(STATE_FILE, { baseDir: BaseDirectory.AppData })
-      .then(function (exists) {
-        if (!exists) throw new Error('no-state-file');
-        return fsApi.readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
+    return readState(fsApi, BaseDirectory.AppData)
+      .then(function (res) {
+        if (res.status === 'ok' || res.status === 'recovered') {
+          state = normalizeState(res.data);
+        } else {
+          state = defaultState();
+        }
+        // 存档异常必须让用户知道：以前这里是静默 defaultState()，用户下一次编辑
+        // 就把默认值写回正档、原数据彻底消失还毫无提示。延后一拍再弹，等首帧
+        // renderAll 之后 toast 才不会被启动渲染盖掉。
+        if (res.status === 'recovered') {
+          setTimeout(function () {
+            showToast('上次退出时存档未写完，已从临时文件恢复' + (res.backup ? '（坏档已备份为 ' + res.backup + '）' : ''), true);
+          }, 400);
+        } else if (res.status === 'corrupt') {
+          setTimeout(function () {
+            showToast(res.backup
+              ? '存档文件已损坏，已备份为 ' + res.backup + '，本次以默认配置启动'
+              : '存档文件已损坏且无法备份，本次以默认配置启动', true);
+          }, 400);
+        }
       })
-      .then(function (text) {
-        var parsed = JSON.parse(text);
-        if (parsed && typeof parsed === 'object') state = normalizeState(parsed);
-      })
-      .catch(function () { state = defaultState(); })
       .then(function () {
         renderAll();
         // state 就绪后，把持久化的自定义热键应用到 Rust 侧。只有主窗口做这件事
