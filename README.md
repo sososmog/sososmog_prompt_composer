@@ -19,7 +19,7 @@
 - **新手引导**：首次启动的最短路径高亮遮罩引导（含一步真实交互），以及初次接近某功能时的锚定轻提示；是否看过的标记随状态落盘
 - 复制到系统剪贴板、导出 `.md`（系统保存对话框）
 - 本地持久化：所有状态存到应用数据目录，重开应用自动恢复
-- 应用内自动更新：启动时检查 GitHub Release，发现新版本可一键下载安装并重启
+- 应用内更新：启动时静默检查 GitHub Release（可在设置里关掉），有新版本只提示不自动装，下载安装始终由你在「设置 → 关于」里点一下触发
 
 ### 浮窗模式
 
@@ -192,9 +192,11 @@ npm run tauri build
 
 仓库内置 [.github/workflows/release.yml](.github/workflows/release.yml)：推送 `v*` 格式的 tag（或手动 `workflow_dispatch` 指定 tag）会触发 GitHub Actions（`windows-latest`），自动安装依赖、用 `tauri-apps/tauri-action` 构建并创建 Draft Release，同时生成供 `tauri-plugin-updater` 消费的 `latest.json` 更新清单。签名密钥通过仓库 Secrets（`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）注入，公钥写在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 中。
 
-### 应用内自动更新
+### 应用内更新
 
-`tauri.conf.json` 中 `plugins.updater.endpoints` 指向本仓库 GitHub Release 的 `latest.json`；应用启动时会检查该地址，若有新版本可提示用户下载并通过 `tauri-plugin-process` 重启完成安装。发布新版本前务必确保 tag 已推送、CI 已成功生成对应产物与 `latest.json`。
+`tauri.conf.json` 中 `plugins.updater.endpoints` 指向本仓库 GitHub Release 的 `latest.json`。应用启动 3 秒后会静默检查一次该地址（受设置项 `settings.update.autoCheck` 控制，默认开，可在「设置 → 通用」关闭）；发布新版本前务必确保 tag 已推送、CI 已成功生成对应产物与 `latest.json`。
+
+**检查与安装是分开的两步，永远不会自动升级**：查到新版本只会在侧栏「设置」按钮上点一个小红点、并在「设置 → 关于」里显示版本号、更新说明和一个「下载并安装」按钮，只有点这个按钮才会下载并通过 `tauri-plugin-process` 重启完成安装。早先的实现是查到后直接弹原生 `window.confirm`，而那个对话框默认焦点就在「确定」上，用户启动后正在打字，一个回车就把升级确认掉了，观感上等于应用自己偷偷升级重启——这条回归由 [src/\_\_tests\_\_/updateCheck.test.js](src/__tests__/updateCheck.test.js) 钉住。
 
 ### 打包前替换应用图标（重要）
 
