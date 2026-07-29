@@ -123,7 +123,7 @@ npm run tauri dev
 ```
 
 - 启动主窗口（标题 Composer，默认 1200×800，最小 900×600）。
-- 前端为纯静态文件、原生 ESM 分模块：纯逻辑在 [src/core.js](src/core.js)，主窗口按 [src/store.js](src/store.js)（状态/持久化）→ [src/render.js](src/render.js)（渲染）→ [src/quick.js](src/quick.js)（浮窗/管理面板）→ [src/events.js](src/events.js)（装配入口）分层，另有 [src/backup.js](src/backup.js)（导入导出）、[src/translate.js](src/translate.js)（一键翻译）、[src/guide.js](src/guide.js)（新手引导）、[src/completion.js](src/completion.js)（行内自动补全交互层）与 [src/styles.css](src/styles.css)；主窗口 UI 在 [src/index.html](src/index.html)，浮窗 UI 在 [src/float.html](src/float.html)。修改后刷新对应窗口即可看到变化。
+- 前端为纯静态文件、原生 ESM 分模块：纯逻辑在 [src/core.js](src/core.js)，主窗口按 [src/store.js](src/store.js)（状态/持久化）→ [src/render.js](src/render.js)（渲染）→ [src/quick.js](src/quick.js)（浮窗/管理面板）→ [src/events.js](src/events.js)（装配入口）分层，浮窗逻辑在 [src/float.js](src/float.js)；主窗口与浮窗共用一套模块以避免实现漂移：[src/materials.js](src/materials.js)（素材解析）、[src/pool.js](src/pool.js)（补全候选池）、[src/sync.js](src/sync.js)（持久化+双窗口广播）、[src/statefile.js](src/statefile.js)（原子写）、[src/edit.js](src/edit.js)（保撤销栈的文本插入）；另有 [src/backup.js](src/backup.js)（导入导出）、[src/translate.js](src/translate.js)（一键翻译）、[src/guide.js](src/guide.js)（新手引导）、[src/completion.js](src/completion.js)（行内自动补全交互层）与 [src/styles.css](src/styles.css) / [src/float.css](src/float.css)；主窗口 UI 在 [src/index.html](src/index.html)，浮窗 UI 在 [src/float.html](src/float.html)。修改后刷新对应窗口即可看到变化。
 - 按下 `Ctrl+Alt+C`（或在设置面板中自定义后的快捷键）可呼出/隐藏浮窗；浮窗默认不可见，不会随应用启动自动弹出。
 
 > 也可以直接用浏览器打开 `src/index.html` 预览主窗口界面（此时无 Tauri 环境，持久化/系统剪贴板/保存对话框/浮窗热键/一键翻译等能力会自动降级为浏览器行为或空操作，UI 仍可正常操作）。
@@ -228,10 +228,17 @@ npm run tauri icon path/to/your-icon.png
 │   ├── translate.js           # 一键翻译编排层（收集待翻块 → http 请求 → 解析写回）
 │   ├── guide.js               # 新手引导：首启动高亮遮罩引导 + 上下文轻提示
 │   ├── completion.js          # 行内自动补全交互层（ghost text 展示/键盘接管，纯逻辑在 core.js），主窗口与浮窗共用
+│   ├── materials.js           # 素材解析纯函数（按 id 合成模块/常用句，内置 patch 合并），主窗口与浮窗共用，避免两处实现漂移
+│   ├── pool.js                # 行内补全候选池合成 + 学习数据读写入口（纯逻辑），统一主窗口与浮窗的候选 key 算法
+│   ├── sync.js                # state 持久化 + 双窗口广播 + 回声过滤（工厂函数 + 依赖注入，可用假 fs/事件对象单测）
+│   ├── statefile.js           # composer-state.json 的原子写 / 容错读，主窗口与浮窗共用同一份实现
+│   ├── edit.js                # textarea 文本插入（用 execCommand('insertText') 保住浏览器原生撤销栈）
+│   ├── float.js               # 浮窗交互逻辑（从 float.html 内联 script 搬出，便于 eslint/单测覆盖）
 │   ├── theme-boot.js          # 主题 bootstrap（同步阻塞的普通脚本，避免首屏闪烁），index.html 与 float.html 共用
 │   ├── fonts.css              # 本地字体 @font-face 声明（取代运行时请求 Google Fonts），详见 src/fonts/README.md
 │   ├── fonts/                 # 本地自托管字体 woff2（由 npm run fonts 生成，约 338KB；缺失时静默回退系统字体）
 │   ├── styles.css             # 主窗口样式
+│   ├── float.css              # 浮窗样式（从 float.html 内联 style 搬出）
 │   ├── index.html             # 主窗口 UI：模块库/装配区/检视栏/快速段落/设置面板
 │   ├── float.html             # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、行内自动补全、自动粘贴开关、一键缩小为悬浮小球
 │   ├── main.js                # 唯一入口：模块图装配完成后调用 events.js 的 bootstrap()
