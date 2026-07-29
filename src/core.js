@@ -221,6 +221,19 @@
     return { enabled: true, segMode: 'clause' };
   }
 
+  /* ============================================================
+   * 1.4 自动检查更新（默认开，但"检查"到"安装"之间一定隔着一次点击）
+   * ------------------------------------------------------------
+   * autoCheck 只管"启动后要不要联网问一次有没有新版本"。查到了也只是把
+   * 「有新版本」这件事显示出来（侧栏设置按钮小红点 + 关于页出现安装按钮），
+   * 绝不自动下载安装——早先的实现在静默检查后直接弹原生 window.confirm，
+   * 而 Tauri 里那个对话框默认焦点就在「确定」上，用户启动后 3 秒正在打字，
+   * 一个回车就把升级确认掉了，观感上等于"应用自己偷偷升级并重启"。
+   * ============================================================ */
+  function defaultUpdateSettings() {
+    return { autoCheck: true };
+  }
+
   function defaultState() {
     return {
       lang: 'zh',
@@ -239,7 +252,8 @@
         pasteDelayMs: 60,
         translation: defaultTranslateSettings(),       // 翻译：LLM 提供商配置
         onboarding: defaultOnboarding(),                // 新手引导：是否已完成/各上下文提示是否看过
-        completion: defaultCompletionSettings()        // 行内补全（自学习）总开关，默认开
+        completion: defaultCompletionSettings(),       // 行内补全（自学习）总开关，默认开
+        update: defaultUpdateSettings()                // 启动时自动检查更新（只提示，不自动安装）
       },
       learning: defaultLearning()                      // v0.2：行内补全的本地自学习数据
     };
@@ -1075,7 +1089,7 @@
     }
 
     // 阶段4：设置项——快捷键 + 粘贴前等待时长，做好防御性校验，任何脏值都回退默认
-    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings(), onboarding: defaultOnboarding(), completion: defaultCompletionSettings() };
+    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings(), onboarding: defaultOnboarding(), completion: defaultCompletionSettings(), update: defaultUpdateSettings() };
     if (raw.settings && typeof raw.settings === 'object') {
       if (typeof raw.settings.toggleShortcut === 'string' && raw.settings.toggleShortcut.trim() !== '') {
         s.settings.toggleShortcut = raw.settings.toggleShortcut;
@@ -1101,6 +1115,11 @@
         s.settings.completion.enabled = cp.enabled !== false;
         // 读时切分粒度：仅 'word' opt-in，其余（含缺失）回退默认 'clause'
         s.settings.completion.segMode = cp.segMode === 'word' ? 'word' : 'clause';
+      }
+      // 自动检查更新：脏值一律回退默认开
+      var up = raw.settings.update;
+      if (up && typeof up === 'object') {
+        s.settings.update.autoCheck = up.autoCheck !== false;
       }
     }
 

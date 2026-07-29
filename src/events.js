@@ -395,6 +395,11 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                 '<label class="st-tr-check"><input type="checkbox" id="stCompletionSegWord" /><span>词级切分（实验）</span></label>' +
                 '<span class="st-desc">开启后，无标点的长句也能从词的中间接续（用系统内置分词，个别旧系统不支持时自动退回按标点切分）。</span>' +
               '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">自动检查更新</span>' +
+                '<span class="st-desc">启动后在后台问一次有没有新版本。查到了只会提示你（侧栏「设置」按钮上出现小红点），下载和安装始终要你在「关于」里手动点，不会自动升级。</span>' +
+                '<label class="st-tr-check"><input type="checkbox" id="stUpdateAutoCheck" /><span>启动时自动检查更新</span></label>' +
+              '</div>' +
             '</section>' +
             // ---- 翻译 ----
             '<section class="st-tab-page" data-tab="translate" role="tabpanel">' +
@@ -548,10 +553,13 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
               '</div>' +
               '<div class="st-field">' +
                 '<span class="st-label">检查更新</span>' +
-                '<span class="st-desc">向服务器查询是否有新版本，有新版本时会提示下载并安装。</span>' +
+                '<span class="st-desc">向服务器查询是否有新版本。查到新版本后这里会多出一个安装按钮，点了才会下载安装并重启。</span>' +
                 '<div class="st-update-row">' +
                   '<button type="button" class="st-update-btn" id="stCheckUpdate">' + icon('refresh-cw') + '<span>检查更新</span></button>' +
+                  '<button type="button" class="st-update-btn st-update-install" id="stInstallUpdate" hidden>' + icon('download') + '<span>下载并安装</span></button>' +
                 '</div>' +
+                '<span class="st-update-note" id="stUpdateNote" hidden></span>' +
+                '<pre class="st-update-body" id="stUpdateBody" hidden></pre>' +
               '</div>' +
             '</section>' +
           '</div>' +
@@ -607,6 +615,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     });
 
     var $stCheckUpdate = $stOverlay.querySelector('#stCheckUpdate');
+    var $stInstallUpdate = $stOverlay.querySelector('#stInstallUpdate');
     if ($stCheckUpdate) {
       if (updaterApi) {
         $stCheckUpdate.addEventListener('click', function () { checkForUpdate(true); });
@@ -615,6 +624,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         $stCheckUpdate.title = '当前环境不支持自动更新（仅桌面应用可用）';
       }
     }
+    // 安装是独立的一次点击：静默检查只负责把这个按钮显示出来
+    if ($stInstallUpdate) $stInstallUpdate.addEventListener('click', installPendingUpdate);
 
     // 引导 tab：快捷键一览里的“呼出浮窗”键显示用户当前配置值
     var $stToggleKey = $stOverlay.querySelector('#stGuideToggleKey');
@@ -675,6 +686,15 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         state.settings.completion.segMode = $stCompletionSegWord.checked ? 'word' : 'clause';
         scheduleSave();
         showToast($stCompletionSegWord.checked ? '已开启词级切分（无标点长句也能句中接续）' : '已切回按标点切分');
+      });
+    }
+    // 通用 tab：启动时自动检查更新（只查不装，见 core.js defaultUpdateSettings）
+    var $stUpdateAutoCheck = $stOverlay.querySelector('#stUpdateAutoCheck');
+    if ($stUpdateAutoCheck) {
+      $stUpdateAutoCheck.addEventListener('change', function () {
+        state.settings.update.autoCheck = $stUpdateAutoCheck.checked;
+        scheduleSave();
+        showToast($stUpdateAutoCheck.checked ? '已开启启动时自动检查更新' : '已关闭自动检查更新（仍可在「关于」里手动检查）');
       });
     }
 
@@ -904,6 +924,9 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if ($stCompletionEnabled) $stCompletionEnabled.checked = !!state.settings.completion.enabled;
     var $stCompletionSegWord = $stOverlay.querySelector('#stCompletionSegWord');
     if ($stCompletionSegWord) $stCompletionSegWord.checked = state.settings.completion.segMode === 'word';
+    var $stUpdateAutoCheck = $stOverlay.querySelector('#stUpdateAutoCheck');
+    if ($stUpdateAutoCheck) $stUpdateAutoCheck.checked = !!(state.settings.update && state.settings.update.autoCheck);
+    renderUpdateState();
     renderTranslateSettings();
     // 若当前正停在某个管理 tab 且面板可见，远端同步后重新 mount 以反映最新数据。
     // 此路径只在非编辑态触发（编辑中 isEditingLocally 会暂缓远端 state 应用），
@@ -1258,26 +1281,114 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
    * 12. 检查更新
    * ============================================================ */
   var checkingUpdate = false;
+  var installingUpdate = false;
+  var pendingUpdate = null;      // check() 查到的新版本；安装前一直存着，等用户点按钮
+
+  /* 检查更新。
+   * manual=true 是用户主动点「检查更新」，会把"已是最新/检查失败"也 toast 出来；
+   * manual=false 是启动后的静默检查，只在真有新版本时说一声。
+   *
+   * 两条路径都不再自动安装，只把 pendingUpdate 记下来交给 renderUpdateState()
+   * 显示：侧栏设置按钮小红点 + 关于页出现「下载并安装」按钮。安装动作统一走
+   * installPendingUpdate()，必须由用户点击触发。 */
   function checkForUpdate(manual) {
     if (!updaterApi) { if (manual) showToast('当前环境不支持自动更新'); return; }
-    if (checkingUpdate) return;
+    if (checkingUpdate || installingUpdate) return;
     checkingUpdate = true;
+    if (manual) renderUpdateState();   // 让按钮立刻进入「检查中…」
     updaterApi.check().then(function (update) {
       checkingUpdate = false;
-      if (!update) { if (manual) showToast('已是最新版本'); return; }
-      var ok = window.confirm('发现新版本 ' + update.version + '，是否立即下载并安装？\n\n' + (update.body || ''));
-      if (!ok) return;
-      showToast('正在下载更新…');
-      update.downloadAndInstall().then(function () {
-        showToast('更新完成，即将重启');
-        if (processApi) processApi.relaunch();
-      }).catch(function (err) {
-        showToast('更新安装失败：' + (err && err.message ? err.message : err), true);
-      });
+      if (!update) {
+        // 服务端已无新版本（例如刚装完这一版）：清掉可能残留的旧提示
+        releasePendingUpdate();
+        if (manual) showToast('已是最新版本');
+        renderUpdateState();
+        return;
+      }
+      // 同一个版本重复查到就不必换对象，省一次 Resource 释放
+      if (!pendingUpdate || pendingUpdate.version !== update.version) {
+        releasePendingUpdate();
+        pendingUpdate = update;
+      }
+      renderUpdateState();
+      // 静默检查也说一声，否则小红点在侧栏容易被忽略；但只是自动消失的 toast，
+      // 不打断手上的输入，也不会代替用户做安装决定。
+      showToast('发现新版本 ' + update.version + '，可在「设置 → 关于」里安装');
     }).catch(function (err) {
       checkingUpdate = false;
+      renderUpdateState();
       if (manual) showToast('检查更新失败：' + (err && err.message ? err.message : err), true);
     });
+  }
+
+  // Update 是 Tauri 侧的 Resource，换掉/丢弃前显式 close()，避免句柄堆积。
+  // 老版本 API 可能没有 close，故用 typeof 守卫；失败不影响主流程。
+  function releasePendingUpdate() {
+    if (pendingUpdate && typeof pendingUpdate.close === 'function') {
+      try { pendingUpdate.close(); } catch (e) { /* 释放失败无需打扰用户 */ }
+    }
+    pendingUpdate = null;
+  }
+
+  function installPendingUpdate() {
+    if (!pendingUpdate || installingUpdate) return;
+    installingUpdate = true;
+    renderUpdateState();
+    showToast('正在下载更新…');
+    pendingUpdate.downloadAndInstall().then(function () {
+      showToast('更新完成，即将重启');
+      if (processApi) processApi.relaunch();
+    }).catch(function (err) {
+      installingUpdate = false;
+      renderUpdateState();
+      showToast('更新安装失败：' + (err && err.message ? err.message : err), true);
+    });
+  }
+
+  /* 把「有没有待安装的新版本」这件事画到界面上：
+   *   - 侧栏「设置」按钮 + 关于 tab 的导航项加小红点（面板关着时也能看见）
+   *   - 关于页显示版本号、更新说明，以及「下载并安装」按钮
+   * 面板是懒建的，$stOverlay 还没建出来时只更新侧栏红点。 */
+  function renderUpdateState() {
+    var has = !!pendingUpdate;
+    var $btnEditorSettings = document.getElementById('btnEditorSettings');
+    if ($btnEditorSettings) $btnEditorSettings.classList.toggle('has-update', has);
+    if (!$stOverlay) return;
+
+    var $navAbout = $stOverlay.querySelector('.st-nav-item[data-tab="about"]');
+    if ($navAbout) $navAbout.classList.toggle('has-update', has);
+
+    var $check = $stOverlay.querySelector('#stCheckUpdate');
+    if ($check) {
+      $check.disabled = !updaterApi || checkingUpdate || installingUpdate;
+      var checkLabel = $check.querySelector('span');
+      if (checkLabel) checkLabel.textContent = checkingUpdate ? '检查中…' : '检查更新';
+    }
+
+    var $install = $stOverlay.querySelector('#stInstallUpdate');
+    if ($install) {
+      $install.hidden = !has;
+      $install.disabled = installingUpdate;
+      var installLabel = $install.querySelector('span');
+      if (installLabel) {
+        installLabel.textContent = installingUpdate
+          ? '正在下载…'
+          : '下载并安装 v' + (pendingUpdate ? pendingUpdate.version : '');
+      }
+    }
+
+    var $note = $stOverlay.querySelector('#stUpdateNote');
+    if ($note) {
+      $note.hidden = !has;
+      if (has) $note.textContent = '发现新版本 v' + pendingUpdate.version + '，安装完成后应用会自动重启（正文内容已保存，不会丢失）。';
+    }
+
+    var $body = $stOverlay.querySelector('#stUpdateBody');
+    if ($body) {
+      var notes = has && pendingUpdate.body ? String(pendingUpdate.body).trim() : '';
+      $body.hidden = !notes;
+      $body.textContent = notes;
+    }
   }
 
   /* ============================================================
@@ -1348,7 +1459,12 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     Promise.resolve(restoreState()).then(function () {
       maybeStartTourOnBoot();
     });
-    setTimeout(function () { checkForUpdate(false); }, 3000);
+    // 开关读在定时器回调里而不是这里：restoreState 是异步的，此刻 state.settings
+    // 还可能是默认值，3 秒后才是用户真实的存档设置。
+    setTimeout(function () {
+      if (state.settings.update && state.settings.update.autoCheck === false) return;
+      checkForUpdate(false);
+    }, 3000);
   }
 
   export {
