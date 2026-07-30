@@ -583,7 +583,14 @@ export function formatAgo(ms) {
 export function formatTokens(n) {
   if (n == null) return '—';
   if (n < 1000) return String(n);
-  if (n < 1000000) return `${Math.round(n / 1000)}k`;
+  if (n < 1000000) {
+    const k = Math.round(n / 1000);
+    // 999999 会被四舍五入成 1000，显示"1000k"就像是坏了（该进位却没换单位）。
+    // 这是阈值用 < 1000000 判断、但取整发生在判断之后带来的必然缝隙：
+    // 判断看的是原值，取整可能把它推过单位边界。所以进位后再检查一次。
+    if (k >= 1000) return `${(k / 1000).toFixed(1)}M`;
+    return `${k}k`;
+  }
   return `${(n / 1000000).toFixed(1)}M`;
 }
 
