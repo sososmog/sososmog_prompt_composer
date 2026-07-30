@@ -216,3 +216,384 @@ export function validateReport(report) {
   }
   return { ok: true, report: /** @type {FleetReport} */ (report) };
 }
+
+/* ============================================================
+ * 状态推断
+ * ------------------------------------------------------------
+ * 算法见 docs/agent-fleet.md §3.4。会话与 subagent 共用同一段
+ * "transcript 尾部判定"核心逻辑（statusCodeFromDigest），区别只在
+ * 外层短路：会话多了 liveness / job / 空 transcript 三个前置分支，
+ * subagent 没有这些包装，直接把自己的字段喂给核心判定。
+ * ============================================================ */
+
+/**
+ * 把状态码展开成完整的 {@link AgentStatus}。
+ * 单拎出来是因为 deriveStatus / deriveSubagentStatus 都要在拿到 code
+ * 之后做这一步，本身没有分支，不值得重复写两遍。
+ * @param {StatusCode} code
+ * @returns {AgentStatus}
+ */
+function buildStatus(code) {
+  const def = STATUS_DEFS[code];
+  return { code, label: def.label, glyph: def.glyph, tone: def.tone, animated: def.animated };
+}
+
+/**
+ * job.state → 状态码。job 是官方/采集层已经算好的权威口径，存在就不用
+ * 再看 transcript 猜——阶段 4 的后台会话不一定还在持续写主 transcript。
+ * @param {string|null|undefined} state
+ * @returns {StatusCode}
+ */
+function mapJobState(state) {
+  switch (state) {
+    case 'working':
+      return 'working';
+    case 'blocked':
+      return 'needs-input';
+    case 'done':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'stopped':
+      return 'stopped';
+    default:
+      // 覆盖"未知取值"和"字段缺失（null）"两种情况：宁可显示未知，不猜。
+      return 'unknown';
+  }
+}
+
+/**
+ * 状态判定的核心：吃一份"transcript 形态"的摘要，判它是
+ * working / needs-input / idle / failed / unknown 里的哪个。
+ *
+ * 会话与 subagent 共用这段逻辑——SubagentDigest 是 TranscriptDigest 的
+ * 同构子集，缺 hasApiError 字段，所以 `d.hasApiError` 对 subagent 恒为
+ * undefined，对应分支自然不会触发，不需要为 subagent 单独写一份判定。
+ *
+ * @param {{lastRole: ('user'|'assistant'|null|undefined), hasApiError?: boolean,
+ *          mtimeMs?: (number|null), lastMsgTsMs?: (number|null), lastStopReason?: (string|null)}} d
+ * @param {number} scannedAt
+ * @param {number} idleMs
+ * @param {number|null|undefined} fallbackTs   age 基准的最后一道退路
+ *   （会话传 session.startedAt；subagent 没有这一层退路，传 null）
+ * @returns {StatusCode}
+ */
+function statusCodeFromDigest(d, scannedAt, idleMs, fallbackTs) {
+  if (d.lastRole == null) return 'unknown'; // 尾部窗口一条消息都没解析出来
+
+  // ⚠️ 必须排在 age / stopReason 判断之前：API 出错的行 stop_reason 实测是
+  // stop_sequence 或 refusal，光看 stopReason 会把出错误判成"正常收尾等你回话"。
+  if (d.hasApiError) return 'failed';
+
+  const base = d.mtimeMs ?? d.lastMsgTsMs ?? fallbackTs;
+  if (base == null) return 'unknown'; // 三级退路全落空（只有 subagent 缺 startedAt 会走到这里）
+
+  // 负数原样参与比较，不做 clamp——负数必然小于 idleMs，不会被误判成 idle。
+  // （age 为负发生在 Rust 时钟 vs JS 时钟有微小偏差时，这里只是不让它出错，
+  // 真正"显示成什么样"是 formatAgo 的职责。）
+  const age = scannedAt - base;
+  if (age > idleMs) return 'idle';
+
+  if (d.lastRole === 'assistant') {
+    // tool_use：模型还要接着调用工具；stopReason 为 null：消息还在途、没收完。
+    // 这两种都算"在动"。其余（end_turn / stop_sequence / refusal）才是真的在等你说话。
+    return d.lastStopReason === 'tool_use' || d.lastStopReason == null ? 'working' : 'needs-input';
+  }
+  if (d.lastRole === 'user') return 'working'; // tool_result 落地或刚提问，模型这一刻在动
+
+  return 'idle';
+}
+
+/**
+ * 单会话状态推断。见 docs/agent-fleet.md §3.4。
+ * @param {AgentSession} session
+ * @param {number} scannedAt
+ * @param {{idleMs?: number}} [opts]
+ * @returns {AgentStatus}
+ */
+export function deriveStatus(session, scannedAt, opts = {}) {
+  const idleMs = opts.idleMs ?? IDLE_MS;
+
+  // 防御性分支：pid 复用的会话正常不该进列表（采集层已经在 liveness 上打了标）。
+  // 万一漏网也不能冒充正常状态。
+  if (session.liveness === 'pid-reused') return buildStatus('unknown');
+
+  // job 是权威来源，存在就不看 transcript——见 mapJobState 注释。
+  if (session.job) return buildStatus(mapJobState(session.job.state));
+
+  // 已启动但一句话没说，是实测存在的真实状态，不是错误。
+  if (!session.transcript) return buildStatus('fresh');
+
+  return buildStatus(statusCodeFromDigest(session.transcript, scannedAt, idleMs, session.startedAt));
+}
+
+/**
+ * subagent 状态推断，核心判据与 deriveStatus 相同，但没有
+ * liveness / job / transcript 三层包装——字段直接在 sub 上。
+ * @param {SubagentDigest} sub
+ * @param {number} scannedAt
+ * @param {{idleMs?: number}} [opts]
+ * @returns {AgentStatus}
+ */
+export function deriveSubagentStatus(sub, scannedAt, opts = {}) {
+  const idleMs = opts.idleMs ?? IDLE_MS;
+  return buildStatus(statusCodeFromDigest(sub, scannedAt, idleMs, null));
+}
+
+/* ============================================================
+ * subagent 树重建
+ * ============================================================ */
+
+/**
+ * @typedef {SubagentDigest & { depth: number, children: SubagentTreeNode[] }} SubagentTreeNode
+ */
+
+/** @param {{agentId: string}} a @param {{agentId: string}} b */
+function compareId(a, b) {
+  if (a.agentId < b.agentId) return -1;
+  if (a.agentId > b.agentId) return 1;
+  return 0;
+}
+
+/**
+ * 兄弟节点排序：最近活动的排前面，一眼看出哪个 subagent 还在动。
+ * mtimeMs 相同（或都缺失）时按 agentId 升序，保证同一份数据每次渲染
+ * 顺序一致，不会因为排序不稳定在轮询刷新时跳位。
+ * @param {SubagentTreeNode[]} list
+ */
+function sortSiblingsInPlace(list) {
+  list.sort((a, b) => {
+    if (a.mtimeMs == null && b.mtimeMs == null) return compareId(a, b);
+    if (a.mtimeMs == null) return 1; // null 排最后
+    if (b.mtimeMs == null) return -1;
+    if (a.mtimeMs !== b.mtimeMs) return b.mtimeMs - a.mtimeMs; // 降序
+    return compareId(a, b);
+  });
+  for (const node of list) sortSiblingsInPlace(node.children);
+}
+
+/**
+ * 把扁平的 subagent 列表重建成树。
+ *
+ * 三条防御性处理，全部对应"正常不该出现，但要保证不出事"的情况：
+ * - 重复 agentId：保留第一个出现的，后面的整条丢弃（而不是覆盖）。
+ * - 父 id 指向不存在的 agent：这个 agent 不该从列表里消失，归入 orphans。
+ * - 互相指父成环（A→B→A）：用三色染色法一次遍历判定，环内节点全部归入
+ *   orphans；挂在"环内节点"下面的节点也没有真正的根可挂，同样归入
+ *   orphans（宁可散落展示，也不要静默丢弃）。
+ *
+ * depth 完全由树结构算出，不读 spawnDepth——spawnDepth 可能缺失，而且
+ * 一旦父子关系被上面任何一条防御性规则改写，spawnDepth 记的原始深度
+ * 就不准了。
+ *
+ * @param {SubagentDigest[]} subagents
+ * @returns {{ roots: SubagentTreeNode[], orphans: SubagentTreeNode[] }}
+ */
+export function buildSubagentTree(subagents) {
+  /** @type {Map<string, SubagentTreeNode>} */
+  const byId = new Map();
+  for (const sub of subagents) {
+    if (!byId.has(sub.agentId)) {
+      byId.set(sub.agentId, { ...sub, depth: 0, children: [] });
+    }
+  }
+
+  // 环检测：经典三色染色法，一次遍历。每个节点最多被推入调用栈一次
+  // （一旦命中 'done' 就立即停止），所以就算输入本身构造成一条长环，
+  // 也是 O(n) 收敛，不会挂死。
+  const inCycle = new Set();
+  /** @type {Map<string, 'visiting'|'done'>} */
+  const colorOf = new Map();
+  for (const startId of byId.keys()) {
+    if (colorOf.get(startId)) continue;
+    const stack = [];
+    let cur = startId;
+    while (cur != null && byId.has(cur) && colorOf.get(cur) !== 'done') {
+      if (colorOf.get(cur) === 'visiting') {
+        const idx = stack.indexOf(cur);
+        for (let i = idx; i < stack.length; i += 1) inCycle.add(stack[i]);
+        break;
+      }
+      colorOf.set(cur, 'visiting');
+      stack.push(cur);
+      cur = byId.get(cur).parentAgentId;
+    }
+    for (const id of stack) colorOf.set(id, 'done');
+  }
+
+  const roots = [];
+  const orphans = [];
+  for (const [id, node] of byId) {
+    if (inCycle.has(id)) {
+      orphans.push(node);
+      continue;
+    }
+    const parentId = node.parentAgentId;
+    if (parentId == null) {
+      roots.push(node);
+    } else if (byId.has(parentId) && !inCycle.has(parentId)) {
+      byId.get(parentId).children.push(node);
+    } else {
+      // 父不存在，或父本身在环里（因而已经被摘出正常树）——都没有真正
+      // 的根可挂，归入 orphans 而不是丢弃。
+      orphans.push(node);
+    }
+  }
+
+  const assignDepth = (node, depth) => {
+    node.depth = depth;
+    for (const child of node.children) assignDepth(child, depth + 1);
+  };
+  for (const node of roots) assignDepth(node, 1);
+  for (const node of orphans) assignDepth(node, 1);
+
+  sortSiblingsInPlace(roots);
+  sortSiblingsInPlace(orphans);
+
+  return { roots, orphans };
+}
+
+/* ============================================================
+ * 分组 / 归约 / 角标
+ * ============================================================ */
+
+/**
+ * 一个会话的"最后活动时间"。UI 层显示"多久前"要用同一个口径，
+ * 所以单独 export 出来，不让两处各写一份、慢慢长歪。
+ * @param {AgentSession} session
+ * @returns {number}
+ */
+export function lastActivityMs(session) {
+  const t = session.transcript;
+  return t?.mtimeMs ?? t?.lastMsgTsMs ?? session.startedAt;
+}
+
+/** @param {AgentSession} a @param {AgentSession} b */
+function compareByActivityThenName(a, b) {
+  const diff = lastActivityMs(b) - lastActivityMs(a); // 降序：最近活动的在前
+  if (diff !== 0) return diff;
+  if (a.name < b.name) return -1;
+  if (a.name > b.name) return 1;
+  return 0;
+}
+
+/**
+ * @typedef {Object} SessionGroup
+ * @property {StatusCode} key
+ * @property {string} label
+ * @property {AgentSession[]} items
+ */
+
+/**
+ * 按状态分组，组的顺序固定为 GROUP_ORDER（needs-input 最前）。
+ * 先过滤掉非 alive 的会话——pid-reused 是采集层的防御性标记，
+ * 不该出现在任何面向用户的列表里。
+ * @param {AgentSession[]} sessions
+ * @param {number} scannedAt
+ * @param {{idleMs?: number}} [opts]
+ * @returns {SessionGroup[]}
+ */
+export function groupSessions(sessions, scannedAt, opts = {}) {
+  const idleMs = opts.idleMs ?? IDLE_MS;
+  /** @type {Map<StatusCode, AgentSession[]>} */
+  const buckets = new Map(GROUP_ORDER.map((code) => [code, []]));
+
+  for (const session of sessions) {
+    if (session.liveness !== 'alive') continue;
+    const { code } = deriveStatus(session, scannedAt, { idleMs });
+    buckets.get(code).push(session);
+  }
+
+  const groups = [];
+  for (const code of GROUP_ORDER) {
+    const items = buckets.get(code);
+    if (items.length === 0) continue; // 空组不出现在结果里
+    items.sort(compareByActivityThenName);
+    groups.push({ key: code, label: STATUS_DEFS[code].label, items });
+  }
+  return groups;
+}
+
+/**
+ * 需要你回话的会话数，给 tab 角标用。
+ * @param {AgentSession[]} sessions
+ * @param {number} scannedAt
+ * @param {{idleMs?: number}} [opts]
+ * @returns {number}
+ */
+export function countNeedsInput(sessions, scannedAt, opts = {}) {
+  const idleMs = opts.idleMs ?? IDLE_MS;
+  let count = 0;
+  for (const session of sessions) {
+    if (session.liveness !== 'alive') continue;
+    if (deriveStatus(session, scannedAt, { idleMs }).code === 'needs-input') count += 1;
+  }
+  return count;
+}
+
+/**
+ * 把所有会话的状态归约成一个，给悬浮小球的状态点用。
+ * 空列表（没有任何 alive 会话）视为"没什么好看的"，落在 idle。
+ * @param {AgentSession[]} sessions
+ * @param {number} scannedAt
+ * @param {{idleMs?: number}} [opts]
+ * @returns {{ code: StatusCode, tone: StatusTone }}
+ */
+export function reduceFleetTone(sessions, scannedAt, opts = {}) {
+  const idleMs = opts.idleMs ?? IDLE_MS;
+  let best = null;
+  for (const session of sessions) {
+    if (session.liveness !== 'alive') continue;
+    const status = deriveStatus(session, scannedAt, { idleMs });
+    if (!best || TONE_PRIORITY[status.code] > TONE_PRIORITY[best.code]) best = status;
+  }
+  if (!best) return { code: 'idle', tone: STATUS_DEFS.idle.tone };
+  return { code: best.code, tone: best.tone };
+}
+
+/* ============================================================
+ * 格式化
+ * ------------------------------------------------------------
+ * 纯字符串拼接，唯一的坑是各个阈值都是"左闭右开"（用 < 不用 <=），
+ * 单测里把每个边界值都钉住。
+ * ============================================================ */
+
+const MS_PER_SECOND = 1000;
+const MS_PER_MINUTE = 60 * MS_PER_SECOND;
+const MS_PER_HOUR = 60 * MS_PER_MINUTE;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+/**
+ * @param {number} ms   已经过去的毫秒数（调用方自己算 scannedAt - mtimeMs）
+ * @returns {string}
+ */
+export function formatAgo(ms) {
+  const v = ms < 0 ? 0 : ms; // 负数（时钟误差）当刚刚，不显示"-3秒前"这种反直觉的话
+  if (v < 5000) return '刚刚';
+  if (v < MS_PER_MINUTE) return `${Math.floor(v / MS_PER_SECOND)}秒前`;
+  if (v < MS_PER_HOUR) return `${Math.floor(v / MS_PER_MINUTE)}分钟前`;
+  if (v < MS_PER_DAY) return `${Math.floor(v / MS_PER_HOUR)}小时前`;
+  return `${Math.floor(v / MS_PER_DAY)}天前`;
+}
+
+/**
+ * @param {number|null|undefined} n
+ * @returns {string}
+ */
+export function formatTokens(n) {
+  if (n == null) return '—';
+  if (n < 1000) return String(n);
+  if (n < 1000000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1000000).toFixed(1)}M`;
+}
+
+/**
+ * @param {number|null|undefined} pct   已归一化到 0–100
+ * @returns {string}
+ */
+export function formatCpu(pct) {
+  if (pct == null) return '—';
+  if (pct === 0) return '0%';
+  if (pct < 1) return '<1%'; // 低占用直接显示 0% 会丢信息（"真的没在跑" vs "只是很轻"）
+  return `${Math.round(pct)}%`;
+}
