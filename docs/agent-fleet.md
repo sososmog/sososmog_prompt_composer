@@ -593,7 +593,9 @@ Rust 侧（A9–A10）与 UI 侧（C9–C10）可并行 ⇄，但都依赖阶段
 | D1 ⇄ | `settings.fleet = { enabled, showCpu }`，`core.js` 的 `normalizeState` 校验；主窗口设置面板加开关 | `normalizeState` 单测；关掉后 tab 隐藏、轮询停 |
 | D2 ⇄ | 主题深浅色适配核对 | 两套主题各看一眼（照 PR #32 的做法） |
 | D3 ⇄ | 文案/空态/warning 展示打磨；README 补一节 | — |
-| D4 | 全量回归 | `npm run lint`（0/0）、`npm test`、`npm run smoke`、`cargo test`、真机清单 |
+| D4 | 全量回归 | `npm run lint`（0/0）、`npm test`、`npm run smoke`、`cargo test`、`cargo clippy --all-targets`、真机清单 |
+
+**D4 必查项**：删掉 `src-tauri/src/fleet/types.rs` 顶部的 `#![allow(dead_code)]`，重跑 clippy 确认 0 新增警告。那行是 P4"契约先于实现"的临时豁免（当时 13 条 dead_code 来自尚未被 A 轨消费的类型）。若届时仍有字段没人读，**说明契约定多了，该删字段而不是留豁免**。
 
 ---
 

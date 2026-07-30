@@ -1,3 +1,7 @@
+// Agent Fleet：扫描本机在跑的 Claude Code 会话，供浮窗的 Agent tab 展示。
+// 只读本地文件 + sysinfo，不改用户任何配置。详见 fleet/mod.rs 与 docs/agent-fleet.md。
+mod fleet;
+
 // ============================================================
 // Windows 专属：粘贴到外部窗口的底层实现。
 // 思路：用一条后台线程持续记录“最近一个不属于本进程的前台窗口”，
@@ -368,10 +372,14 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.invoke_handler(tauri::generate_handler![
         paste_to_active_window,
-        set_toggle_shortcut
+        set_toggle_shortcut,
+        fleet::list_agent_sessions
     ]);
     #[cfg(not(desktop))]
-    let builder = builder.invoke_handler(tauri::generate_handler![paste_to_active_window]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        paste_to_active_window,
+        fleet::list_agent_sessions
+    ]);
 
     builder
         .run(tauri::generate_context!())
