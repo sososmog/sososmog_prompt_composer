@@ -220,8 +220,12 @@ pub struct TranscriptDigest {
 
     // ---- 状态判定用 ----
     pub last_role: Option<Role>,
-    /// `tool_use` | `end_turn` | `stop_sequence` | …
+    /// 实测见过的值：`tool_use`（最常见）、`end_turn`、`stop_sequence`、`refusal`。
     /// null 表示消息还没收完（在途），前端据此判 working。
+    ///
+    /// ⚠️ **不能只靠这个字段判"在等用户"**：API 出错的行 `stop_reason` 实测是
+    /// `stop_sequence` 或 `refusal`，光看它会误判成 end_turn 一类的正常收尾。
+    /// 所以前端的判定顺序必须是先看 `has_api_error`，再看 stop_reason。
     pub last_stop_reason: Option<String>,
     pub last_tail_kind: Option<TailKind>,
     /// 尾部 assistant 的 tool_use 名字，最多 4 个
@@ -231,8 +235,16 @@ pub struct TranscriptDigest {
     /// 本机是 UTC+8，直接当本地时间比会差 8 小时。
     pub last_msg_ts_ms: Option<i64>,
 
+    /// 判据是顶层 `isApiErrorMessage === true`。这是**主信号**，
+    /// 下面两个字段只是补充说明，可能都缺。
     pub has_api_error: bool,
+    /// HTTP 状态码。源数据里**是数字**（实测 `"apiErrorStatus": 403`），
+    /// 而且可能整个字段缺失（实测 refusal 那类错误就没有）。
+    /// 采集侧统一归一化成字符串，免得前端要处理 number | string | undefined 三态。
     pub api_error_status: Option<String>,
+    /// 错误码，来自顶层 `error` 字段。实测值 `oauth_org_not_allowed`、`invalid_request`。
+    /// 比状态码更有展示价值（能直接告诉用户是权限问题还是请求被拒）。
+    pub api_error_code: Option<String>,
 
     /// 官方口径的 context 占用：`input + cache_creation + cache_read`
     /// （只算 input 侧、不含 output，与 statusLine 的 `used_percentage` 同公式）。
@@ -446,6 +458,7 @@ mod tests {
                     last_msg_ts_ms: Some(1_785_416_159_000),
                     has_api_error: false,
                     api_error_status: None,
+                    api_error_code: None,
                     context_tokens: Some(68_000),
                     parse_errors: 0,
                 }),
@@ -529,6 +542,7 @@ mod tests {
             "lastMsgTsMs",
             "hasApiError",
             "apiErrorStatus",
+            "apiErrorCode",
             "contextTokens",
             "parseErrors",
         ] {

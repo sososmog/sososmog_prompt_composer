@@ -67,12 +67,17 @@
  * @property {string|null} model
  * @property {string|null} effort
  * @property {'user'|'assistant'|null} lastRole
- * @property {string|null} lastStopReason    null = 消息还在途 → 判 working
+ * @property {string|null} lastStopReason    实测值 tool_use / end_turn / stop_sequence / refusal；
+ *                                           null = 消息还在途 → 判 working。
+ *                                           **不能只靠它判"在等用户"**：API 出错的行
+ *                                           stop_reason 是 stop_sequence 或 refusal，
+ *                                           必须先看 hasApiError。
  * @property {'tool_use'|'tool_result'|'text'|'thinking'|null} lastTailKind
  * @property {string[]} lastToolNames
  * @property {number|null} lastMsgTsMs
- * @property {boolean} hasApiError
- * @property {string|null} apiErrorStatus
+ * @property {boolean} hasApiError           主信号：顶层 isApiErrorMessage === true
+ * @property {string|null} apiErrorStatus    源数据里是数字且可能缺失，采集侧已归一化成字符串
+ * @property {string|null} apiErrorCode      如 oauth_org_not_allowed / invalid_request
  * @property {number|null} contextTokens     官方口径：input + cache_creation + cache_read
  * @property {number} parseErrors            >0 = 格式可能漂移了
  */
