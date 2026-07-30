@@ -14,6 +14,7 @@
     "fonts": "node scripts/fetch-fonts.mjs",
     "smoke": "node src/__tests__/frontend.smoke.mjs",
     "smoke:csp": "node src/__tests__/frontend.smoke.mjs --csp",
+    "smoke:fleet": "node src/__tests__/fleet.smoke.mjs",
     "version:check": "node scripts/sync-version.mjs",
     "version:set": "node scripts/sync-version.mjs --set"
   },

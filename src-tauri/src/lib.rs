@@ -308,7 +308,7 @@ pub fn run() {
     // 全局快捷键仅在桌面端可用，移动端跳过相关插件与注册逻辑
     #[cfg(desktop)]
     let builder = {
-        use tauri::Manager;
+        use tauri::{Emitter, Manager};
         use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
         // 默认 Ctrl+Alt+C：呼出/隐藏浮窗。用户可在设置面板里改成任意组合，
@@ -331,6 +331,15 @@ pub fn run() {
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }
+                                // 广播新的可见性。此前只有浮窗自己的关闭键会广播
+                                // （float.js），热键这条路径一直是静默的——主窗口的
+                                // 浮窗按钮激活态要等下次获得焦点才更新，而 Agent tab
+                                // 的轮询更是无从知道自己已经被隐藏，会继续白跑。
+                                // 一个监控工具在看不见的时候还烧 CPU 属实讽刺。
+                                let _ = app.emit(
+                                    "composer-float-visibility",
+                                    serde_json::json!({ "visible": !is_visible }),
+                                );
                             }
                         }
                     })
