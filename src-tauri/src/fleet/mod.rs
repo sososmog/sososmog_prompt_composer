@@ -25,6 +25,7 @@
 //! 采集逻辑由 A 轨（A2–A7）填入。
 
 pub mod config;
+pub mod proc;
 pub mod roster;
 pub mod types;
 
