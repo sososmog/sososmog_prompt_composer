@@ -6,13 +6,32 @@
 - 定位：**观察者**（observe, never control）。只读展示，不 spawn、不终止、不拦权限。
 - 铁律：**在 `~/.claude` 里零脚印，只读不写。**
 
+## 进度
+
+| 阶段 | 状态 |
+|---|---|
+| P1–P5 准备 | ✅ 完成 |
+| 阶段 0 轨 A（Rust 采集层 A1–A8） | ✅ 完成，含真机验证 |
+| 阶段 0 轨 B（JS 纯函数 B1–B5） | ✅ 完成 |
+| 阶段 1 轨 C（浮窗 UI） | ⬜ 未开始 |
+| 阶段 2 subagent 树 | ⬜ 未开始 |
+| 阶段 3 收尾 | ⬜ 未开始 |
+| 阶段 4 可选增强 | ⬜ 未开始 |
+
+当前规模：Rust 75 个测试 + 1 个默认跳过的真机诊断测试；前端 613 个测试；
+clippy 0 新增警告；lint 0/0。
+
+**真机验证结果**（A8，`cargo test --test fleet_real_machine -- --ignored --nocapture`）：
+本机 6 个会话全部识别，4 个读到摘要（分支/模型/档位/尾部状态全对、坏行 0）、
+2 个无 transcript 正确落到「已启动 · 未开始」、存活校验 6/6 通过。
+
 ---
 
 ## 0. 已定的四个决策
 
 | # | 决策 | 取值 | 理由 |
 |---|---|---|---|
-| 1 | CPU 口径 | `cpu_usage() / cpus().len()`，显示 0–100% | 与任务管理器一致；sysinfo 官方文档明确这是归一化到 0-100 的做法 |
+| 1 | CPU 口径 | 归一化到 0–100%（除以核心数） | 与任务管理器一致。⚠️ **算法不是 `cpu_usage() / ncpu`** —— P3 实测那个 API 在 Windows 上是坏的，改成自己用 `accumulated_cpu_time()` 差值算，见 §1.3 与 §5 轨A |
 | 2 | idle 阈值 | 5 分钟无写入 | 常量 `IDLE_MS`，集中在 fleet.js 一处 |
 | 3 | 默认 tab | 记住上次停留 | localStorage `composer-fw-tab`，与 `composer-fw-autopaste` 同套路 |
 | 4 | subagent 树 | 做，独立成阶段 2 | 真正的"多 agent"；调研的 13 个项目无人做过 |
@@ -57,8 +76,12 @@
 | `claude agents --json` 实测单次 **1.1–1.9 秒**，且承诺的 `status`/`waitingFor` 在 VS Code 宿主会话里**全部缺失** | 不能用来轮询 | 不用（连兜底都先不做） |
 | jsonl 里**没有** `costUSD` 字段 | 算不出成本 | 不显示成本（见 1.4） |
 | `message.model` 是 `claude-opus-5`，但用户设的是 `opus[1m]` | 区分不出 200k / 1M 上下文窗口 | **只显示绝对 token，不显示百分比** |
-| Tauri v2 **非 async 命令跑在主线程** | 文件 I/O + sysinfo 会卡 UI | 命令必须 `async` + `spawn_blocking` |
+| Tauri v2 **非 async 命令跑在主线程** | 文件 I/O + sysinfo 会卡 UI | 命令必须 `async` + `spawn_blocking`；且托管 `Arc<FleetState>` 而非 `FleetState`（`State<'_, T>` 是借用的，move 不进 `spawn_blocking`） |
 | 社区教程里的 `stop_hook_active` 字段官方已删除 | 照抄会失效 | 我们不用 hooks，无影响 |
+| **`effort` 只在 assistant 行有**（`gitBranch` 在 user 行也有） | 尾部恰好是 `tool_result` 时 effort 变 null，同一会话的思考档位会随轮询时刻闪 | 和 `model`/`context_tokens` 一样回溯到最近的 assistant 行 |
+| Agent 工具的 `isolation: "worktree"` **从 main 建 worktree，不是从当前分支** | 三个 subagent 全都开局就没有本分支的契约与夹具 | 派活时预先说明要先 `git merge --ff-only <分支>`（三个 agent 各自自行发现并修正了，但白花了时间） |
+| `eslint .` 会扫 `.claude/worktrees/` 里的仓库副本 | 三个 worktree 并存时报 2109 个假错误，看着像自己写崩了 | 已加进 `eslint.config.js` 的 ignores |
+| 契约类型定完但编排层还没接时，**每个新采集模块都会各自触发一串 dead_code** | 四个文件各加了一次模块级豁免，容易变成长期存在 | 编排层接通后一次性删净；只留挂在具体字段/方法上、标注了阶段的精准豁免 |
 
 ### 1.4 明确放弃的功能
 
@@ -68,6 +91,10 @@
 - 成本显示 —— 放弃。
 - 额度显示 —— 放弃。
 - context 占用 —— **不受影响**。官方 `used_percentage` 的公式实测是 `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`（只算 input 侧、不含 output），我们用同一公式自己算，数字对得上。只是不显示百分比（窗口大小判不准）。
+
+**"不显示百分比"已被真机数据证实是对的**：A8 实测本会话 `contextTokens = 435306`，
+**超过 200k**。而 jsonl 里 `message.model` 记的是 `claude-opus-5`（用户实际设的是
+`opus[1m]`），从中区分不出 200k 还是 1M 窗口。若按 200k 算，这里会显示 **218%**。
 
 ---
 
@@ -91,7 +118,12 @@
 
 ### L2 主 transcript —— `$CONFIG/projects/<slug>/<sessionId>.jsonl`
 
-实测 entry `type` 全集：`user` `assistant` `attachment` `queue-operation` `file-history-snapshot` `file-history-delta` `ai-title` `last-prompt` `pr-link` `mode`。**没有官方 spec，字段全是可选，解析器必须防御式写。**
+实测 entry `type` 全集（扫 53 个真实会话文件）：`ai-title` `assistant` `attachment`
+`file-history-delta` `file-history-snapshot` `last-prompt` `mode` `permission-mode`
+`pr-link` `queue-operation` `relocated` `system` `user` `worktree-state`。
+**没有官方 spec，字段全是可选，解析器必须防御式写**——我们只认其中 4 种
+（`assistant` / `user` / `ai-title` / `last-prompt`），其余必须安全忽略而不是报错，
+因为这个列表只会越来越长。
 
 可用字段：
 
@@ -202,8 +234,9 @@ type FleetReport = {
 
 type FleetWarning = {
   code: 'no-config-dir' | 'roster-unreadable' | 'roster-entry-invalid'
-      | 'transcript-not-found' | 'transcript-unreadable' | 'transcript-unparsable'
-      | 'subagents-unreadable' | 'cpu-unavailable' | 'pid-reused',
+      | 'transcript-unreadable' | 'transcript-unparsable'
+      | 'subagents-unreadable' | 'pid-reused',
+  // 刻意没有 'transcript-not-found' 与 'cpu-unavailable'，理由见 §3.6
   detail: string,            // 已脱敏，只带文件名不带内容
 }
 
@@ -220,8 +253,10 @@ type AgentSession = {
 
   liveness: 'alive' | 'pid-reused',   // 'dead' 直接不返回
 
-  // L5（cpu:false 或采样失败时为 null）
-  proc: { cpuPercent: number, memoryMb: number, runTimeSec: number } | null,
+  // L5 进程指标。两级 null 刻意区分（见 §3.6）：
+  //   proc === null            → 没采（cpu 开关关了 / 进程没了）
+  //   proc.cpuPercent === null → 内存和运行时长采到了，只有 CPU 还缺基准
+  proc: { cpuPercent: number | null, memoryMb: number, runTimeSec: number } | null,
 
   // L2（null = 空会话，找不到 jsonl —— 这是已验证的真实状态，不是错误）
   transcript: TranscriptDigest | null,
@@ -247,8 +282,9 @@ type TranscriptDigest = {
   lastTailKind: 'tool_use' | 'tool_result' | 'text' | 'thinking' | null,
   lastToolNames: string[],        // 尾部 assistant 的 tool_use 名字，最多 4 个
   lastMsgTsMs: number | null,
-  hasApiError: boolean,
-  apiErrorStatus: string | null,
+  hasApiError: boolean,          // 主信号：顶层 isApiErrorMessage === true
+  apiErrorStatus: string | null, // 源数据是数字且可能缺失，采集侧归一化成字符串
+  apiErrorCode: string | null,   // 顶层 error 字段，如 oauth_org_not_allowed
   contextTokens: number | null,
   parseErrors: number,            // 尾部坏行数，>0 说明格式可能漂移了
 }
@@ -336,6 +372,51 @@ const TONE_PRIORITY = { failed: 5, 'needs-input': 4, working: 3, fresh: 2, idle:
 **主会话在等你输入，但它的后台 subagent 还在跑** —— 这正是本次会话发生过的情况（我在等你回话，两个调研 agent 还在跑）。
 
 决定：**会话状态保持 `needs-input`**（准确——你确实可以现在打字），**另外在卡片上挂一个"N 个子 agent 在跑"的独立指示**。不把两个事实塌缩成一个状态。
+
+---
+
+### 3.6 实现期对契约做的三处修正（连理由一起记，否则会被加回去）
+
+契约在 P4 冻结，但 P5 造夹具和 A 轨实现时撞出三处**定错了**的地方。三处都是趁"还
+没有任何消费者"改的，`SCHEMA_VERSION` 保持 1（两侧在同一个 commit 里一起改，且有
+跨语言测试强制它们一致）。
+
+**① `apiErrorStatus` 是数字且可能缺失，另加 `apiErrorCode`**
+
+造夹具时全盘搜真实的 API 错误行，发现两个都存在的变体：
+
+| | 变体 A | 变体 B |
+|---|---|---|
+| `apiErrorStatus` | `403`（**数字**） | **字段整个不存在** |
+| `error` | `"oauth_org_not_allowed"` | `"invalid_request"` |
+| `stop_reason` | `"stop_sequence"` | `"refusal"` |
+
+原契约写的是 `Option<String>`。改为采集侧把数字归一化成字符串（免得前端处理
+number/string/undefined 三态），并新增 `apiErrorCode` 承接 `error`——它比状态码更有
+展示价值（能直接告诉用户是权限问题还是请求被拒）。
+
+顺带纠正一条会导致误判的认知：**API 出错的行 `stop_reason` 是 `stop_sequence` 或
+`refusal`**，不是 null 也不是 `end_turn`。只看 stopReason 会把"出错"误判成"正常收尾
+等你回话"。判定顺序必须先看 `hasApiError`——伪码本来就是这个顺序，现在有夹具钉住。
+
+**② `cpuPercent` 改成可为 null —— 原设计在撒谎**
+
+原本是 `f32`，逼得采集层在首次采样还没有基准时只能填 `0.0`。但 **`0%` 是一个具体
+结论（这进程真的闲着），跟"还不知道"是两回事**。改成可为 null 之后，两级 null 表达
+两件不同的事：`proc === null` 是没采，`proc.cpuPercent === null` 是内存和运行时长
+采到了、只有 CPU 还缺基准。前端对后者显示 "—"。
+
+**③ 删掉两个 `WarningCode`**
+
+- `transcript-not-found`：找不到 jsonl 是**最常见的正常状态**（会话已启动但一句话没
+  说，实测本机 6 个会话里有 2 个如此）。为它产 warning 会让每轮轮询都刷出一堆噪声，
+  而它根本不是问题。编排层直接映射成 `transcript: null`，前端渲染"已启动 · 未开始"。
+  jsonl 存在但 0 字节也走同一条路径，同样不报。
+- `cpu-unavailable`：自从 ①② 之后，"还没有基准"已经在数据里表达清楚了，再加一条
+  warning 是重复信息。
+
+两条"为什么没有它们"的理由同时留在 `types.rs` 里——只写在文档里，下一个人在代码里
+看不到，照样会顺手补上。
 
 ---
 
