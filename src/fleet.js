@@ -29,7 +29,7 @@
 
 /**
  * @typedef {Object} FleetWarning
- * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-not-found'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'cpu-unavailable'|'pid-reused'} code
+ * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'} code
  * @property {string} detail
  */
 
@@ -52,8 +52,10 @@
 
 /**
  * @typedef {Object} ProcMetrics
- * @property {number} cpuPercent   已归一化到 0–100
- * @property {number} memoryMb
+ * @property {number|null} cpuPercent  已归一化到 0–100。**null = 还不知道，不是 0%**：
+ *                                     差值算法要两次采样，首次扫描没有基准可减。
+ *                                     0% 是个具体结论（真的闲着），null 是没有结论。
+ * @property {number} memoryMb         内存和运行时长不需要基准，采到就有值
  * @property {number} runTimeSec
  */
 

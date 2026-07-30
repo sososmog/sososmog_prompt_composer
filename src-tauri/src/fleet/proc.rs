@@ -1,28 +1,3 @@
-//! L5 进程指标：CPU / 内存 / 存活校验，只刷 [`super::roster`] 拿到的 pid。
-//!
-//! ⚠️ **不要用 `Process::cpu_usage()`。** 实测（`tests/sysinfo_probe.rs` 头部注释，
-//! sysinfo 0.36.1 / Windows 11）：烧满 1 个核，`cpu_usage()` 只返回 0.0003~0.002，
-//! 换四种姿势全部差五个数量级。它不崩、不报错，只是数字全错——是最难发现的那类
-//! bug，界面上会一直显示接近 0% 的 CPU 而没有任何异常信号。
-//!
-//! 这里改用 `accumulated_cpu_time()` 的差值自己算：
-//! ```text
-//! 归一化% = (acc_ms_now - acc_ms_prev) / wall_ms_elapsed * 100 / 核心数
-//! ```
-//! 好处不止是"能用"：这个算法不依赖 sysinfo 的平台实现（它显然有平台差异 bug），
-//! 而且统计窗口就是我们自己的轮询间隔，语义明确（"最近一个轮询周期的平均占用"）。
-//!
-//! 本文件是**自包含的采样器**，不碰 `super::mod` 的任何东西——编排层
-//! （`mod.rs`）负责把 [`CpuSampler`] 放进 `FleetState` 里长期持有，因为差值算法
-//! 依赖"上一次采样"的状态，必须跨命令调用保留。
-
-// ⚠️ 临时豁免，A6/A7（`mod.rs` 编排层接入 CpuSampler/check_liveness）落地后必须
-// 删掉这一行。原因与 `types.rs` 顶部同一条豁免、`roster.rs` 顶部那条完全一样：
-// 这个文件是 A3 单独交付的产物，`mod.rs` 的 `list_agent_sessions` 目前还是
-// stub，正常（不含测试）编译单元里没有任何地方构造 `CpuSampler` / 调用
-// `check_liveness`，会产生一整串 dead_code 警告。单测不算数，因为
-// `#[cfg(test)] mod tests` 只在 `cfg(test)` 编译单元里存在。
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::Mutex;

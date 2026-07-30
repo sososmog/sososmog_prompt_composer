@@ -1,27 +1,3 @@
-//! L1 会话名册：扫描 `$CONFIG/sessions/<pid>.json`。
-//!
-//! 每个正在跑的 claude 进程会在这里写一个文件，**只在启动时写一次**（mtime 就是
-//! 启动时间，不代表活动时间——最后活动时间要看 transcript 的 mtime，那是
-//! `transcript.rs` 的事）。这一层只负责把名册摊平成 [`RosterEntry`] 列表。
-//!
-//! ## 两条容易想当然想错的规则
-//!
-//! 1. **文件名不是权威数据源。** 约定上文件名是 `<pid>.json`，但真正的 pid 和
-//!    sessionId 必须从内容里取——夹具里特意放了一个 `weird-name.json`
-//!    （文件名不是数字）来钉住这条，防止有人图省事从文件名 parse pid。
-//! 2. **`sessions/` 目录不存在 ≠ 出错。** 这只是"这台机器还没跑过 claude"的
-//!    正常状态，不产 warning；但目录存在、读不出来（权限问题等）就是真的异常，
-//!    要报 [`WarningCode::RosterUnreadable`]。两者语义完全不同，不能合并处理。
-
-// ⚠️ 临时豁免，A6/A7（`mod.rs` 编排层接入 roster::scan）落地后必须删掉这一行。
-//
-// 与 `types.rs` 顶部同一条豁免同样的原因：这个文件是 A2 单独交付的产物，
-// `scan()` 目前还没有调用方（`mod.rs` 的 `list_agent_sessions` 仍是 stub），
-// 所以 `cargo check`/`cargo clippy` 在**不含测试**的正常编译单元里看不到任何
-// 地方构造 `RosterEntry`、调用 `scan`，会产生一整串 dead_code 警告——
-// 单测（`#[cfg(test)] mod tests`）不算数，因为它只在 `cfg(test)` 编译单元里存在。
-// 等编排层把这个模块接进去，这行连同这条注释都要删掉。
-#![allow(dead_code)]
 
 use std::path::Path;
 

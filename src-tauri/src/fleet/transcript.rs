@@ -1,27 +1,3 @@
-//! L2：主 transcript（`$CONFIG/projects/<slug>/<sessionId>.jsonl`）的定位与尾部解析。
-//!
-//! 完整背景见 `docs/agent-fleet.md` §2、§5「轨 A 的关键实现细节」、§9。这里只复述
-//! 三条决定了整个模块形状的坑：
-//!
-//! 1. **项目目录名编码不可逆**（`/a/b-c` 与 `/a/b/c` 编码后相同，且实测大小写不统一，
-//!    同时存在 `C--Users-...` 和 `c--Users-...`）。所以 [`find_transcript`] 老老实实
-//!    遍历 `projects/*/` 找文件名，不去反推目录名是什么。
-//! 2. **jsonl 没有官方 schema**，字段全可选，`type` 已实测 14 种，以后只会更多。
-//!    解析器必须对每一行、每一个字段都做“取不到就是 None”的防御式处理，
-//!    绝不能因为某一行长得不像预期就 panic。
-//! 3. **时间戳是 UTC**（`...T07:29:57.407Z`），本机是 UTC+8。这里手写了一个
-//!    `parse_iso8601_utc_ms`，没有为了这一个固定格式去引 chrono/time。
-
-// ⚠️ 临时豁免，和 `types.rs` 顶部那条一模一样的道理，接进去之后必须删掉这一行。
-//
-// 本文件按任务分工只负责采集（定位 + tail 读 + digest 抽取），编排层
-// `mod.rs` 的 A6/A7（`FleetState` + 把这些函数接进 `list_agent_sessions`）
-// 是后续步骤，不在这次改动范围内。于是眼下 `mod.rs` 只有一行
-// `pub mod transcript;`，没有任何非测试调用点——所有 pub 项在"正常构建"
-// （不含 `#[cfg(test)]`）里都"从未被使用"，会产生一批 dead_code 警告。
-// 跟 `types.rs` 一样，先豁免，等 A6 把调用点接上后这行就该删掉
-//（届时如果还有函数没人调用，说明它本不该存在，该删函数而不是留豁免）。
-#![allow(dead_code)]
 
 use std::io::{Read as _, Seek, SeekFrom};
 use std::path::{Path, PathBuf};

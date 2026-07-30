@@ -284,7 +284,12 @@ pub fn run() {
                 .build(),
         );
 
-    // Windows 专属状态：粘贴命令要用的“最近前台窗口”缓存。
+    // Agent Fleet 的长期状态：CPU 采样基准 + transcript 路径缓存。
+    // 用 Arc 托管（而不是直接托管 FleetState）是因为命令要把它 move 进
+    // spawn_blocking —— `State<'_, T>` 是借用的，move 不进去，Arc 才能 clone 出来。
+    let builder = builder.manage(std::sync::Arc::new(fleet::FleetState::new()));
+
+    // Windows 专属状态：粘贴命令要用的”最近前台窗口”缓存。
     #[cfg(windows)]
     let builder = builder.manage(win32::LastForeground(std::sync::Mutex::new(None)));
 
@@ -363,6 +368,14 @@ pub fn run() {
                     std::thread::spawn(move || {
                         macos::track_foreground_loop(app_handle);
                     });
+                }
+
+                // 预热 Agent Fleet 的 CPU 采样基准：CPU 百分比要两次采样才算得出来，
+                // 不预热的话用户第一次打开 Agent tab 看到的 CPU 全是"—"，得等下一轮。
+                // 内部自己起线程，不阻塞启动。
+                {
+                    let fleet_state = app.state::<std::sync::Arc<fleet::FleetState>>();
+                    fleet::spawn_cpu_prewarm(app.handle().clone(), fleet_state.inner().clone());
                 }
 
                 Ok(())

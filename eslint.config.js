@@ -5,8 +5,14 @@ import globals from 'globals';
  * （performance / KeyboardEvent / structuredClone …）就会以 no-undef 报错，
  * 而它跟代码正确性毫无关系。 */
 export default [
-  // Rust 构建产物（被 git 忽略），不参与前端 lint
-  { ignores: ['src-tauri/target/**'] },
+  // Rust 构建产物（被 git 忽略），不参与前端 lint。
+  //
+  // .claude/worktrees/** 是并行开发时的 git worktree 落地目录，里面是整个仓库的
+  // 副本。不排除的话 `eslint .` 会把每个 worktree 的源码重复扫一遍——实测三个
+  // worktree 同时存在时报出 2109 个"错误"，全是同一份代码被数了四遍，而且因为
+  // worktree 里没有各自的 node_modules，连 import 解析都是错的。
+  // 这些假错误极具误导性：清理 worktree 之前跑一次 lint 会让人以为自己写崩了。
+  { ignores: ['src-tauri/target/**', '.claude/worktrees/**'] },
   js.configs.recommended,
   {
     // 纯逻辑层：不碰 DOM，只用 ES 内置对象，故不给任何浏览器全局——

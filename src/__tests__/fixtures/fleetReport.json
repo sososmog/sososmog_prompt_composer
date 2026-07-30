@@ -253,7 +253,11 @@
       "startedAt": 1785414360000,
       "cliVersion": "2.1.220",
       "liveness": "alive",
-      "proc": null,
+      "proc": {
+        "cpuPercent": null,
+        "memoryMb": 350,
+        "runTimeSec": 1800
+      },
       "transcript": {
         "sizeBytes": 318000,
         "mtimeMs": 1785416157000,
@@ -367,8 +371,8 @@
   ],
   "warnings": [
     {
-      "code": "cpu-unavailable",
-      "detail": "占位：pid 62222 首次采样，无基准"
+      "code": "pid-reused",
+      "detail": "占位：pid 62222 的启动时间与名册记录不符"
     },
     {
       "code": "transcript-unparsable",

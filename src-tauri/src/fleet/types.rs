@@ -1,39 +1,3 @@
-//! Agent Fleet 的 IPC 契约（**冻结项**）。
-//!
-//! 这个文件是 Rust 采集层与前端判定层之间唯一的约定。改这里必须同时改：
-//!   - `src/fleet.js` 顶部的 JSDoc typedef
-//!   - `docs/agent-fleet.md` §3
-//!   - `SCHEMA_VERSION`
-//!
-//! ## 三条设计要点
-//!
-//! 1. **`scanned_at` 是唯一时间基准。** 前端算"多久没动了"一律用
-//!    `scannedAt - mtimeMs`，绝不用 `Date.now()`。否则 Rust 时钟与 JS 时钟的
-//!    微小差异会算出负数，界面上显示成"-3 秒前"。
-//! 2. **`SCHEMA_VERSION` 是给开发期用的，不是给未来用的。** `tauri dev` 下前端
-//!    热重载但 Rust 二进制是旧的，版本对不上时前端要显式报"需要重启 dev"，
-//!    而不是渲染出一堆 undefined。
-//! 3. **`warnings` 与 `sessions` 并存。** 一个会话读不出 transcript 不能让整个
-//!    tab 空掉；返回该会话 + 一条 warning。宁可显示"未知"，不猜。
-//!
-//! ## 隐私
-//!
-//! `ai_title` / `last_prompt` / `description` 是用户真实工作内容。
-//! 采集侧统一截断到 `TEXT_LIMIT` 字符（既是隐私边界也是 IPC 体积上限），
-//! 前端纯内存展示，**不落盘、不进导出备份**。
-//! `FleetWarning::detail` 只带文件名，不带文件内容。
-
-// ⚠️ 临时豁免，落地后必须删掉这一行。
-//
-// 本文件是"契约先于实现"的产物：类型在 P4 一次性定稿冻结，好让 Rust 采集层（A 轨）
-// 与前端判定层（B 轨）能并行开工而不各自猜结构。因此在 A 轨把采集逻辑填进来之前，
-// 这里的常量/字段/枚举变体确实"从未被构造"，会产生 13 条 dead_code 警告。
-//
-// 留着警告的坏处是会淹没真正的警告，所以先豁免；但**豁免本身也会淹没问题**，
-// 所以它进了收尾检查清单（docs/agent-fleet.md 阶段 3 的 D4）：A 轨合流后必须删掉
-// 这行、重跑 clippy 确认 0 新增警告。若届时仍有字段没人读，说明契约定多了，
-// 该删字段而不是该留豁免。
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
@@ -63,9 +27,11 @@ pub const TEXT_LIMIT: usize = 200;
 pub struct FleetOptions {
     /// 默认 [`DEFAULT_TAIL_BYTES`]
     pub tail_bytes: Option<u64>,
-    /// 默认 `true`
+    /// 默认 `true`。**阶段 2**（subagent 树）接入后才有人读。
+    #[allow(dead_code)]
     pub include_subagents: Option<bool>,
-    /// 默认 `false`（阶段 4 接入后台会话时才转 true）
+    /// 默认 `false`。**阶段 4**（后台会话）接入后才有人读。
+    #[allow(dead_code)]
     pub include_jobs: Option<bool>,
     /// 默认 `true`
     pub cpu: Option<bool>,
@@ -77,9 +43,13 @@ impl FleetOptions {
             .unwrap_or(DEFAULT_TAIL_BYTES)
             .clamp(4 * 1024, TAIL_BYTES_MAX)
     }
+    /// 阶段 2 才会被编排层调用；契约提前定好，好让前端不用等我们改接口。
+    #[allow(dead_code)]
     pub fn include_subagents(&self) -> bool {
         self.include_subagents.unwrap_or(true)
     }
+    /// 阶段 4 才会被编排层调用。
+    #[allow(dead_code)]
     pub fn include_jobs(&self) -> bool {
         self.include_jobs.unwrap_or(false)
     }
@@ -128,19 +98,26 @@ pub enum WarningCode {
     RosterUnreadable,
     /// 单个 `sessions/<pid>.json` 解析失败（跳过该条，其余照常）
     RosterEntryInvalid,
-    /// 遍历 `projects/*/` 没找到该 sessionId 的 jsonl
-    TranscriptNotFound,
-    /// 找到了但读不了（I/O 错误）
+    /// 找到了 jsonl 但读不了（I/O 错误）
     TranscriptUnreadable,
     /// 读到了但尾部窗口里解析不出任何消息（格式漂移的信号）
     TranscriptUnparsable,
-    /// `<sid>/subagents/` 读不了
+    /// `<sid>/subagents/` 读不了 —— 阶段 2 接入 subagent 树后才会被构造
+    #[allow(dead_code)]
     SubagentsUnreadable,
-    /// CPU 采样不可用（首次采样、间隔过短、进程消失）
-    CpuUnavailable,
     /// pid 存在但启动时间与 roster 的 startedAt 对不上 → 疑似 PID 被复用
     PidReused,
 }
+
+// 关于这里**没有**哪两个 code，理由值得留着，否则以后会有人"顺手补上"：
+//
+// - `TranscriptNotFound`：找不到 jsonl 是**最常见的正常状态**（会话已启动但一句话
+//   没说，实测本机 5 个会话里有 2 个如此）。为它产 warning 会让每轮轮询都刷出一堆
+//   噪声，而它根本不是问题——编排层把这种情况直接映射成 `transcript: null`，
+//   前端渲染为"已启动 · 未开始"。
+// - `CpuUnavailable`：自从 `ProcMetrics::cpu_percent` 改成 `Option` 之后，
+//   "还没有基准"这件事已经在数据里表达清楚了（前端显示 "—"），再加一条 warning
+//   是重复信息。
 
 /// 一个 Claude Code 会话。
 ///
@@ -194,7 +171,13 @@ pub struct ProcMetrics {
     /// 算法是自己用 `accumulated_cpu_time()` 差值算的，**不是** sysinfo 的
     /// `cpu_usage()`——后者在 Windows 上实测是坏的，详见
     /// `tests/sysinfo_probe.rs` 头部注释。
-    pub cpu_percent: f32,
+    ///
+    /// **`None` 表示"还不知道"，不是 0%。** 差值算法需要两次采样，首次扫描
+    /// （或应用刚重启）时没有基准可减。这两种情况必须区分开：`0%` 是一个具体
+    /// 结论（这进程真的闲着），`None` 是没有结论，前端显示 "—"。
+    /// 早先这个字段是 `f32`，逼得采集层在没基准时只能填 0.0 —— 那是在撒谎。
+    pub cpu_percent: Option<f32>,
+    /// 内存和运行时长不需要基准，采到就有值，所以它们不是 Option。
     pub memory_mb: u64,
     pub run_time_sec: u64,
 }
@@ -425,8 +408,8 @@ mod tests {
             scanned_at: 1_785_416_167_000,
             config_dir: "C:\\Users\\demo\\.claude".into(),
             warnings: vec![FleetWarning::new(
-                WarningCode::CpuUnavailable,
-                "首次采样，无基准",
+                WarningCode::PidReused,
+                "pid 62222 的启动时间与名册记录不符",
             )],
             sessions: vec![AgentSession {
                 pid: 52052,
@@ -439,7 +422,7 @@ mod tests {
                 cli_version: "2.1.220".into(),
                 liveness: Liveness::Alive,
                 proc: Some(ProcMetrics {
-                    cpu_percent: 3.53,
+                    cpu_percent: Some(3.53),
                     memory_mb: 483,
                     run_time_sec: 1200,
                 }),
@@ -577,7 +560,7 @@ mod tests {
         assert!(job["inFlight"].get("queued").is_some());
 
         let w = &v["warnings"][0];
-        assert_eq!(w["code"], "cpu-unavailable");
+        assert_eq!(w["code"], "pid-reused");
         assert!(w.get("detail").is_some());
     }
 
