@@ -27,6 +27,7 @@
 pub mod config;
 pub mod proc;
 pub mod roster;
+pub mod transcript;
 pub mod types;
 
 use std::time::{SystemTime, UNIX_EPOCH};
