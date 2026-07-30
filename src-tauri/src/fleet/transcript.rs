@@ -258,7 +258,6 @@ fn extract(lines: &[String]) -> Extracted {
         api_error_status,
         api_error_code,
         git_branch,
-        effort,
     ) = match last_msg {
         Some(v) => {
             let ty = v.get("type").and_then(Value::as_str).unwrap_or("");
@@ -285,9 +284,6 @@ fn extract(lines: &[String]) -> Extracted {
             let api_error_status = v.get("apiErrorStatus").and_then(normalize_api_error_status);
             let api_error_code = v.get("error").and_then(Value::as_str).map(String::from);
             let git_branch = v.get("gitBranch").and_then(Value::as_str).map(String::from);
-            // effort 只在 assistant 行的顶层出现；user 行没有这个字段，取不到就是
-            // None——按契约描述，这里**不**像 model 那样回溯到更早的 assistant 行。
-            let effort = v.get("effort").and_then(Value::as_str).map(String::from);
             (
                 role,
                 stop_reason,
@@ -298,18 +294,26 @@ fn extract(lines: &[String]) -> Extracted {
                 api_error_status,
                 api_error_code,
                 git_branch,
-                effort,
             )
         }
-        None => (None, None, None, Vec::new(), None, false, None, None, None, None),
+        None => (None, None, None, Vec::new(), None, false, None, None, None),
     };
 
-    // model / context_tokens 都来自"最后一条 assistant 消息"，而不是"最后一条
-    // user/assistant 消息"——最后一条可能是 user 行（没有这两样东西），这时要
-    // 往前找最近的 assistant。`last_assistant` 就是那次回溯的结果。
+    // model / effort / context_tokens 都来自"最后一条 assistant 消息"，而不是
+    // "最后一条 user/assistant 消息"——最后一条可能是 user 行（这三样都没有），
+    // 这时要往前找最近的 assistant。`last_assistant` 就是那次回溯的结果。
+    //
+    // effort 一开始按"取最后一条消息"实现（契约原文的字面意思），跑通之后发现
+    // 那样会出一个纯采样假象：尾巴恰好是 tool_result（user 行）时 effort 变 null，
+    // 于是同一个会话的思考档位会随轮询时刻在 "xhigh" 和空之间来回闪，
+    // 而这段时间里它其实一直没变。gitBranch 不受影响是因为 user 行顶层也带它。
     let model = last_assistant
         .and_then(|v| v.get("message"))
         .and_then(|m| m.get("model"))
+        .and_then(Value::as_str)
+        .map(String::from);
+    let effort = last_assistant
+        .and_then(|v| v.get("effort"))
         .and_then(Value::as_str)
         .map(String::from);
     let context_tokens = last_assistant
@@ -591,6 +595,23 @@ mod tests {
         let d = read_digest(&transcript_fixture("tool-result-tail.jsonl"), 65536).unwrap();
         assert_eq!(d.last_role, Some(Role::User));
         assert_eq!(d.last_tail_kind, Some(TailKind::ToolResult));
+    }
+
+    /// 尾巴是 user 行（tool_result）时，model / effort / context_tokens 必须回溯到
+    /// 前面最近的 assistant 行拿到，而不是变成 None。
+    ///
+    /// 这三样只在 assistant 行上有。如果不回溯，同一个会话的模型名和思考档位
+    /// 就会随轮询时刻在"有值"和"空"之间来回闪——而这段时间里它们其实一直没变。
+    /// 纯粹是采样时机造成的假象，用户看到的却像是配置在自己变。
+    #[test]
+    fn digest_backtracks_to_last_assistant_for_model_effort_and_tokens() {
+        let d = read_digest(&transcript_fixture("tool-result-tail.jsonl"), 65536).unwrap();
+        assert_eq!(d.last_role, Some(Role::User), "前提：这个夹具的尾巴确实是 user 行");
+        assert_eq!(d.model.as_deref(), Some("claude-opus-5"), "model 应回溯到 assistant");
+        assert_eq!(d.effort.as_deref(), Some("xhigh"), "effort 应回溯到 assistant");
+        assert_eq!(d.context_tokens, Some(70424), "context_tokens 应回溯到 assistant");
+        // gitBranch 不需要回溯——user 行顶层也带它，所以它本来就不会闪。
+        assert_eq!(d.git_branch.as_deref(), Some("feat/demo-branch"));
     }
 
     #[test]
