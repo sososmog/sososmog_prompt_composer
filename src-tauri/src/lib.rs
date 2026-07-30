@@ -1,6 +1,9 @@
 // Agent Fleet：扫描本机在跑的 Claude Code 会话，供浮窗的 Agent tab 展示。
 // 只读本地文件 + sysinfo，不改用户任何配置。详见 fleet/mod.rs 与 docs/agent-fleet.md。
-mod fleet;
+//
+// pub 而非私有：tests/fleet_real_machine.rs 要直接调用各采集层，对真实
+// ~/.claude 跑一遍看认出了什么。那个测试是格式漂移时的主要诊断手段。
+pub mod fleet;
 
 // ============================================================
 // Windows 专属：粘贴到外部窗口的底层实现。
