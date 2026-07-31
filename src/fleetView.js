@@ -224,6 +224,96 @@ function countWorkingSubagents(subagents, scannedAt) {
   return n;
 }
 
+/** 卡片上可能有用户的选区，标题上没有——搬动量打平时优先牺牲标题。 */
+export const CARD_WEIGHT = 100;
+export const TITLE_WEIGHT = 1;
+/**
+ * 选区此刻真的落在这个节点上。压倒性权重：其它节点全加起来也不该盖过它。
+ *
+ * 只靠 CARD_WEIGHT 不够——同组两张卡片换位时两边都是卡片，权重一样，DP
+ * 的严格大于比较会稳定地拍向先遇到的那支，而重排里"往上跑"的恰恰是数据
+ * 变了的那张，没变的那张被往下挤 = 被搬走。fuzz 实测这类平局占全部选区
+ * 丢失的 100%，且每一次都有一个同样最优、但保住选区的选择。
+ *
+ * 量级边界：10000 / CARD_WEIGHT = 100，也就是屏幕上超过 100 张卡片时，
+ * 卡片数量堆起来能盖过选区。真机实测过超限后果——只是退化成"选区丢失"
+ * （即这个提交之前的行为），顺序正确性不依赖权重，不会错乱也不会崩。
+ * 101 个并发会话不是真实场景，不为它加复杂度。
+ */
+export const SELECTED_WEIGHT = 10000;
+
+/**
+ * 选区当前落在哪个元素里。渲染前读一次，喂给 pickStayPut 当权重。
+ *
+ * 拿不到选区（没选、跨文档、jsdom 早期状态）一律返回 null，调用方按
+ * "没有选区"处理——这条路径不能抛，它跑在每一轮轮询上。
+ *
+ * `isCollapsed` 那个判断不只是"没选中就别管"，它还恰好挡住了编写区的
+ * textarea：真 Chromium 实测，**textarea 内部的选区在 document 层面报告
+ * isCollapsed: true**（哪怕真的选中了一段文字），于是这里返回 null，
+ * 编写区不会被误判成需要保护。这条 jsdom 测不出来，是在真浏览器里验的。
+ * 结构上 #fwTextarea 与 #fwPanelFleet 是兄弟节点，contains 也是 false，
+ * 算第二道保险。
+ *
+ * 成本可忽略：真机实测 1000 次 getSelection()+contains 共 0.6ms，读的是
+ * 已有的 selection 对象，不触发重排。
+ *
+ * @returns {Node|null}
+ */
+function currentSelectionNode() {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    return sel.getRangeAt(0).startContainer;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * 挑出"可以原地不动"的那批节点：在保持相对顺序的前提下，让留下来的总权重
+ * 最大（加权最长上升子序列）。返回的是 oldIndex 数组里的下标。
+ *
+ * 为什么需要它：DOM 重排时"谁不动"是可选的，而**被移动 = 被重新挂载 =
+ * 落在它上面的用户选区当场消失**。所以这不是性能优化，是 E6 的正确性核心。
+ * 早先用的是一趟贪心 cursor（cursor 不等于当前节点就 insertBefore），它在
+ * "挡路的节点是活的、只是该往后排"时会去搬后面那张无辜的卡片——换组、组内
+ * 重排、整组消失这三件日常事都能触发。
+ *
+ * 权重而非长度：长度打平时普通 LIS 会随实现细节挑中搬卡片那一支。最简的
+ * 打平形态是相邻两项交换且后者是卡片（oldIndex 形如 [0,1,2,4,3]）。
+ *
+ * O(n²) DP。n 是屏幕上的行数（会话数量级），换 O(n log n) 要额外处理权重，
+ * 不值得。
+ *
+ * @param {number[]} oldIndex 每个目标节点在旧 DOM 里的下标，新节点为 -1
+ * @param {number[]} weights  同长度的权重数组
+ * @returns {number[]} 可以原地不动的下标，升序
+ */
+export function pickStayPut(oldIndex, weights) {
+  const n = oldIndex.length;
+  const best = new Array(n).fill(0);
+  const prev = new Array(n).fill(-1);
+  let bestEnd = -1;
+  for (let i = 0; i < n; i += 1) {
+    if (oldIndex[i] < 0) continue; // 新建的节点必然要插入，不参与
+    best[i] = weights[i];
+    for (let j = 0; j < i; j += 1) {
+      if (oldIndex[j] >= 0 && oldIndex[j] < oldIndex[i] && best[j] + weights[i] > best[i]) {
+        best[i] = best[j] + weights[i];
+        prev[i] = j;
+      }
+    }
+    if (bestEnd < 0 || best[i] > best[bestEnd]) bestEnd = i;
+  }
+  const out = [];
+  for (let i = bestEnd; i >= 0; i = prev[i]) {
+    out.push(i);
+    if (prev[i] < 0) break;
+  }
+  return out.reverse();
+}
+
 /**
  * 装配浮窗的 Agent tab：渲染 + 轮询。
  *
@@ -306,77 +396,25 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     contentEl.appendChild(el);
   }
 
-  /** @param {import('./fleet.js').AgentSession} session @param {object} def @param {number} scannedAt */
-  function buildCard(session, def, scannedAt) {
-    const card = document.createElement('div');
-    card.className = 'fw-fleet-card tone-' + def.tone;
-    card.dataset.sessionId = session.sessionId;
+  /**
+   * 卡片上每个会随轮询变化的字段，算成纯字符串/布尔。
+   *
+   * E6 的地基：把"这一轮该显示什么"与"怎么落到 DOM 上"分开，updateCard
+   * 才能逐字段比对、只动真变了的那个节点。所有分支逻辑都收在这里，建和
+   * 更新两条路径吃的是同一份结果——否则两边各写一遍必然漂移，而漂移出来
+   * 的 bug 只在"某字段变化时"才现形，最难抓。
+   *
+   * @param {import('./fleet.js').AgentSession} session
+   * @param {object} def
+   * @param {number} scannedAt
+   */
+  function cardFields(session, def, scannedAt) {
+    const t = session.transcript;
+    const modelText = (t && t.model) || '';
 
-    const head = document.createElement('div');
-    head.className = 'fw-fleet-card-head';
-
-    const glyph = document.createElement('span');
-    glyph.className = 'fw-fleet-glyph' + (def.animated ? ' is-animated' : '');
-    glyph.textContent = def.glyph;
-    head.appendChild(glyph);
-
-    const name = document.createElement('span');
-    name.className = 'fw-fleet-name';
-    name.textContent = session.name;
-    name.title = session.name;
-    head.appendChild(name);
-
-    const model = document.createElement('span');
-    model.className = 'fw-fleet-model';
-    const modelText = (session.transcript && session.transcript.model) || '';
-    // 后台会话常常没有 transcript，也就没有 model 可显示。那个位置改标"后台"
-    // 比留空有用：这类会话的 CPU 是 "—"、没有进程，看到标记才知道那是它本来
-    // 的样子，而不是采集失败了。
-    model.textContent = modelText || (session.kind === 'background' ? '后台' : '');
-    head.appendChild(model);
-
-    const openBtn = buildOpenCwdButton(session);
-    if (openBtn) head.appendChild(openBtn);
-
-    card.appendChild(head);
-
-    const titleLine = document.createElement('div');
-    titleLine.className = 'fw-fleet-title-line';
-    const titleText = cardTitle(session);
-    titleLine.textContent = titleText;
-    titleLine.title = titleText;
-    card.appendChild(titleLine);
-
-    const branch = session.transcript && session.transcript.gitBranch;
-    if (branch) {
-      const branchLine = document.createElement('div');
-      branchLine.className = 'fw-fleet-branch';
-      branchLine.textContent = '⎇ ' + branch;
-      branchLine.title = branch;
-      card.appendChild(branchLine);
-    }
-
-    // 后台会话的核心价值：官方已经算好的一句人话摘要（实测样本"要我顺手提交
-    // 这条 fix 吗?"）。它比我们从 transcript 推的任何东西都准，也是"这个任务
-    // 到底卡在哪"的直接答案。
-    //
-    // 这是唯一一处会让卡片变高的追加内容——阶段 3 刻意没给失败卡片单独起行，
-    // 就是因为一屏内高度参差难扫视。这里破例，理由是后台会话本来就少，而没有
-    // 这一行的话它整张卡片几乎是空的（没有 CPU、常常也没有 transcript）。
-    const jobDetail = session.job && session.job.detail;
-    if (jobDetail) {
-      const detailLine = document.createElement('div');
-      detailLine.className = 'fw-fleet-job-detail';
-      detailLine.textContent = jobDetail;
-      detailLine.title = jobDetail;
-      card.appendChild(detailLine);
-    }
-
-    const meta = document.createElement('div');
-    meta.className = 'fw-fleet-meta';
     const ago = formatAgo(scannedAt - lastActivityMs(session));
     const cpu = formatCpu(session.proc ? session.proc.cpuPercent : null);
-    const tokens = formatTokens(session.transcript ? session.transcript.contextTokens : null);
+    const tokens = formatTokens(t ? t.contextTokens : null);
     let metaText = def.label + ' · ' + ago + ' · CPU ' + cpu + ' · ' + tokens + ' tokens';
     // §3.5：主会话状态（def.label）保持它本来该是什么样——哪怕它是
     // "等你回话"、subagent 还在后台跑，也不塌缩成一个状态，只在这里
@@ -390,7 +428,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     // 这个原因）。apiErrorStatus/apiErrorCode 都可能缺失，两个都没有时
     // （hasApiError 为真但两个字段都是 null）什么都不追加，避免留一个
     // 空的" · "分隔符。
-    const t = session.transcript;
+    let metaTitle = '';
     if (t && t.hasApiError) {
       const errParts = [];
       if (t.apiErrorStatus) errParts.push(t.apiErrorStatus);
@@ -398,15 +436,207 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       if (errParts.length > 0) {
         const errText = errParts.join(' ');
         metaText += ' · ' + errText;
-        meta.title = errText; // 错误码可能很长，靠 title 看全文
+        metaTitle = errText; // 错误码可能很长，靠 title 看全文
       }
     }
-    meta.textContent = metaText;
+
+    return {
+      cardClass: 'fw-fleet-card tone-' + def.tone,
+      glyphClass: 'fw-fleet-glyph' + (def.animated ? ' is-animated' : ''),
+      glyph: def.glyph,
+      name: session.name,
+      // 后台会话常常没有 transcript，也就没有 model 可显示。那个位置改标"后台"
+      // 比留空有用：这类会话的 CPU 是 "—"、没有进程，看到标记才知道那是它本来
+      // 的样子，而不是采集失败了。
+      model: modelText || (session.kind === 'background' ? '后台' : ''),
+      title: cardTitle(session),
+      branch: (t && t.gitBranch) || '',
+      // 后台会话的核心价值：官方已经算好的一句人话摘要（实测样本"要我顺手提交
+      // 这条 fix 吗?"）。它比我们从 transcript 推的任何东西都准，也是"这个任务
+      // 到底卡在哪"的直接答案。
+      //
+      // 这是唯一一处会让卡片变高的追加内容——阶段 3 刻意没给失败卡片单独起行，
+      // 就是因为一屏内高度参差难扫视。这里破例，理由是后台会话本来就少，而没有
+      // 这一行的话它整张卡片几乎是空的（没有 CPU、常常也没有 transcript）。
+      jobDetail: (session.job && session.job.detail) || '',
+      metaText: metaText,
+      metaTitle: metaTitle,
+    };
+  }
+
+  /**
+   * 只在文本真变了时才写 textContent。
+   *
+   * 这是 E6 的核心动作，不是省一次赋值那么简单：给 textContent 赋值——
+   * **哪怕赋的是同一个字符串**——也会把原来的文本节点整个换掉，落在它上面
+   * 的用户选区随之塌成空串。所以这个判断必须留着。
+   *
+   * @param {HTMLElement} el
+   * @param {string} text
+   */
+  function setText(el, text) {
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  /** 同 setText 的理由，只是 title 不影响选区，纯粹避免无谓的属性写入。 */
+  function setTitle(el, text) {
+    if (text) {
+      if (el.title !== text) el.title = text;
+    } else if (el.hasAttribute('title')) {
+      el.removeAttribute('title');
+    }
+  }
+
+  /**
+   * 可选的单行文本（分支行 / 后台摘要）：有内容就确保存在并更新，没内容
+   * 就摘掉。返回当前节点，供调用方存回 refs。
+   *
+   * @param {HTMLElement} card
+   * @param {HTMLElement|null} el 上一轮的节点，没有则为 null
+   * @param {string} text
+   * @param {string} className
+   * @param {string} prefix 显示用前缀（分支行的 "⎇ "），不进 title
+   * @param {HTMLElement} before 插入位置的锚点
+   * @returns {HTMLElement|null}
+   */
+  function syncOptionalLine(card, el, text, className, prefix, before) {
+    if (!text) {
+      if (el) el.remove();
+      return null;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.className = className;
+      card.insertBefore(el, before);
+    }
+    setText(el, prefix + text);
+    setTitle(el, text);
+    return el;
+  }
+
+  /** @param {import('./fleet.js').AgentSession} session @param {object} def @param {number} scannedAt */
+  function buildCard(session, def, scannedAt) {
+    const f = cardFields(session, def, scannedAt);
+
+    const card = document.createElement('div');
+    card.className = f.cardClass;
+    card.dataset.sessionId = session.sessionId;
+
+    const head = document.createElement('div');
+    head.className = 'fw-fleet-card-head';
+
+    const glyph = document.createElement('span');
+    glyph.className = f.glyphClass;
+    glyph.textContent = f.glyph;
+    head.appendChild(glyph);
+
+    const name = document.createElement('span');
+    name.className = 'fw-fleet-name';
+    name.textContent = f.name;
+    name.title = f.name;
+    head.appendChild(name);
+
+    const model = document.createElement('span');
+    model.className = 'fw-fleet-model';
+    model.textContent = f.model;
+    head.appendChild(model);
+
+    const openBtn = buildOpenCwdButton(session);
+    if (openBtn) head.appendChild(openBtn);
+
+    card.appendChild(head);
+
+    const titleLine = document.createElement('div');
+    titleLine.className = 'fw-fleet-title-line';
+    titleLine.textContent = f.title;
+    titleLine.title = f.title;
+    card.appendChild(titleLine);
+
+    const meta = document.createElement('div');
+    meta.className = 'fw-fleet-meta';
+
+    // branch / jobDetail 是可选行，插在 titleLine 与 meta 之间。先把 meta
+    // 挂上去当锚点，syncOptionalLine 才有 before 可用（建和更新走同一条
+    // 插入路径，顺序不会两边写歪）。
     card.appendChild(meta);
+    const branchLine = syncOptionalLine(card, null, f.branch, 'fw-fleet-branch', '⎇ ', meta);
+    const jobDetailLine = syncOptionalLine(card, null, f.jobDetail, 'fw-fleet-job-detail', '', meta);
+
+    meta.textContent = f.metaText;
+    if (f.metaTitle) meta.title = f.metaTitle;
 
     const subSection = buildSubagentSection(session, scannedAt);
     if (subSection) card.appendChild(subSection);
 
+    // 逐字段更新要能找回每个节点。挂在 DOM 元素上而不是另存一张外部
+    // Map：卡片被移除时这些引用跟着一起走，不需要额外的清理逻辑，也就
+    // 不会漏清理成内存泄漏。
+    card._fleetRefs = {
+      glyph: glyph,
+      name: name,
+      model: model,
+      titleLine: titleLine,
+      branchLine: branchLine,
+      jobDetailLine: jobDetailLine,
+      meta: meta,
+      subSection: subSection || null,
+    };
+    card._fleetFields = f;
+    return card;
+  }
+
+  /**
+   * 拿已有的卡片节点就地更新到新数据。与 buildCard 一一对应——那边加一个
+   * 字段，这边就要跟一个，靠 cardFields 是唯一事实源来保证不漏。
+   *
+   * @param {HTMLElement} card
+   * @param {import('./fleet.js').AgentSession} session
+   * @param {object} def
+   * @param {number} scannedAt
+   */
+  function updateCard(card, session, def, scannedAt) {
+    const f = cardFields(session, def, scannedAt);
+    const r = card._fleetRefs;
+    // 理论上不会发生（卡片都出自 buildCard）。真发生了就退回重建，
+    // 让面板显示得对，而不是抛异常把整轮渲染带崩。
+    if (!r) return buildCard(session, def, scannedAt);
+
+    if (card.className !== f.cardClass) card.className = f.cardClass;
+    if (r.glyph.className !== f.glyphClass) r.glyph.className = f.glyphClass;
+    setText(r.glyph, f.glyph);
+    setText(r.name, f.name);
+    setTitle(r.name, f.name);
+    setText(r.model, f.model);
+    setText(r.titleLine, f.title);
+    setTitle(r.titleLine, f.title);
+
+    // 顺序必须是 branch → jobDetail → meta，与 buildCard 一致。branch 行迟到
+    // 时（后台会话先没 gitBranch、下一轮才读到）要插在 jobDetail **之前**，
+    // 所以锚点取"当前排在它后面的第一个节点"而不是一律用 meta——否则同屏两
+    // 张卡片会一张 branch 在上、一张 branch 在下。
+    r.branchLine = syncOptionalLine(card, r.branchLine, f.branch, 'fw-fleet-branch', '⎇ ', r.jobDetailLine || r.meta);
+    r.jobDetailLine = syncOptionalLine(card, r.jobDetailLine, f.jobDetail, 'fw-fleet-job-detail', '', r.meta);
+
+    setText(r.meta, f.metaText);
+    setTitle(r.meta, f.metaTitle);
+
+    // 打开目录的按钮：cwd 或注入能力变化时增删。它带闭包（捕获了 session），
+    // cwd 变了就得换一个，否则点开的是旧目录。
+    const head = r.glyph.parentNode;
+    const oldBtn = head.querySelector('.fw-fleet-open-cwd');
+    if (oldBtn) oldBtn.remove();
+    const newBtn = buildOpenCwdButton(session);
+    if (newBtn) head.appendChild(newBtn);
+
+    // 子 agent 区整块重建。这里刻意不做 keyed 更新：它默认是收起的，
+    // 展开时才有内容，而展开态下用户的注意力在树上、不在选文字上；
+    // 真要在树里选文字再说（E6 的症状是卡片主体，不是这里）。
+    if (r.subSection) r.subSection.remove();
+    const subSection = buildSubagentSection(session, scannedAt);
+    if (subSection) card.appendChild(subSection);
+    r.subSection = subSection || null;
+
+    card._fleetFields = f;
     return card;
   }
 
@@ -590,41 +820,137 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       openSubagentSessionId = null;
     }
 
-    const prevList = contentEl.querySelector('.fw-fleet-list');
-    const savedScrollTop = prevList ? prevList.scrollTop : 0;
-
-    contentEl.innerHTML = '';
     const groups = groupSessions(report.sessions, report.scannedAt);
+
     if (groups.length === 0) {
+      // 空态/降级态走全量替换：没有卡片就没有可保的选区，也没有复用价值。
+      contentEl.innerHTML = '';
       const empty = document.createElement('div');
       empty.className = 'fw-fleet-empty';
       empty.textContent = '没有正在运行的 agent';
       contentEl.appendChild(empty);
-    } else {
-      const list = document.createElement('div');
-      list.className = 'fw-fleet-list';
-      for (const group of groups) {
-        const def = STATUS_DEFS[group.key];
-        const h = document.createElement('div');
-        h.className = 'fw-fleet-group-title';
-        const label = document.createElement('span');
-        label.textContent = group.label;
-        const count = document.createElement('span');
-        count.className = 'fw-fleet-group-count';
-        count.textContent = String(group.items.length);
-        h.appendChild(label);
-        h.appendChild(count);
-        list.appendChild(h);
-        for (const session of group.items) {
-          list.appendChild(buildCard(session, def, report.scannedAt));
-        }
-      }
-      contentEl.appendChild(list);
-      list.scrollTop = savedScrollTop;
+      syncWarnings(report.warnings);
+      return;
     }
 
-    if (report.warnings && report.warnings.length > 0) {
-      contentEl.appendChild(buildWarnings(report.warnings));
+    // E6：keyed 原地更新。以前这里是 contentEl.innerHTML = '' 然后整树重建，
+    // 每 2s 把所有文本节点换一遍——落在卡片上的用户选区随之消失（拖蓝一段
+    // 会话标题想复制，两秒后就没了）。焦点守卫拦不住这个场景，因为拖选不
+    // 产生焦点：activeElement 停在 body，root.contains() 为 false。
+    //
+    // 现在按 sessionId 复用节点：活下来的卡片连同它承载的选区一起留在原地，
+    // 只有真变了的字段会被写。顺带把每轮的 DOM 操作量从"N 张卡全建"降到
+    // "改几个字符串"。
+    let list = contentEl.querySelector('.fw-fleet-list');
+    if (!list) {
+      // 从空态/加载态/错误态切过来：contentEl 里是别的东西，清掉重来一次。
+      contentEl.innerHTML = '';
+      list = document.createElement('div');
+      list.className = 'fw-fleet-list';
+      contentEl.appendChild(list);
+    }
+
+    // 现存卡片建索引。注意要在动 DOM 之前收集完——边遍历边移动节点会漏。
+    /** @type {Map<string, HTMLElement>} */
+    const existing = new Map();
+    for (const el of list.querySelectorAll('.fw-fleet-card')) {
+      existing.set(el.dataset.sessionId, el);
+    }
+
+    // ---- 第一趟：把这一轮该有的节点按目标顺序攒出来（先不动 DOM）----
+    //
+    // 早先这里是一趟贪心 cursor：cursor 不等于当前节点就 insertBefore。
+    // 它有个隐蔽的失败模式——挡在 cursor 上的不一定是"要被删的"节点，也
+    // 可能是"活着但该排到后面去"的节点。贪心遇到这种情况会去搬**后面那张
+    // 无辜的卡片**，而搬动等于重新挂载，选区当场没。触发它的是最日常的三
+    // 件事：某个会话状态变了换组、组内按活动时间重排、某一整组消失。所以
+    // 改成两趟，用 LIS 挑出"最多能有多少节点原地不动"。
+    const target = [];
+    let groupIndex = 0;
+    for (const group of groups) {
+      const def = STATUS_DEFS[group.key];
+
+      // 分组标题按序号复用（组的身份就是它在列表里的第几个），只更新文字。
+      // 用 key 复用没有意义：标题里没有值得保护的选区，而组会随状态增删。
+      let h = list.querySelector('.fw-fleet-group-title[data-group-index="' + groupIndex + '"]');
+      if (!h) {
+        h = document.createElement('div');
+        h.className = 'fw-fleet-group-title';
+        h.dataset.groupIndex = String(groupIndex);
+        const label = document.createElement('span');
+        const count = document.createElement('span');
+        count.className = 'fw-fleet-group-count';
+        h.appendChild(label);
+        h.appendChild(count);
+      }
+      setText(h.firstChild, group.label);
+      setText(h.lastChild, String(group.items.length));
+      target.push(h);
+      groupIndex += 1;
+
+      for (const session of group.items) {
+        const old = existing.get(session.sessionId);
+        const card = old
+          ? updateCard(old, session, def, report.scannedAt)
+          : buildCard(session, def, report.scannedAt);
+        target.push(card);
+      }
+    }
+
+    // ---- 第二趟：只搬必须搬的 ----
+    const domOrder = new Map();
+    Array.prototype.forEach.call(list.children, function (el, i) {
+      domOrder.set(el, i);
+    });
+    /** @type {number[]} 每个 target 元素在旧 DOM 里的下标，新节点为 -1 */
+    const oldIndex = target.map(function (el) {
+      const at = domOrder.get(el);
+      return at === undefined ? -1 : at;
+    });
+    // 选区在谁身上，谁就最不能动。必须在这里读、每轮读一次：它是随用户
+    // 操作变化的运行时事实，不能从数据推出来。
+    const selNode = currentSelectionNode();
+    const weights = target.map(function (el) {
+      if (selNode && el.contains(selNode)) return SELECTED_WEIGHT;
+      return el.classList.contains('fw-fleet-card') ? CARD_WEIGHT : TITLE_WEIGHT;
+    });
+    const keepIdx = pickStayPut(oldIndex, weights);
+    const keep = new Set();
+    for (const i of keepIdx) keep.add(target[i]);
+
+    // 从后往前插：后面的节点已经就位，anchor 才是稳定的。
+    let anchor = null;
+    for (let i = target.length - 1; i >= 0; i -= 1) {
+      const node = target[i];
+      if (!keep.has(node)) list.insertBefore(node, anchor);
+      anchor = node;
+    }
+
+    /** 这一轮摆放过的全部节点（标题+卡片），收尾时据此清理残留。 */
+    const placed = new Set(target);
+
+    // 清掉这一轮没被用到的旧节点：退出的会话、以及组变少后多出来的标题。
+    // 判据是"这一轮有没有摆过它"而不是"它是什么类型"——按类型判会给将来
+    // 往 list 里加第三种子节点留个静默失效的口子（Number(undefined) >= n 恒
+    // 为 false，那种节点会既不被清理也不参与摆放，永久滞留在列表里）。
+    for (const el of Array.prototype.slice.call(list.children)) {
+      if (!placed.has(el)) el.remove();
+    }
+
+    syncWarnings(report.warnings);
+  }
+
+  /**
+   * 警告折叠区跟着报告增删。整块重建（而不是 keyed 更新）是刻意的：它
+   * 默认收起，展开态由 warningsOpen 单独记着，重建不影响；而警告文本
+   * 变化时整块换掉最省事。
+   * @param {import('./fleet.js').FleetWarning[]|undefined} warnings
+   */
+  function syncWarnings(warnings) {
+    const old = contentEl.querySelector('.fw-fleet-warnings');
+    if (old) old.remove();
+    if (warnings && warnings.length > 0) {
+      contentEl.appendChild(buildWarnings(warnings));
     }
   }
 
