@@ -93,6 +93,27 @@ function subagentLabel(sub) {
 }
 
 /**
+ * 文件夹图标（feather 风格，与 float.html 里那几个内联 SVG 同一套笔画参数）。
+ * 用 createElementNS 而不是 innerHTML 拼字符串：这个文件其余部分全是
+ * createElement 建节点，没必要为一个图标开 innerHTML 的头。
+ * @returns {SVGElement}
+ */
+function folderIcon() {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z');
+  svg.appendChild(path);
+  return svg;
+}
+
+/**
  * 数一棵子树里"更深层"折叠起来的节点总数（不只是直接子节点，是全部
  * 后代）——用户想知道的是"这一支底下到底还有多少东西"，不是"这一层
  * 有几个直接孩子"。
@@ -214,6 +235,11 @@ function countWorkingSubagents(subagents, scannedAt) {
  *        并且完全不启动轮询——playwright 冒烟跑在浏览器里，这一步不能报错。
  * @param {() => boolean} opts.getVisibility  当前浮窗是否可见（由调用方综合
  *        document.visibilityState 判断；本模块只在每次 tick 时读一下这个值）
+ * @param {(path: string) => (Promise<unknown>|void)} [opts.openPath]  在系统文件管理器
+ *        里打开一个目录（Tauri opener 插件的 openPath）。**这是本模块唯一一个对外
+ *        副作用**，此前整个 Agent 面板都是只读的。不传 / 非 Tauri 环境则整个按钮
+ *        不渲染，而不是渲染成禁用态——一个永远点不动的按钮只是在占位置。
+ *        失败反馈（toast）由注入方负责，本模块只负责调用。
  * @param {(err: unknown) => void} [opts.onError]  每次抓取失败时的旁路通知（比如
  *        float.js 想 console.warn 一下），与面板里显示的错误横条互不影响
  * @param {boolean} [opts.enabled]  settings.fleet.enabled 的初始值，默认 true。
@@ -221,7 +247,7 @@ function countWorkingSubagents(subagents, scannedAt) {
  *        定时器，之后由 setEnabled() 实时更新（见返回值说明）。
  * @returns {{ refreshSchedule: () => void, setEnabled: (v: boolean) => void, stop: () => void }}
  */
-export function createFleetView({ root, tabButton, badge, orbDot, invoke, getVisibility, onError, enabled }) {
+export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPath, getVisibility, onError, enabled }) {
   let errorBannerEl = null;
   let contentEl = null;
   let warningsOpen = false; // 警告折叠区展开状态，重渲染后要保持（同 openQuickGroupId 的做法）
@@ -303,6 +329,9 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, getVis
     model.textContent = modelText;
     head.appendChild(model);
 
+    const openBtn = buildOpenCwdButton(session);
+    if (openBtn) head.appendChild(openBtn);
+
     card.appendChild(head);
 
     const titleLine = document.createElement('div');
@@ -357,6 +386,42 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, getVis
     if (subSection) card.appendChild(subSection);
 
     return card;
+  }
+
+  /**
+   * E3：卡片头部右侧的"打开工作目录"按钮。
+   *
+   * 刻意做成一个独立小按钮，而不是让整张卡片可点：打开文件管理器是个对外
+   * 副作用，而卡片本身是拿来扫读状态的，误触很烦。
+   *
+   * @param {import('./fleet.js').AgentSession} session
+   * @returns {HTMLElement|null}
+   */
+  function buildOpenCwdButton(session) {
+    if (!openPath || !session.cwd) return null;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'fw-fleet-open-cwd';
+    btn.title = '在文件管理器中打开 ' + session.cwd;
+    btn.setAttribute('aria-label', '打开工作目录');
+    btn.appendChild(folderIcon());
+    btn.addEventListener('click', function () {
+      // ⚠️ 点完必须 blur。按钮留着焦点会让 applyReport 的焦点守卫一直判定
+      // "用户正在交互"，于是**每一轮轮询都跳过内容重建**——面板从此静悄悄
+      // 地停止刷新，界面上没有任何迹象说明为什么。子 agent 折叠区不需要这
+      // 一步，是因为它点完立刻重建 DOM，按钮连同焦点一起消失了；这个按钮
+      // 不重建 DOM，得自己把焦点交出去。
+      btn.blur();
+      try {
+        const r = openPath(session.cwd);
+        // 注入方自己也会 catch（float.js 要弹 toast），这里再兜一层只是不想
+        // 让某个没 catch 的实现变成 unhandled rejection。
+        if (r && typeof r.catch === 'function') r.catch(function () {});
+      } catch (e) {
+        /* 同步抛错也不该波及卡片上的其它交互 */
+      }
+    });
+    return btn;
   }
 
   /**

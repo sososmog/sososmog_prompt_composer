@@ -586,12 +586,25 @@ import { createFleetView } from './fleetView.js';
     ? function (cmd, args) { return coreApi.invoke(cmd, args); }
     : null;
 
+  // 打开会话工作目录（E3）。权限 opener:allow-open-path 已在 capabilities 里。
+  // 失败反馈放在这里而不是 fleetView：面板里那条错误横条是留给"轮询失败"的，
+  // 一次点击没打开不该占用它（横条会一直挂着直到下次成功抓取）。toast 才是
+  // 这种一次性操作反馈的正确位置——顺带复用 backup.js 里打开配置目录同一套
+  // 失败话术。
+  var openerApi = TAURI && TAURI.opener;
+  var fleetOpenPath = (openerApi && typeof openerApi.openPath === 'function')
+    ? function (p) {
+        return openerApi.openPath(p).catch(function () { showToast('打开目录失败'); });
+      }
+    : null;
+
   var fleetView = createFleetView({
     root: $panelFleet,
     tabButton: $tabFleetBtn,
     badge: $tabFleetBadge,
     orbDot: $orbDot,
     invoke: fleetInvoke,
+    openPath: fleetOpenPath,
     // Windows 上 window.hide() 是否触发 visibilitychange 未验证，但这只是
     // 省电优化：判断失败最坏情况是浮窗隐藏时仍以精简档轮询，代价可忽略，
     // 不把它当正确性问题（见 docs/agent-fleet.md §5 C4）。

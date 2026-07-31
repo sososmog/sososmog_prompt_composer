@@ -461,6 +461,19 @@
     flex:1; min-width:0; font-family:var(--font-mono); font-size:10px; color:var(--faint);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;
   }
+  /* 打开工作目录：head 行最右侧的图标按钮。align-self:center 是必需的——
+     head 是 align-items:baseline，图标没有文字基线，跟着 baseline 对会明显下沉。 */
+  .fw-fleet-open-cwd {
+    flex:none; align-self:center;
+    display:inline-flex; align-items:center; justify-content:center;
+    width:17px; height:17px; padding:0;
+    border:none; border-radius:4px; background:transparent;
+    color:var(--faint); cursor:pointer;
+    transition:background 0.14s ease, color 0.14s ease;
+  }
+  .fw-fleet-open-cwd:hover { background:var(--amber-soft); color:var(--amber-hi); }
+  .fw-fleet-open-cwd svg { width:11px; height:11px; }
+
   .fw-fleet-title-line {
     font-size:11px; color:var(--text-soft);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;

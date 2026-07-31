@@ -1179,6 +1179,130 @@ describe('createFleetView：E2 小球状态点', function () {
 });
 
 /* ============================================================
+ * E3：点开会话的工作目录
+ * ------------------------------------------------------------
+ * 这是整个 Agent 面板里第一个对外副作用（此前全部只读），所以除了
+ * "点了有没有调对"，还要验两件容易漏的事：没有注入能力时按钮压根
+ * 不渲染，以及点完焦点必须交出去——否则焦点守卫会让面板悄悄停更。
+ * ============================================================ */
+describe('createFleetView：E3 打开工作目录', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  function mount(sessions, extra) {
+    var refs = fleetRefs();
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: sessions }));
+    refs.root.classList.add('is-active');
+    controller = createFleetView(
+      Object.assign(
+        {
+          root: refs.root,
+          tabButton: refs.tabButton,
+          badge: refs.badge,
+          invoke: invoke,
+          getVisibility: function () { return true; },
+        },
+        extra
+      )
+    );
+    return refs;
+  }
+
+  it('点击按钮，用会话的 cwd 调注入的 openPath', async function () {
+    var openPath = vi.fn().mockResolvedValue(undefined);
+    var refs = mount([makeSession({ sessionId: 's1', cwd: 'D:/proj/alpha' })], { openPath: openPath });
+    await advance(0);
+
+    var btn = refs.root.querySelector('.fw-fleet-card[data-session-id="s1"] .fw-fleet-open-cwd');
+    expect(btn).not.toBe(null);
+    expect(btn.title).toContain('D:/proj/alpha');
+
+    btn.click();
+    expect(openPath).toHaveBeenCalledTimes(1);
+    expect(openPath).toHaveBeenCalledWith('D:/proj/alpha');
+  });
+
+  it('每张卡片各带各的按钮，点谁开谁的目录', async function () {
+    var openPath = vi.fn().mockResolvedValue(undefined);
+    var refs = mount(
+      [
+        makeSession({ sessionId: 's1', cwd: 'D:/proj/alpha' }),
+        makeSession({ sessionId: 's2', cwd: 'D:/proj/beta' }),
+      ],
+      { openPath: openPath }
+    );
+    await advance(0);
+
+    refs.root.querySelector('.fw-fleet-card[data-session-id="s2"] .fw-fleet-open-cwd').click();
+    expect(openPath).toHaveBeenCalledWith('D:/proj/beta');
+  });
+
+  it('没有注入 openPath（非 Tauri）：按钮完全不渲染，卡片其余部分照常', async function () {
+    var refs = mount([makeSession({ sessionId: 's1' })]);
+    await advance(0);
+
+    expect(refs.root.querySelectorAll('.fw-fleet-open-cwd').length).toBe(0);
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(1);
+  });
+
+  it('cwd 为空：不渲染按钮（没有目录可开）', async function () {
+    var openPath = vi.fn();
+    var refs = mount([makeSession({ sessionId: 's1', cwd: '' })], { openPath: openPath });
+    await advance(0);
+
+    expect(refs.root.querySelectorAll('.fw-fleet-open-cwd').length).toBe(0);
+  });
+
+  it('点完把焦点交出去，面板不会因为焦点守卫停止刷新', async function () {
+    var openPath = vi.fn().mockResolvedValue(undefined);
+    var refs = fleetRefs();
+    var invoke = vi
+      .fn()
+      .mockResolvedValueOnce(makeReport({ sessions: [makeSession({ sessionId: 's1', name: '旧名字' })] }))
+      .mockResolvedValue(makeReport({ sessions: [makeSession({ sessionId: 's1', name: '新名字' })] }));
+    refs.root.classList.add('is-active');
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, openPath: openPath, getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var btn = refs.root.querySelector('.fw-fleet-open-cwd');
+    // 真实浏览器里点 <button> 会先聚焦它；jsdom 的 .click() 不会，所以显式
+    // 摆出这个前置状态，否则这条用例测的就不是 blur 而是 jsdom 的行为。
+    btn.focus();
+    expect(refs.root.contains(document.activeElement)).toBe(true);
+
+    btn.click();
+    expect(refs.root.contains(document.activeElement)).toBe(false);
+
+    // 行为级验证：下一轮轮询的新数据确实画进了 DOM
+    await advance(2000);
+    expect(refs.root.querySelector('.fw-fleet-name').textContent).toBe('新名字');
+  });
+
+  it('openPath 抛错 / 返回 rejected promise 都不炸，后续轮询照常', async function () {
+    var openPath = vi.fn().mockRejectedValue(new Error('打不开'));
+    var refs = mount([makeSession({ sessionId: 's1' })], { openPath: openPath });
+    await advance(0);
+
+    refs.root.querySelector('.fw-fleet-open-cwd').click();
+    await advance(2000);
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(1);
+
+    // 同步抛错也一样
+    var throwing = vi.fn(function () { throw new Error('同步炸'); });
+    var refs2 = mount([makeSession({ sessionId: 's9' })], { openPath: throwing });
+    await advance(0);
+    expect(function () {
+      refs2.root.querySelector('.fw-fleet-open-cwd').click();
+    }).not.toThrow();
+  });
+});
+
+/* ============================================================
  * float.js：tab 切换 + localStorage 持久化（C5）
  * ------------------------------------------------------------
  * 这段逻辑本身在 float.js 里，不在 fleetView.js，但按任务约束这是
