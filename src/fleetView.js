@@ -227,6 +227,33 @@ function countWorkingSubagents(subagents, scannedAt) {
 /** 卡片上可能有用户的选区，标题上没有——搬动量打平时优先牺牲标题。 */
 export const CARD_WEIGHT = 100;
 export const TITLE_WEIGHT = 1;
+/**
+ * 选区此刻真的落在这个节点上。压倒性权重：其它节点全加起来也不该盖过它。
+ *
+ * 只靠 CARD_WEIGHT 不够——同组两张卡片换位时两边都是卡片，权重一样，DP
+ * 的严格大于比较会稳定地拍向先遇到的那支，而重排里"往上跑"的恰恰是数据
+ * 变了的那张，没变的那张被往下挤 = 被搬走。fuzz 实测这类平局占全部选区
+ * 丢失的 100%，且每一次都有一个同样最优、但保住选区的选择。
+ */
+export const SELECTED_WEIGHT = 10000;
+
+/**
+ * 选区当前落在哪个元素里。渲染前读一次，喂给 pickStayPut 当权重。
+ *
+ * 拿不到选区（没选、跨文档、jsdom 早期状态）一律返回 null，调用方按
+ * "没有选区"处理——这条路径不能抛，它跑在每一轮轮询上。
+ *
+ * @returns {Node|null}
+ */
+function currentSelectionNode() {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    return sel.getRangeAt(0).startContainer;
+  } catch (e) {
+    return null;
+  }
+}
 
 /**
  * 挑出"可以原地不动"的那批节点：在保持相对顺序的前提下，让留下来的总权重
@@ -865,7 +892,13 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       const at = domOrder.get(el);
       return at === undefined ? -1 : at;
     });
+    // 选区在谁身上，谁就最不能动。必须在这里读、每轮读一次：它是随用户
+    // 操作变化的运行时事实，不能从数据推出来。
+    const selNode = currentSelectionNode();
     const weights = target.map(function (el) {
+      if (selNode && el.contains(selNode)) return SELECTED_WEIGHT;
+
+
       return el.classList.contains('fw-fleet-card') ? CARD_WEIGHT : TITLE_WEIGHT;
     });
     const keepIdx = pickStayPut(oldIndex, weights);

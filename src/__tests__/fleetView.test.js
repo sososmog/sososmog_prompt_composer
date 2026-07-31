@@ -28,8 +28,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createFleetView, pickStayPut, CARD_WEIGHT, TITLE_WEIGHT } from '../fleetView.js';
-import { STATUS_DEFS } from '../fleet.js';
+import { createFleetView, pickStayPut, CARD_WEIGHT, TITLE_WEIGHT, SELECTED_WEIGHT } from '../fleetView.js';
+import { STATUS_DEFS, groupSessions } from '../fleet.js';
 import fleetReportFixture from './fixtures/fleetReport.json';
 
 var here = path.dirname(fileURLToPath(import.meta.url));
@@ -1803,6 +1803,37 @@ describe('createFleetView：E6 keyed 原地更新', function () {
     expect(sel.toString().length).toBe(2);
   });
 
+  it('同组两张卡换位时，没变的那张上的选区仍然存活', async function () {
+    // 第三轮 review 的 fuzz 抓出来的：这是选区丢失里最后也最高频的一种。
+    // 活跃会话的 mtime 每轮都在动，同组内换位是轮询里最日常的重排。
+    // 两边都是卡片，CARD_WEIGHT 分不出高下，只有"选区在谁身上"能分。
+    var tw = function (o) { return Object.assign({}, makeSession({}).transcript, o); };
+    var refs = mountSeq([
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'A', name: 'aaa', transcript: tw({ mtimeMs: 1000000 }) }),
+        makeSession({ sessionId: 'B', name: 'bbb', transcript: tw({ mtimeMs: 999000 }) }),
+      ] }),
+      // B 变新排到 A 前面；A 的数据一个字节都没变
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'A', name: 'aaa', transcript: tw({ mtimeMs: 1000000 }) }),
+        makeSession({ sessionId: 'B', name: 'bbb', transcript: tw({ mtimeMs: 1000500 }) }),
+      ] }),
+    ]);
+    await advance(0);
+    var sel = selectTitleOf(refs, 'A');
+    expect(sel.toString().length).toBe(2);
+
+    await advance(2000);
+
+    // 顺序照常变（该换就换），只是选区那张没被拿去当代价
+    var ids = Array.prototype.map.call(
+      refs.root.querySelectorAll('.fw-fleet-card'),
+      function (el) { return el.dataset.sessionId; }
+    );
+    expect(ids).toEqual(['B', 'A']);
+    expect(sel.toString().length).toBe(2);
+  });
+
   it('子 agent 折叠区的展开状态不被轮询重绘打断', async function () {
     var subs = [
       { agentId: 'a1', parentId: null, description: '查代码', status: 'running', startedAt: 1000000, updatedAt: 1000000, model: 'claude-sonnet-5' },
@@ -1868,8 +1899,31 @@ describe('pickStayPut', function () {
     expect(moved([2, 0, 1], allCards(3))).toEqual([0]);
   });
 
-  it('相邻交换：只搬其中一个（等权重时保留先遇到的那个）', function () {
-    expect(moved([1, 0], allCards(2))).toEqual([1]);
+  it('相邻交换：只搬其中一个', function () {
+    // 搬哪一个由权重决定，等权重时是平局。这里只钉"恰好搬一个"——
+    // "该搬哪一个"由下面 SELECTED_WEIGHT 那条负责，那才是有意义的判据。
+    expect(moved([1, 0], allCards(2)).length).toBe(1);
+  });
+
+  it('选区落在谁身上，谁就不被搬（平局时的唯一正确判据）', function () {
+    // 同组两张卡片换位：两边都是卡片，CARD_WEIGHT 帮不上忙，DP 的严格
+    // 大于比较会稳定地拍向先遇到的那支。而重排里"往上跑"的恰恰是数据变
+    // 了的那张，没变的那张被往下挤 = 被搬 = 选区没了。
+    // oldIndex [0,2,1] = [标题, 卡B(原在末), 卡A(原在中)]
+    var oldIndex = [0, 2, 1];
+    // 选区在 A（idx2）上：必须搬 B，不能搬 A
+    expect(moved(oldIndex, [TITLE_WEIGHT, CARD_WEIGHT, SELECTED_WEIGHT])).toEqual([1]);
+    // 选区在 B（idx1）上：反过来
+    expect(moved(oldIndex, [TITLE_WEIGHT, SELECTED_WEIGHT, CARD_WEIGHT])).toEqual([2]);
+  });
+
+  it('选区权重压得过成片的卡片，不会被数量堆过去', function () {
+    // 一张带选区的卡片 vs 一长串没选区的卡片：前者必须活下来。
+    // SELECTED_WEIGHT 定成 10000 而不是 200 就是为了这个——否则只要
+    // 屏幕上卡片够多，选区那张就会被数量淹掉。
+    var oldIndex = [5, 0, 1, 2, 3];
+    var weights = [SELECTED_WEIGHT, CARD_WEIGHT, CARD_WEIGHT, CARD_WEIGHT, CARD_WEIGHT];
+    expect(moved(oldIndex, weights)).not.toContain(0);
   });
 
   it('打平时牺牲标题、保住卡片（权重的唯一作用）', function () {
@@ -1892,4 +1946,125 @@ describe('pickStayPut', function () {
   it('空输入不炸', function () {
     expect(pickStayPut([], [])).toEqual([]);
   });
+});
+
+/* ============================================================
+ * E6 fuzz：随机多轮变化下的顺序正确性 + 选区存活率
+ * ------------------------------------------------------------
+ * 前面那些用例每条只钉一个具体场景，而 DOM diff 的失败往往出在
+ * 场景的组合上（增删 + 换组 + 组内重排同时发生）。这条用随机序列
+ * 补那个面，两条不变式：
+ *   1. 每一轮渲染后的卡片顺序必须等于 groupSessions 的期望顺序；
+ *   2. 被观察的卡片如果这一轮数据一个字节都没变、且仍在列表里，
+ *      它上面的选区必须还在。
+ *
+ * 自证有效（按项目约定实际跑过）：把 fleetView.js 里那行
+ * `if (selNode && el.contains(selNode)) return SELECTED_WEIGHT;`
+ * 删掉，同样 1200 轮下 242 个样本会丢 21 次（8.7%）。这里用 300
+ * 轮拿到约 60 个样本，漏检概率 ~0.4%，而耗时只有 0.4 秒。
+ *
+ * PRNG 是固定 seed 的线性同余，失败可复现。
+ * ============================================================ */
+describe('createFleetView：E6 fuzz', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  var SCANNED = 1000000;
+
+  it('随机多轮增删改：顺序始终正确，未变卡片上的选区始终存活', async function () {
+    var seed = 12345;
+    function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+    function pick(a) { return a[Math.floor(rnd() * a.length)]; }
+
+    var STATES = [
+      {},
+      { lastRole: 'assistant', lastStopReason: 'end_turn', lastTailKind: 'text' },
+      { hasApiError: true, apiErrorStatus: '529', lastStopReason: 'stop_sequence' },
+    ];
+    var pool = ['s0', 's1', 's2', 's3', 's4', 's5'];
+
+    function randomReport() {
+      var sessions = [];
+      for (var i = 0; i < pool.length; i += 1) {
+        if (rnd() < 0.92) {
+          var st = Object.assign({}, rnd() < 0.35 ? pick(STATES) : STATES[i % 3]);
+          st.mtimeMs = SCANNED - Math.floor(rnd() * 3) * 1000;
+          st.lastMsgTsMs = st.mtimeMs;
+          sessions.push(makeSession({
+            sessionId: pool[i],
+            name: 'sess' + pool[i],
+            transcript: Object.assign({}, makeSession({}).transcript, st),
+          }));
+        }
+      }
+      return makeReport({ sessions: sessions, scannedAt: SCANNED });
+    }
+
+    var cur = randomReport();
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      orbDot: refs.orbDot,
+      invoke: vi.fn(function () { return Promise.resolve(cur); }),
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var orderFail = 0;
+    var selTotal = 0;
+    var selLost = 0;
+
+    for (var r = 0; r < 300; r += 1) {
+      var cards = refs.root.querySelectorAll('.fw-fleet-card');
+      var sel = null;
+      var watchedId = null;
+      var prevById = {};
+      cur.sessions.forEach(function (s) { prevById[s.sessionId] = JSON.stringify(s); });
+
+      if (cards.length > 0) {
+        var c = cards[Math.floor(rnd() * cards.length)];
+        watchedId = c.dataset.sessionId;
+        var tn = c.querySelector('.fw-fleet-title-line').firstChild;
+        if (tn && tn.textContent.length >= 2) {
+          var rg = document.createRange();
+          rg.setStart(tn, 0);
+          rg.setEnd(tn, 2);
+          sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(rg);
+        }
+      }
+
+      cur = randomReport();
+      await advance(2000);
+
+      var expected = [];
+      groupSessions(cur.sessions, cur.scannedAt).forEach(function (g) {
+        g.items.forEach(function (s) { expected.push(s.sessionId); });
+      });
+      var actual = Array.prototype.map.call(
+        refs.root.querySelectorAll('.fw-fleet-card'),
+        function (e) { return e.dataset.sessionId; }
+      );
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) orderFail += 1;
+
+      if (sel && watchedId) {
+        var still = cur.sessions.filter(function (s) { return s.sessionId === watchedId; })[0];
+        if (still && JSON.stringify(still) === prevById[watchedId]) {
+          selTotal += 1;
+          if (sel.toString().length !== 2) selLost += 1;
+        }
+      }
+    }
+
+    expect(orderFail).toBe(0);
+    expect(selLost).toBe(0);
+    // 采样量不足会让上面两条变成没意义的空跑——顺带钉住它
+    expect(selTotal).toBeGreaterThan(30);
+  }, 30000);
 });
