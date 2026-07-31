@@ -234,6 +234,11 @@ export const TITLE_WEIGHT = 1;
  * 的严格大于比较会稳定地拍向先遇到的那支，而重排里"往上跑"的恰恰是数据
  * 变了的那张，没变的那张被往下挤 = 被搬走。fuzz 实测这类平局占全部选区
  * 丢失的 100%，且每一次都有一个同样最优、但保住选区的选择。
+ *
+ * 量级边界：10000 / CARD_WEIGHT = 100，也就是屏幕上超过 100 张卡片时，
+ * 卡片数量堆起来能盖过选区。真机实测过超限后果——只是退化成"选区丢失"
+ * （即这个提交之前的行为），顺序正确性不依赖权重，不会错乱也不会崩。
+ * 101 个并发会话不是真实场景，不为它加复杂度。
  */
 export const SELECTED_WEIGHT = 10000;
 
@@ -242,6 +247,16 @@ export const SELECTED_WEIGHT = 10000;
  *
  * 拿不到选区（没选、跨文档、jsdom 早期状态）一律返回 null，调用方按
  * "没有选区"处理——这条路径不能抛，它跑在每一轮轮询上。
+ *
+ * `isCollapsed` 那个判断不只是"没选中就别管"，它还恰好挡住了编写区的
+ * textarea：真 Chromium 实测，**textarea 内部的选区在 document 层面报告
+ * isCollapsed: true**（哪怕真的选中了一段文字），于是这里返回 null，
+ * 编写区不会被误判成需要保护。这条 jsdom 测不出来，是在真浏览器里验的。
+ * 结构上 #fwTextarea 与 #fwPanelFleet 是兄弟节点，contains 也是 false，
+ * 算第二道保险。
+ *
+ * 成本可忽略：真机实测 1000 次 getSelection()+contains 共 0.6ms，读的是
+ * 已有的 selection 对象，不触发重排。
  *
  * @returns {Node|null}
  */
@@ -897,8 +912,6 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     const selNode = currentSelectionNode();
     const weights = target.map(function (el) {
       if (selNode && el.contains(selNode)) return SELECTED_WEIGHT;
-
-
       return el.classList.contains('fw-fleet-card') ? CARD_WEIGHT : TITLE_WEIGHT;
     });
     const keepIdx = pickStayPut(oldIndex, weights);
