@@ -16,10 +16,10 @@
 | 阶段 1 轨 C（浮窗 UI） | ✅ 完成，含真浏览器冒烟 + 用户真机验收 |
 | 阶段 2 subagent 树 | ✅ 完成，含真机验证 |
 | 阶段 3 收尾 | ✅ 完成 |
-| 阶段 4 可选增强 | 🔶 E2/E3/E5 完成；E1 待决策，E6/E7/E8 待触发，E4 未开始 |
+| 阶段 4 可选增强 | 🔶 E1/E2/E3/E5 完成；E6/E7/E8 待触发，E4 未开始 |
 
-当前规模：Rust 88 个单测 + 5 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
-前端 670 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本（10 项）；
+当前规模：Rust 102 个单测 + 5 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
+前端 682 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本（10 项）；
 clippy 0 新增警告；lint 0/0。
 
 **D4 全量回归全绿**：前端 654 单测 / lint 0-0 / 对比度 4 项达标 / 主冒烟 30 项 /
@@ -208,7 +208,15 @@ subagents/agent-a52f755df57239c77.meta.json    149B
 
 `timeline.jsonl` 是 append-only 的状态变迁流，实测 state 值 `working` / `blocked` / `done`。
 
-当前本机 `daemon status` = not running，`roster.json` 的 `workers` 是 `{}` —— 没有后台会话可测。**所以 L4 排到阶段 4，且必须能在"目录不存在"时静默跳过。**
+当前本机 `daemon status` = not running，`roster.json` 的 `workers` 是 `{}` —— 没有活的后台会话可测。**所以 L4 排到阶段 4，且必须能在"目录不存在"时静默跳过。**
+
+**E1 实现后的补充（SCHEMA v2）**：
+
+- 走的是"**独立成条**"方案：job 按 `sessionId` 与名册匹配，匹配上的挂到已有会话（那说明它有活进程，CPU／存活校验一切照常），**匹配不上的自己成为一个 `AgentSession`**。这样天然避免同一会话显示两次，也让"没有活进程的后台会话"能出现在列表里——那正是这一层的意义，`--bg` 起的活最容易被忘掉。
+- 为此 `AgentSession.pid` 改成 `Option<u32>`、`Liveness` 增加 `no-process`。前端不读 `pid`，所以渲染层零改动；但三个聚合函数（`groupSessions` / `countNeedsInput` / `reduceFleetTone`）原本写的是 `liveness !== 'alive' → 跳过`，**那条判据会把后台会话整个吞掉且毫无迹象**，统一换成 `isListedSession()`（只排除 `pid-reused`）。
+- `state.json` 的 `createdAt`／`updatedAt` 实测是 **ISO-8601 字符串**，而名册那边的 `startedAt` 是**数字毫秒**。同一产品里两种格式并存，所以解析器两种都认——只认一种就是在等它下次变更时静默失效（时间变 0，界面显示"很久以前"，不报任何错）。
+- `jobs/` 是只增不删的历史归档，终态 job（`done`／`failed`／`stopped`）只在 `JOB_TERMINAL_RETENTION_MS`（1 小时）内显示，否则"已完成"组会变成越滚越长的垃圾堆。进行中的不受限制。状态取值不认识时**按未结束处理**，宁可多显示一条。
+- 真机诊断刻意扫两遍（正常口径 + `now=0` 忽略保留期）：本机只有一条两周前的历史 job，正常口径下是 0 条，只扫一遍就分不清"过滤生效"和"解析器坏了"。
 
 ### L5 进程指标 —— sysinfo
 
@@ -287,7 +295,7 @@ type AgentSession = {
   // L3（空数组 = 无 subagents 目录）
   subagents: SubagentDigest[],
 
-  // L4（阶段 4）
+  // L4（v2 起有实现；非后台会话为 null）
   job: JobDigest | null,
 }
 
@@ -454,7 +462,7 @@ src-tauri/src/fleet/roster.rs       L1
 src-tauri/src/fleet/transcript.rs   L2（tail 读 + digest 抽取）
 src-tauri/src/fleet/subagents.rs    L3（阶段 2）
 src-tauri/src/fleet/proc.rs         L5（sysinfo）
-src-tauri/src/fleet/jobs.rs         L4（阶段 4）
+src-tauri/src/fleet/jobs.rs         L4（后台会话）
 src-tauri/tests/fixtures/*.jsonl    脱敏后的真实样本
 src/fleet.js                        纯函数
 src/fleetView.js                    浮窗 DOM 层 + 轮询调度
@@ -743,18 +751,18 @@ Rust 侧（A9–A10）与 UI 侧（C9–C10）可并行 ⇄，但都依赖阶段
 | E2 | 悬浮小球状态点（复用 `reduceFleetTone`） | ✅ 已做 | 门槛 `ORB_DOT_MIN_PRIORITY=3`，只有 failed/needs-input/working 点亮；顺带修掉浅色主题下橙点 2.89:1 的对比度问题 |
 | E3 | 点卡片打开该会话的 cwd（走已有的 `opener` 插件） | ✅ 已做 | 独立小按钮而非整卡可点；点完必须 `blur()`，否则焦点守卫会让面板静默停更 |
 | E5 | CPU 含工具子进程 | ✅ 已做 | 全量刷拓扑 + 只对子树刷 CPU（14.4+12ms，而非一次性全量带 CPU 的 75ms）；按各进程分别算差值再求和 |
-| E1 | L4 后台会话（`jobs/*/state.json` + `timeline.jsonl`） | ⬜ 待决策 | 官方已算好 `state`/`detail`/`tokens`/`intent`。**契约决定未定：后台会话可能没有活进程，`pid` 要不要改 `Option<u32>`**（见下）。**本机现在没有后台会话，需要先 `claude --bg` 造一个才能验** |
+| E1 | L4 后台会话（`jobs/*/state.json`） | ✅ 已做 | 走"独立成条"方案，升 SCHEMA_VERSION 2（`pid` 改 `Option`、`liveness` 加 `no-process`）。细节见 §L4 那节。⚠️ **本机没有活的后台会话，只用历史归档验过解析路径；真正的端到端要先 `claude --bg` 造一个** |
 | E8 | subagent jsonl 按 mtime 缓存 | ⬜ 待触发 | 等"会话多 + 子 agent 多时轮询变迟钝"真的出现。缓存要有上限或按会话清理 |
 | E6 | keyed 原地更新替代全量重建 | ⬜ 待触发 | 触发条件很具体：全量重建会抹掉**文本选区**（焦点守卫护不住它），这是最可能先被感知到的症状 |
 | E7 | `notify` 文件监听替代轮询 | ⬜ 待触发 | 只监听已知会话的 jsonl，即时性更好；仅当轮询显得迟钝时做。**改成推送后要保留一个低频兜底轮询**——轮询自带"漏了下次补上"的自愈，监听器静默失效时界面会永久停在旧数据上 |
 | E4 | Codex 支持 | ⬜ 未开始 | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`，首行 `session_meta` 带 `cwd`/`cli_version`/`originator`。**与其余几项不是一个量级**：没有名册（拿不到 pid → 拿不到 CPU）、状态判据要另写一套、契约要加 `provider` 且升 SCHEMA_VERSION |
 
-**E1 的契约决定**（做之前必须先定）：后台会话可能没有活进程（daemon 托管，或进程已退出但作业还在），而契约里 `AgentSession.pid` 是必填 `u32`、`liveness` 只有 `alive`/`pid-reused`。
+**E1 的契约决定**（已定：方案 B）：后台会话可能没有活进程（daemon 托管，或进程已退出但作业还在），而 v1 契约里 `AgentSession.pid` 是必填 `u32`、`liveness` 只有 `alive`/`pid-reused`。
 
 - **方案 A 仅标注**：job 只挂到已有名册会话上（按 `sessionId` 匹配）。简单、不改契约；但没有活进程的后台会话根本不出现，等于功能只做一半。
-- **方案 B 独立成条**：job 可以自己成为一个 `AgentSession`。更有用；但要把 `pid` 改 `Option<u32>`、`liveness` 加一个值、前端各处判 pid 的地方跟着改，要升 `SCHEMA_VERSION`。
+- **方案 B 独立成条**（采用）：job 可以自己成为一个 `AgentSession`。代价是 `pid` 改 `Option<u32>`、`liveness` 加 `no-process`、升 `SCHEMA_VERSION`。
 
-倾向 B —— A 会让用户困惑（"我 `--bg` 起的活怎么不显示"）。
+选 B 的理由：A 会让用户困惑（"我 `--bg` 起的活怎么不显示"）。实际改下来代价比预估小——前端根本不读 `pid`，唯一要动的是三个聚合函数的可见性判据。
 
 > `timeline.jsonl` 是完美的状态变迁时间线数据源，但先别做时间线 UI：380px 宽塞不下，且 `state.json` 的 `detail` 一句摘要已经够用。
 

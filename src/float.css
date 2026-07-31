@@ -482,6 +482,15 @@
     font-family:var(--font-mono); font-size:10px; color:var(--faint);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+  /* 后台会话的官方状态摘要。用色条同色（--card-tone）的左边框把它与普通
+     正文区分开——它不是会话内容，是"这个任务当前什么情况"。 */
+  .fw-fleet-job-detail {
+    margin-top:2px; padding-left:6px;
+    border-left:2px solid var(--card-tone, var(--muted));
+    font-size:10.5px; line-height:1.45; color:var(--text-soft);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
   .fw-fleet-meta {
     font-size:10px; color:var(--faint);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;

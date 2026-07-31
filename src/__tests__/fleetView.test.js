@@ -112,7 +112,7 @@ function makeSubagent(overrides) {
 function makeReport(overrides) {
   return Object.assign(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       scannedAt: 1000000,
       configDir: 'C:/demo/.claude',
       sessions: [],
@@ -194,7 +194,7 @@ describe('createFleetView：渲染', function () {
     expect(labels).not.toContain(STATUS_DEFS.completed.label);
     expect(labels).not.toContain(STATUS_DEFS.stopped.label);
 
-    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(8);
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(9);
   });
 
   it('无会话时显示空态文案', async function () {
@@ -519,7 +519,8 @@ describe('createFleetView：轮询调度', function () {
   it('schemaVersion 不匹配：停止轮询并显示提示', async function () {
     var refs = fleetRefs();
     refs.root.classList.add('is-active');
-    var invoke = vi.fn().mockResolvedValue(makeReport({ schemaVersion: 2 }));
+    // 用一个刻意远离当前值的版本号，免得契约每升一版这条测试就要跟着改
+    var invoke = vi.fn().mockResolvedValue(makeReport({ schemaVersion: 999 }));
     controller = createFleetView({
       root: refs.root,
       tabButton: refs.tabButton,
@@ -1006,6 +1007,145 @@ describe('createFleetView：失败卡片错误码', function () {
 
     var meta = findCard(refs, 's1').querySelector('.fw-fleet-meta');
     expect(meta.textContent).not.toContain('oauth_org_not_allowed');
+  });
+});
+
+/* ============================================================
+ * E1：后台会话（L4）的渲染
+ * ------------------------------------------------------------
+ * 后台会话的卡片和普通会话不是一回事：没有进程（CPU 是 "—"），常常连
+ * transcript 都没有（没有标题、没有分支、没有 model）。如果只按普通
+ * 会话那套画，它会是一张几乎全空的卡片——所以这里验的是"空出来的位置
+ * 各自换成了什么"。
+ * ============================================================ */
+describe('createFleetView：E1 后台会话卡片', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  function makeJobSession(overrides, jobOverrides) {
+    return makeSession(
+      Object.assign(
+        {
+          sessionId: 'sid-bg',
+          name: 'demo-bg',
+          pid: null,
+          liveness: 'no-process',
+          kind: 'background',
+          entrypoint: 'daemon',
+          proc: null,
+          transcript: null,
+          job: Object.assign(
+            {
+              jobId: 'aa11bb22',
+              state: 'working',
+              detail: '占位：正在改测试',
+              tempo: 'steady',
+              tokens: 40000,
+              inFlight: { tasks: 2, queued: 1 },
+              intent: '占位：后台任务的原始 prompt',
+              updatedAt: 1000000,
+            },
+            jobOverrides
+          ),
+        },
+        overrides
+      )
+    );
+  }
+
+  function mount(sessions, extra) {
+    var refs = fleetRefs();
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: sessions }));
+    refs.root.classList.add('is-active');
+    controller = createFleetView(
+      Object.assign(
+        {
+          root: refs.root,
+          tabButton: refs.tabButton,
+          badge: refs.badge,
+          invoke: invoke,
+          getVisibility: function () { return true; },
+        },
+        extra
+      )
+    );
+    return refs;
+  }
+
+  it('没有进程的后台会话照样渲染成卡片', async function () {
+    var refs = mount([makeJobSession()]);
+    await advance(0);
+
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"]');
+    expect(card, 'no-process 的后台会话必须画出来').not.toBe(null);
+    expect(card.classList.contains('tone-active')).toBe(true); // job.state=working
+  });
+
+  it('显示官方算好的 detail 摘要', async function () {
+    var refs = mount([makeJobSession()]);
+    await advance(0);
+
+    var detail = refs.root.querySelector('.fw-fleet-job-detail');
+    expect(detail).not.toBe(null);
+    expect(detail.textContent).toBe('占位：正在改测试');
+    expect(detail.title).toBe('占位：正在改测试');
+  });
+
+  it('detail 缺失时不留空行', async function () {
+    var refs = mount([makeJobSession({}, { detail: null })]);
+    await advance(0);
+    expect(refs.root.querySelectorAll('.fw-fleet-job-detail').length).toBe(0);
+  });
+
+  it('普通会话不出现 detail 行', async function () {
+    var refs = mount([makeSession({ sessionId: 's1' })]);
+    await advance(0);
+    expect(refs.root.querySelectorAll('.fw-fleet-job-detail').length).toBe(0);
+  });
+
+  it('没有 transcript 时标题回落到 job.intent', async function () {
+    var refs = mount([makeJobSession()]);
+    await advance(0);
+
+    var title = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"] .fw-fleet-title-line');
+    expect(title.textContent).toBe('占位：后台任务的原始 prompt');
+    expect(title.textContent).not.toBe('（无标题）');
+  });
+
+  it('有 transcript 时仍然优先用 aiTitle，不被 intent 顶掉', async function () {
+    var withTranscript = makeJobSession({ transcript: makeSession({}).transcript });
+    var refs = mount([withTranscript]);
+    await advance(0);
+
+    var title = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"] .fw-fleet-title-line');
+    expect(title.textContent).toBe('占位标题');
+  });
+
+  it('没有 model 时那个位置标「后台」，CPU 显示「—」而不是 0%', async function () {
+    var refs = mount([makeJobSession()]);
+    await advance(0);
+
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"]');
+    expect(card.querySelector('.fw-fleet-model').textContent).toBe('后台');
+    // 没有进程 ≠ 0% 占用，这个区别正是 cpuPercent 用 Option 的原因
+    expect(card.querySelector('.fw-fleet-meta').textContent).toContain('CPU —');
+    expect(card.querySelector('.fw-fleet-meta').textContent).not.toContain('CPU 0');
+  });
+
+  it('后台会话有 model 时不覆盖它', async function () {
+    var refs = mount([makeJobSession({ transcript: makeSession({}).transcript })]);
+    await advance(0);
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"]');
+    expect(card.querySelector('.fw-fleet-model').textContent).toBe('claude-opus-5');
+  });
+
+  it('blocked 的后台会话计入 tab 角标', async function () {
+    var refs = mount([makeJobSession({}, { state: 'blocked' })]);
+    await advance(0);
+    expect(refs.badge.hidden).toBe(false);
+    expect(refs.badge.textContent).toBe('1');
   });
 });
 

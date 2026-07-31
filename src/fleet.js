@@ -29,13 +29,15 @@
 
 /**
  * @typedef {Object} FleetWarning
- * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'} code
+ * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'} code
  * @property {string} detail
  */
 
 /**
  * @typedef {Object} AgentSession
- * @property {number} pid
+ * @property {number|null} pid    null = 这个会话没有对应进程（daemon 托管的后台
+ *                                会话），不是"没采到"。前端不读它，留在这里是为了
+ *                                让契约完整
  * @property {string} sessionId
  * @property {string} name
  * @property {string} cwd
@@ -43,7 +45,7 @@
  * @property {string} kind                'interactive' | 'background'
  * @property {number} startedAt           ms epoch
  * @property {string} cliVersion
- * @property {'alive'|'pid-reused'} liveness
+ * @property {'alive'|'pid-reused'|'no-process'} liveness
  * @property {ProcMetrics|null} proc
  * @property {TranscriptDigest|null} transcript  null = 空会话（已启动未开始），**不是错误**
  * @property {SubagentDigest[]} subagents
@@ -135,7 +137,7 @@
  * ============================================================ */
 
 /** 必须与 src-tauri/src/fleet/types.rs 的 SCHEMA_VERSION 一致。 */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /**
  * 多久没有写入算"空闲"。
@@ -482,7 +484,27 @@ export function buildSubagentTree(subagents) {
  */
 export function lastActivityMs(session) {
   const t = session.transcript;
-  return t?.mtimeMs ?? t?.lastMsgTsMs ?? session.startedAt;
+  // job.updatedAt 排在 startedAt 之前：后台会话常常没有 transcript，那时若直接
+  // 落到 startedAt，一个刚刚还在变状态的任务会显示成"3 小时前"——而 updatedAt
+  // 正是官方维护的"这个任务最后一次状态变化"。
+  return t?.mtimeMs ?? t?.lastMsgTsMs ?? session.job?.updatedAt ?? session.startedAt;
+}
+
+/**
+ * 这个会话该不该出现在列表 / 角标 / 小球状态点里。
+ *
+ * 判据从"必须是 alive"改成"排除 pid-reused"，是 SCHEMA 2 带来的：daemon 托管的
+ * 后台会话（`/loop`、`--bg`）根本没有进程可言，liveness 是 `no-process`，而它们
+ * 恰恰是最需要被看见的一类——起了就没人盯着，全靠面板告诉你它是不是卡住了。
+ *
+ * 唯一要排除的仍然只有 `pid-reused`：那是"有个进程，但我们不确定它还是不是
+ * 原来那个"，显示出来会误导（采集层已经为它单独报了 warning）。
+ *
+ * @param {AgentSession} session
+ * @returns {boolean}
+ */
+export function isListedSession(session) {
+  return session.liveness !== 'pid-reused';
 }
 
 /** @param {AgentSession} a @param {AgentSession} b */
@@ -516,7 +538,7 @@ export function groupSessions(sessions, scannedAt, opts = {}) {
   const buckets = new Map(GROUP_ORDER.map((code) => [code, []]));
 
   for (const session of sessions) {
-    if (session.liveness !== 'alive') continue;
+    if (!isListedSession(session)) continue;
     const { code } = deriveStatus(session, scannedAt, { idleMs });
     buckets.get(code).push(session);
   }
@@ -542,7 +564,7 @@ export function countNeedsInput(sessions, scannedAt, opts = {}) {
   const idleMs = opts.idleMs ?? IDLE_MS;
   let count = 0;
   for (const session of sessions) {
-    if (session.liveness !== 'alive') continue;
+    if (!isListedSession(session)) continue;
     if (deriveStatus(session, scannedAt, { idleMs }).code === 'needs-input') count += 1;
   }
   return count;
@@ -560,7 +582,7 @@ export function reduceFleetTone(sessions, scannedAt, opts = {}) {
   const idleMs = opts.idleMs ?? IDLE_MS;
   let best = null;
   for (const session of sessions) {
-    if (session.liveness !== 'alive') continue;
+    if (!isListedSession(session)) continue;
     const status = deriveStatus(session, scannedAt, { idleMs });
     if (!best || TONE_PRIORITY[status.code] > TONE_PRIORITY[best.code]) best = status;
   }

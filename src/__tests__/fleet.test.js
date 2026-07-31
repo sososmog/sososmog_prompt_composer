@@ -18,6 +18,7 @@ import {
   buildSubagentTree,
   groupSessions,
   lastActivityMs,
+  isListedSession,
   countNeedsInput,
   reduceFleetTone,
   formatAgo,
@@ -512,7 +513,8 @@ describe('groupSessions', () => {
     const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
     expect(byKey['needs-input'].items).toHaveLength(2); // sid-needs-input + sid-job(blocked)
     expect(byKey['needs-input'].label).toBe(STATUS_DEFS['needs-input'].label);
-    expect(byKey.working.items).toHaveLength(2); // sid-working + sid-no-cpu
+    // sid-working + sid-no-cpu + sid-job-headless（无进程的后台会话，job.state=working）
+    expect(byKey.working.items).toHaveLength(3);
     expect(byKey.working.label).toBe(STATUS_DEFS.working.label);
     expect(byKey.failed.items).toHaveLength(1);
     expect(byKey.fresh.items).toHaveLength(1);
@@ -530,7 +532,8 @@ describe('groupSessions', () => {
     const groups = groupSessions(report.sessions, scannedAt);
     const working = groups.find((g) => g.key === 'working');
     expect(lastActivityMs(working.items[0])).toBe(lastActivityMs(working.items[1]));
-    expect(working.items.map((s) => s.name)).toEqual(['demo-composer-18', 'demo-no-cpu']);
+    // 只看并列的前两个；第三个（sid-job-headless）活动更早，本来就该排在后面
+    expect(working.items.slice(0, 2).map((s) => s.name)).toEqual(['demo-composer-18', 'demo-no-cpu']);
   });
 
   it('liveness=pid-reused 的会话被排除', () => {
@@ -538,11 +541,46 @@ describe('groupSessions', () => {
     expect(groupSessions([pidReused], scannedAt)).toEqual([]);
   });
 
-  it('全部 alive 会话都被分到某个组，不丢会话', () => {
+  /* ------------------------------------------------------------
+   * SCHEMA v2：没有进程的后台会话
+   * ------------------------------------------------------------
+   * 这是 E1 最容易被改回去的地方——三个聚合函数原本都写的是
+   * `liveness !== 'alive' → 跳过`，那条判据会把 no-process 的后台会话
+   * 整个吞掉，而且吞得悄无声息（没有报错、没有 warning，就是不显示）。
+   * ------------------------------------------------------------ */
+  it('liveness=no-process 的后台会话必须出现在列表里', () => {
+    const headless = report.sessions.find((s) => s.sessionId === 'sid-job-headless');
+    expect(headless, '夹具里应有一个无进程的后台会话').toBeTruthy();
+    expect(headless.pid).toBeNull();
+    expect(headless.proc).toBeNull();
+
+    const groups = groupSessions([headless], scannedAt);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('working'); // job.state=working
+    expect(groups[0].items[0].sessionId).toBe('sid-job-headless');
+  });
+
+  it('isListedSession：只排除 pid-reused，alive 与 no-process 都要显示', () => {
+    const base = report.sessions[0];
+    expect(isListedSession({ ...base, liveness: 'alive' })).toBe(true);
+    expect(isListedSession({ ...base, liveness: 'no-process' })).toBe(true);
+    expect(isListedSession({ ...base, liveness: 'pid-reused' })).toBe(false);
+  });
+
+  it('无进程的后台会话也计入 tab 角标和小球状态点', () => {
+    const headless = report.sessions.find((s) => s.sessionId === 'sid-job-headless');
+    const blocked = { ...headless, sessionId: 'sid-bg-blocked', job: { ...headless.job, state: 'blocked' } };
+
+    expect(countNeedsInput([blocked], scannedAt)).toBe(1);
+    expect(reduceFleetTone([blocked], scannedAt).code).toBe('needs-input');
+  });
+
+  it('除 pid-reused 外每个会话都被分到某个组，不丢会话', () => {
     const groups = groupSessions(report.sessions, scannedAt);
     const total = groups.reduce((sum, g) => sum + g.items.length, 0);
-    const aliveCount = report.sessions.filter((s) => s.liveness === 'alive').length;
-    expect(total).toBe(aliveCount);
+    // 判据是"非 pid-reused"而不是"alive"：no-process 的后台会话也要计入
+    const listedCount = report.sessions.filter((s) => s.liveness !== 'pid-reused').length;
+    expect(total).toBe(listedCount);
   });
 
   it('合成用例钉住 name 升序：lastActivityMs 完全相同时', () => {

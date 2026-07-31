@@ -76,6 +76,9 @@ function cardTitle(session) {
   const t = session.transcript;
   if (t && t.aiTitle) return t.aiTitle;
   if (t && t.lastPrompt) return t.lastPrompt;
+  // 后台会话可能一条 transcript 都没有，但它有 intent（起这个任务时的原始
+  // prompt）——那回答的正是标题该回答的问题："这是在干什么"。
+  if (session.job && session.job.intent) return session.job.intent;
   return '（无标题）';
 }
 
@@ -326,7 +329,10 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     const model = document.createElement('span');
     model.className = 'fw-fleet-model';
     const modelText = (session.transcript && session.transcript.model) || '';
-    model.textContent = modelText;
+    // 后台会话常常没有 transcript，也就没有 model 可显示。那个位置改标"后台"
+    // 比留空有用：这类会话的 CPU 是 "—"、没有进程，看到标记才知道那是它本来
+    // 的样子，而不是采集失败了。
+    model.textContent = modelText || (session.kind === 'background' ? '后台' : '');
     head.appendChild(model);
 
     const openBtn = buildOpenCwdButton(session);
@@ -348,6 +354,22 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       branchLine.textContent = '⎇ ' + branch;
       branchLine.title = branch;
       card.appendChild(branchLine);
+    }
+
+    // 后台会话的核心价值：官方已经算好的一句人话摘要（实测样本"要我顺手提交
+    // 这条 fix 吗?"）。它比我们从 transcript 推的任何东西都准，也是"这个任务
+    // 到底卡在哪"的直接答案。
+    //
+    // 这是唯一一处会让卡片变高的追加内容——阶段 3 刻意没给失败卡片单独起行，
+    // 就是因为一屏内高度参差难扫视。这里破例，理由是后台会话本来就少，而没有
+    // 这一行的话它整张卡片几乎是空的（没有 CPU、常常也没有 transcript）。
+    const jobDetail = session.job && session.job.detail;
+    if (jobDetail) {
+      const detailLine = document.createElement('div');
+      detailLine.className = 'fw-fleet-job-detail';
+      detailLine.textContent = jobDetail;
+      detailLine.title = jobDetail;
+      card.appendChild(detailLine);
     }
 
     const meta = document.createElement('div');

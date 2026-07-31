@@ -2,7 +2,22 @@
 use serde::{Deserialize, Serialize};
 
 /// IPC 契约版本。改契约必须递增。
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// - v1：初版。
+/// - v2：接入 L4 后台会话。`AgentSession.pid` 由 `u32` 改成 `Option<u32>`、
+///   `Liveness` 增加 `NoProcess`——daemon 托管的 `/loop`、`--bg` 会话根本
+///   没有对应进程，硬塞一个假 pid 会让存活校验和 CPU 采样一起说谎。
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// 终态 job（`done`/`failed`/`stopped`）在列表里保留多久。
+///
+/// `jobs/` 目录是**只增不删**的历史归档（本机最老的一条是两周前），全部显示
+/// 会让"已完成"组变成一个越滚越长的垃圾堆。1 小时的取舍：刚跑完的后台任务
+/// 你多半还想看一眼结果，隔夜的就纯属历史了——那种回顾需求该去翻 `jobs/`
+/// 目录本身，不该占用一个 380px 宽的实时面板。
+///
+/// 进行中的 job（`working`/`blocked`）不受此限制，永远显示。
+pub const JOB_TERMINAL_RETENTION_MS: i64 = 60 * 60 * 1000;
 
 /// transcript 尾部默认读取字节数。
 ///
@@ -29,8 +44,7 @@ pub struct FleetOptions {
     pub tail_bytes: Option<u64>,
     /// 默认 `true`。编排层用它决定要不要扫 `subagents/` 目录（见 `mod.rs`）。
     pub include_subagents: Option<bool>,
-    /// 默认 `false`。**阶段 4**（后台会话）接入后才有人读。
-    #[allow(dead_code)]
+    /// 默认 `true`（v2 起）。关掉就看不到 `/loop` 和 `--bg` 起的后台会话。
     pub include_jobs: Option<bool>,
     /// 默认 `true`
     pub cpu: Option<bool>,
@@ -45,10 +59,8 @@ impl FleetOptions {
     pub fn include_subagents(&self) -> bool {
         self.include_subagents.unwrap_or(true)
     }
-    /// 阶段 4 才会被编排层调用。
-    #[allow(dead_code)]
     pub fn include_jobs(&self) -> bool {
-        self.include_jobs.unwrap_or(false)
+        self.include_jobs.unwrap_or(true)
     }
     pub fn cpu(&self) -> bool {
         self.cpu.unwrap_or(true)
@@ -104,6 +116,10 @@ pub enum WarningCode {
     SubagentsUnreadable,
     /// pid 存在但启动时间与 roster 的 startedAt 对不上 → 疑似 PID 被复用
     PidReused,
+    /// `jobs/` 目录存在但读不了（权限问题一类）
+    JobsUnreadable,
+    /// 单个 `jobs/<id>/state.json` 解析失败（跳过该条，其余照常）
+    JobEntryInvalid,
 }
 
 // 关于这里**没有**哪两个 code，理由值得留着，否则以后会有人"顺手补上"：
@@ -124,8 +140,15 @@ pub enum WarningCode {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSession {
-    // ---- L1：名册（必有） ----
-    pub pid: u32,
+    // ---- L1：名册 ----
+    /// **`None` = 这个会话没有对应进程**，不是"没采到"。daemon 托管的后台
+    /// 会话（`/loop`、`--bg`）就是这样：作业还在，执行它的进程可能压根不
+    /// 存在，或者已经退出而作业状态还留在磁盘上。
+    ///
+    /// v1 时这里是必填 `u32`，代价是后台会话要么进不来、要么得编一个假 pid
+    /// 让存活校验和 CPU 采样跟着一起说谎。前端不读这个字段（只有 Rust 侧的
+    /// 采样和存活校验用），所以改成 Option 对渲染层零影响。
+    pub pid: Option<u32>,
     pub session_id: String,
     pub name: String,
     pub cwd: String,
@@ -137,7 +160,7 @@ pub struct AgentSession {
     pub started_at: i64,
     pub cli_version: String,
 
-    /// 存活性。`dead` 的会话直接不返回，所以这里只会是这两个值之一。
+    /// 存活性。`dead` 的会话直接不返回，所以这里只会是下面几个值之一。
     pub liveness: Liveness,
 
     // ---- L5：进程指标（cpu:false 或采样失败时为 null） ----
@@ -158,6 +181,13 @@ pub struct AgentSession {
 pub enum Liveness {
     Alive,
     PidReused,
+    /// 没有对应进程可查（v2 起）。目前只有 daemon 托管的后台会话会是这个值。
+    ///
+    /// 与 `PidReused` 的区别很重要，前端据此决定显不显示：`NoProcess` 是
+    /// "本来就没有进程，一切正常"，而 `PidReused` 是"有个进程但我们不确定
+    /// 它还是不是原来那个"——后者显示出来会误导人，前者恰恰最需要被看见
+    /// （后台会话起了就没人管，全靠面板告诉你它卡住没有）。
+    NoProcess,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -328,7 +358,7 @@ mod tests {
         let o = FleetOptions::default();
         assert_eq!(o.tail_bytes(), DEFAULT_TAIL_BYTES);
         assert!(o.include_subagents());
-        assert!(!o.include_jobs(), "include_jobs 缺省必须是 false（阶段 4 才开）");
+        assert!(o.include_jobs(), "v2 起 include_jobs 缺省是 true");
         assert!(o.cpu());
     }
 
@@ -389,6 +419,18 @@ mod tests {
             "\"pid-reused\""
         );
         assert_eq!(
+            serde_json::to_string(&Liveness::Alive).unwrap(),
+            "\"alive\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Liveness::NoProcess).unwrap(),
+            "\"no-process\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WarningCode::JobEntryInvalid).unwrap(),
+            "\"job-entry-invalid\""
+        );
+        assert_eq!(
             serde_json::to_string(&WarningCode::NoConfigDir).unwrap(),
             "\"no-config-dir\""
         );
@@ -409,7 +451,7 @@ mod tests {
                 "pid 62222 的启动时间与名册记录不符",
             )],
             sessions: vec![AgentSession {
-                pid: 52052,
+                pid: Some(52052),
                 session_id: "11111111-2222-3333-4444-555555555555".into(),
                 name: "demo-proj-18".into(),
                 cwd: "C:\\work\\demo".into(),
@@ -578,6 +620,27 @@ mod tests {
         let sub = &v["sessions"][0]["subagents"][0];
         assert!(sub["parentAgentId"].is_null(), "顶层 agent 的 parentAgentId 应为 null");
         assert!(sub["lastStopReason"].is_null());
+    }
+
+    /// v2：没有活进程的后台会话，`pid` 必须出线成 `null` 而不是 0 或缺键。
+    ///
+    /// 0 是个具体的 pid（在 Linux 上还是个真实存在的调度器进程），拿它当
+    /// "没有进程"的哨兵值，就是把两件不同的事压成同一个数字。
+    #[test]
+    fn a_session_without_a_process_serializes_pid_as_null() {
+        let mut r = full_report();
+        r.sessions[0].pid = None;
+        r.sessions[0].liveness = Liveness::NoProcess;
+        r.sessions[0].proc = None;
+
+        let v = serde_json::to_value(&r).unwrap();
+        let s = &v["sessions"][0];
+        assert!(s.get("pid").is_some(), "pid 键不能整个消失");
+        assert!(s["pid"].is_null(), "没有进程时 pid 应为 null，实际 {:?}", s["pid"]);
+        assert_eq!(s["liveness"], "no-process");
+        assert!(s["proc"].is_null());
+        // 后台会话的价值全在 job 这一块，它必须还在
+        assert!(s["job"].get("state").is_some());
     }
 
     /// 空集合出线成 `[]` 而不是 null——前端会直接 `.length` / `.map`。

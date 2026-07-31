@@ -26,7 +26,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use composer_lib::fleet::{proc, roster, subagents, transcript};
+use composer_lib::fleet::{jobs, proc, roster, subagents, transcript, types};
 
 /// 把扁平的 subagent 列表按 parentAgentId 打印成树。
 ///
@@ -120,6 +120,48 @@ fn dump_what_the_collector_sees_on_this_machine() {
     for w in &scan.warnings {
         println!("  [warn] {:?} — {}", w.code, w.detail);
     }
+    // ---------- L4 后台会话 ----------
+    // 放在名册的 early-return 之前，理由同 mod.rs：机器上完全可能只有 --bg
+    // 起的后台任务、一个交互式会话都没有。
+    //
+    // 扫两遍是刻意的：正常口径会把超出保留期的历史归档过滤掉，本机很可能
+    // 一条都不剩——那样就分不清"解析器在真实数据上跑通了"和"解析器整个坏了"
+    // （两种情况都是 0 条）。第二遍传 now=0 让保留期判定永远不成立，等于
+    // "忽略新旧，全都解析一遍"，用真实的 state.json 验证解析路径本身。
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let job_scan = jobs::scan(&dir, now);
+    let all_jobs = jobs::scan(&dir, 0);
+    println!(
+        "\nL4 后台会话: {} 条在列（忽略保留期则 {} 条，差额是超出 {} 分钟的历史归档）, {} 条 warning",
+        job_scan.entries.len(),
+        all_jobs.entries.len(),
+        types::JOB_TERMINAL_RETENTION_MS / 60_000,
+        job_scan.warnings.len()
+    );
+    for w in &job_scan.warnings {
+        println!("  [warn] {:?} — {}", w.code, w.detail);
+    }
+    // 打印 state/name/tokens 就够诊断了。**不打印 detail 和 intent**——
+    // 那两个直接来自用户的 prompt 和模型输出，这个脚本的输出是要贴给别人看的。
+    for e in &all_jobs.entries {
+        println!(
+            "  job {} — state={:?} tempo={:?} tokens={:?} name={} 有sessionId={} detail长度={}",
+            e.digest.job_id,
+            e.digest.state.as_deref().unwrap_or("—"),
+            e.digest.tempo.as_deref().unwrap_or("—"),
+            e.digest.tokens,
+            e.name,
+            e.session_id.is_some(),
+            e.digest.detail.as_ref().map(|d| d.chars().count()).unwrap_or(0),
+        );
+    }
+    if all_jobs.entries.is_empty() {
+        println!("  （没有任何 job 目录。要验 L4 必须先用 claude --bg 或 /loop 造一个）");
+    }
+
     if scan.entries.is_empty() {
         println!("名册为空：当前没有 claude 进程在跑（或 sessions/ 目录不存在）。");
         return;

@@ -16,13 +16,14 @@
 //! | L1 会话发现 | [`roster`] | `$CONFIG/sessions/<pid>.json` |
 //! | L2 活动与内容 | [`transcript`] | `$CONFIG/projects/<slug>/<sid>.jsonl` 尾部 |
 //! | L3 subagent 树 | [`subagents`] | `<sid>/subagents/agent-*.{jsonl,meta.json}` |
-//! | L4 后台会话 | `jobs`（阶段 4，未实现） | `$CONFIG/jobs/<id>/state.json` |
+//! | L4 后台会话 | [`jobs`] | `$CONFIG/jobs/<id>/state.json` |
 //! | L5 进程指标 | [`proc`] | sysinfo，只刷 L1 拿到的 pid |
 //!
 //! 本文件是**编排层**：把上面几层拼成一份 [`types::FleetReport`]。各层自己不知道
 //! 彼此的存在，拼装规则集中在这里，好让"哪个失败该降级成什么"只有一处定义。
 
 pub mod config;
+pub mod jobs;
 pub mod proc;
 pub mod roster;
 pub mod subagents;
@@ -98,6 +99,113 @@ impl FleetState {
     }
 }
 
+/// 读 L2（transcript 摘要）+ L3（subagent 列表）。
+///
+/// 从主循环里抽出来，是因为 v2 之后有**两条**路径需要它：名册会话，以及独立
+/// 成条的后台会话（后者同样有 sessionId、同样能定位到 jsonl，凭什么少显示
+/// 标题和分支）。
+///
+/// 三种"没有 digest"的情况要分清，只有一种算异常：
+///   ①根本没有 jsonl        → 已启动未开始，**实测最常见的正常状态**，不报
+///   ②jsonl 存在但 0 字节    → 同上，也是刚启动，不报
+///   ③读不了 / 解析不出来    → 真异常，报 warning，前端显示"状态未知"
+fn read_layers(
+    state: &FleetState,
+    config_dir: &Path,
+    session_id: &str,
+    opts: &FleetOptions,
+    warnings: &mut Vec<FleetWarning>,
+) -> (Option<types::TranscriptDigest>, Vec<types::SubagentDigest>) {
+    let mut transcript_digest = None;
+    // 默认空数组——`opts.include_subagents()` 关掉、或者压根没有 transcript
+    // 时都停在这个默认值上。
+    let mut subagents = Vec::new();
+
+    let Some(path) = state.resolve_transcript(config_dir, session_id) else {
+        return (transcript_digest, subagents);
+    };
+
+    let is_empty = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(false);
+    if !is_empty {
+        match transcript::read_digest(&path, opts.tail_bytes()) {
+            Ok(d) => transcript_digest = Some(d),
+            Err(transcript::DigestError::Unparsable) => {
+                warnings.push(FleetWarning::new(
+                    WarningCode::TranscriptUnparsable,
+                    format!("{session_id} 的尾部窗口里没有可解析的消息"),
+                ));
+            }
+            Err(transcript::DigestError::Io(e)) => {
+                warnings.push(FleetWarning::new(
+                    WarningCode::TranscriptUnreadable,
+                    format!("读取 {} 的会话记录失败：{}", session_id, e.kind()),
+                ));
+            }
+        }
+    }
+
+    // subagents_dir 从 transcript 路径的父目录推导，而不是再遍历一遍
+    // `projects/`——transcript 路径已经被 `resolve_transcript` 缓存过，
+    // 它的父目录就是项目目录。这条推导同时天然覆盖了「没有 transcript
+    // 的会话」：那种会话（已启动未开始）必然也没有子 agent，走不到这里，
+    // `subagents` 就停在上面的空数组默认值，不需要再单独判一次「目录不存在」。
+    if opts.include_subagents() {
+        if let Some(project_dir) = path.parent() {
+            let subagents_dir = project_dir.join(session_id).join("subagents");
+            let sub_scan = subagents::scan(&subagents_dir, opts.tail_bytes());
+            subagents = sub_scan.digests;
+            warnings.extend(sub_scan.warnings);
+        }
+    }
+
+    (transcript_digest, subagents)
+}
+
+/// 把一条后台会话（L4）单独变成一个 [`AgentSession`]。
+///
+/// 这是"方案 B 独立成条"的落点。另一条路（方案 A 仅标注）只把 job 挂到已有
+/// 名册会话上，代价是**没有活进程的后台会话根本不会出现**——而 daemon 托管的
+/// `/loop`、`--bg` 恰恰常常没有自己的进程。用户起了个后台任务却在面板上找不到，
+/// 比多一个契约字段糟糕得多。
+///
+/// L1 字段全部来自 `state.json` 自己（`name`/`cwd`/`cliVersion`/`createdAt`），
+/// 没有一处是编造的；唯一凑不出来的 pid 就老实填 `None`。
+fn build_job_session(
+    state: &FleetState,
+    config_dir: &Path,
+    entry: jobs::JobEntry,
+    opts: &FleetOptions,
+    warnings: &mut Vec<FleetWarning>,
+) -> AgentSession {
+    let (transcript, subagents) = match &entry.session_id {
+        Some(sid) => read_layers(state, config_dir, sid, opts, warnings),
+        None => (None, Vec::new()),
+    };
+
+    AgentSession {
+        pid: None,
+        // 没有 sessionId 时退回 jobId：这个字段是前端的去重键（渲染时
+        // data-session-id、展开子 agent 时的身份），不能是空串。
+        session_id: entry
+            .session_id
+            .clone()
+            .unwrap_or_else(|| entry.digest.job_id.clone()),
+        name: entry.name,
+        cwd: entry.cwd,
+        entrypoint: entry.entrypoint,
+        kind: "background".to_string(),
+        started_at: entry.created_at,
+        cli_version: entry.cli_version,
+        liveness: Liveness::NoProcess,
+        // 没有进程就没有进程指标。这里填 None 而不是一组 0，理由同
+        // cpu_percent 那条：0% 是个具体结论，None 才是"没有这回事"。
+        proc: None,
+        transcript,
+        subagents,
+        job: Some(entry.digest),
+    }
+}
+
 /// 一次完整扫描。所有阻塞 I/O 都在这个函数里，由调用方放进 `spawn_blocking`。
 fn scan_blocking(
     state: &FleetState,
@@ -107,7 +215,30 @@ fn scan_blocking(
     let scan = roster::scan(config_dir);
     let mut warnings = scan.warnings;
 
-    if scan.entries.is_empty() {
+    // L4 后台会话。**必须在名册的 early-return 之前扫**：一台机器完全可能一个
+    // 交互式会话都没有、只有 `--bg` 起的后台任务在跑，那种时候面板不该是空的。
+    //
+    // 按 sessionId 建索引，是为了让"挂到已有会话上"和"独立成条"这两种情况共用
+    // 一条判定：能在名册里找到同一个 sessionId 就挂上去（那说明这个后台会话
+    // 确实有活进程，走名册那条路能拿到 CPU），找不到的才独立成条。这样天然
+    // 避免了同一个会话被显示两次。
+    let mut job_by_session: HashMap<String, jobs::JobEntry> = HashMap::new();
+    // 没有 sessionId 的 job 无从匹配，只能独立成条。
+    let mut unmatchable_jobs: Vec<jobs::JobEntry> = Vec::new();
+    if opts.include_jobs() {
+        let job_scan = jobs::scan(config_dir, now_ms());
+        warnings.extend(job_scan.warnings);
+        for entry in job_scan.entries {
+            match entry.session_id.clone() {
+                Some(sid) => {
+                    job_by_session.insert(sid, entry);
+                }
+                None => unmatchable_jobs.push(entry),
+            }
+        }
+    }
+
+    if scan.entries.is_empty() && job_by_session.is_empty() && unmatchable_jobs.is_empty() {
         return (Vec::new(), warnings);
     }
 
@@ -166,54 +297,16 @@ fn scan_blocking(
             None
         };
 
-        // L2：定位并读 transcript 尾部。
-        //
-        // 三种"没有 digest"的情况要分清，只有一种算异常：
-        //   ①根本没有 jsonl        → 已启动未开始，**实测最常见的正常状态**，不报
-        //   ②jsonl 存在但 0 字节    → 同上，也是刚启动，不报
-        //   ③读不了 / 解析不出来    → 真异常，报 warning，前端显示"状态未知"
-        let mut transcript_digest = None;
-        // L3：本会话的 subagent 摘要。默认空数组——`opts.include_subagents()`
-        // 关掉、或者压根没有 transcript 时都停在这个默认值上。
-        let mut subagents = Vec::new();
-        if let Some(path) = state.resolve_transcript(config_dir, &entry.session_id) {
-            let is_empty = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(false);
-            if !is_empty {
-                match transcript::read_digest(&path, opts.tail_bytes()) {
-                    Ok(d) => transcript_digest = Some(d),
-                    Err(transcript::DigestError::Unparsable) => {
-                        warnings.push(FleetWarning::new(
-                            WarningCode::TranscriptUnparsable,
-                            format!("{} 的尾部窗口里没有可解析的消息", entry.session_id),
-                        ));
-                    }
-                    Err(transcript::DigestError::Io(e)) => {
-                        warnings.push(FleetWarning::new(
-                            WarningCode::TranscriptUnreadable,
-                            format!("读取 {} 的会话记录失败：{}", entry.session_id, e.kind()),
-                        ));
-                    }
-                }
-            }
+        let (transcript_digest, subagents) =
+            read_layers(state, config_dir, &entry.session_id, opts, &mut warnings);
 
-            // subagents_dir 从 transcript 路径的父目录推导，而不是再遍历一遍
-            // `projects/`——transcript 路径已经被 `resolve_transcript` 缓存过，
-            // 它的父目录就是项目目录。这条推导同时天然覆盖了「没有 transcript
-            // 的会话」：那种会话（已启动未开始）必然也没有子 agent，走不进这个
-            // `if let Some(path) = ...`分支，`subagents` 就停在上面的空数组默认值，
-            // 不需要再单独判一次「目录不存在」。
-            if opts.include_subagents() {
-                if let Some(project_dir) = path.parent() {
-                    let subagents_dir = project_dir.join(&entry.session_id).join("subagents");
-                    let sub_scan = subagents::scan(&subagents_dir, opts.tail_bytes());
-                    subagents = sub_scan.digests;
-                    warnings.extend(sub_scan.warnings);
-                }
-            }
-        }
+        // 这个会话同时也是个后台会话？把 job 挂上去（并从索引里消费掉，
+        // 剩下的才需要独立成条）。这条路径下会话是有活进程的，CPU、存活校验
+        // 一切照常，job 只是补一份官方算好的状态。
+        let job = job_by_session.remove(&entry.session_id);
 
         sessions.push(AgentSession {
-            pid: entry.pid,
+            pid: Some(entry.pid),
             session_id: entry.session_id,
             name: entry.name,
             cwd: entry.cwd,
@@ -225,10 +318,16 @@ fn scan_blocking(
             proc: proc_metrics,
             transcript: transcript_digest,
             subagents,
-            // L4 由阶段 4 填。契约里已经留好位置，前端现在拿到的就是 null，
-            // 渲染逻辑不需要为此改动。
-            job: None,
+            job: job.map(|j| j.digest),
         });
+    }
+
+    // 剩下的 job 在名册里没有对应会话——它们就是"没有活进程的后台会话"，
+    // 独立成条。这是方案 B 的意义所在：这些恰恰是最容易被忘掉、最需要面板
+    // 提醒你的任务。
+    for entry in job_by_session.into_values().chain(unmatchable_jobs) {
+        let session = build_job_session(state, config_dir, entry, opts, &mut warnings);
+        sessions.push(session);
     }
 
     (sessions, warnings)

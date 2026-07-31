@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "scannedAt": 1785416160000,
   "configDir": "C:Usersdemo.claude",
   "sessions": [
@@ -329,6 +329,33 @@
         },
         "intent": "占位：原始 prompt",
         "updatedAt": 1785416040000
+      }
+    },
+    {
+      "pid": null,
+      "sessionId": "sid-job-headless",
+      "name": "demo-bg-headless",
+      "cwd": "C:workdemo",
+      "entrypoint": "daemon",
+      "kind": "background",
+      "startedAt": 1785410000000,
+      "cliVersion": "2.1.220",
+      "liveness": "no-process",
+      "proc": null,
+      "transcript": null,
+      "subagents": [],
+      "job": {
+        "jobId": "aa11bb22",
+        "state": "working",
+        "detail": "占位：正在改测试",
+        "tempo": "steady",
+        "tokens": 40000,
+        "inFlight": {
+          "tasks": 2,
+          "queued": 1
+        },
+        "intent": "占位：后台任务的原始 prompt",
+        "updatedAt": 1785416150000
       }
     },
     {
