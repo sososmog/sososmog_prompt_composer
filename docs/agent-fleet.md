@@ -15,11 +15,18 @@
 | 阶段 0 轨 B（JS 纯函数 B1–B5） | ✅ 完成 |
 | 阶段 1 轨 C（浮窗 UI） | ✅ 完成，含真浏览器冒烟 + 用户真机验收 |
 | 阶段 2 subagent 树 | ✅ 完成，含真机验证 |
-| 阶段 3 收尾 | 🚧 进行中 |
+| 阶段 3 收尾 | ✅ 完成 |
 | 阶段 4 可选增强 | ⬜ 未开始 |
 
 当前规模：Rust 83 个单测 + 4 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
-前端 642 个测试 + 3 个真浏览器冒烟脚本；clippy 0 新增警告；lint 0/0。
+前端 654 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本；
+clippy 0 新增警告；lint 0/0。
+
+**D4 全量回归全绿**：前端 654 单测 / lint 0-0 / 对比度 4 项达标 / 主冒烟 30 项 /
+CSP 冒烟 32 项 / Agent tab 冒烟 / cargo test 83+4 / clippy 0 新增。
+另用本机真实存量存档（`settings` 里没有 `fleet` 键）过了一遍 `normalizeState`：
+补上默认值且其它设置与内容一个没丢；`enabled` 的 10 种取值里只有真正的 `false`
+会关，其余 9 种脏值一律回落 `true`；`fleet` 键的 7 种残缺形态都不抛异常。
 
 **真机验证累计结果**（`cargo test --test fleet_real_machine -- --ignored --nocapture`）：
 
@@ -697,7 +704,7 @@ Rust 侧（A9–A10）与 UI 侧（C9–C10）可并行 ⇄，但都依赖阶段
 | D1 ⇄ | `settings.fleet = { enabled, showCpu }`，`core.js` 的 `normalizeState` 校验；主窗口设置面板加开关 | `normalizeState` 单测；关掉后 tab 隐藏、轮询停 |
 | D2 ⇄ | 主题深浅色适配核对 | 两套主题各看一眼（照 PR #32 的做法） |
 | D3 ⇄ | 文案/空态/warning 展示打磨；README 补一节 | — |
-| D4 | 全量回归 | `npm run lint`（0/0）、`npm test`、`npm run smoke`、`cargo test`、`cargo clippy --all-targets`、真机清单 |
+| D4 | 全量回归 | `npm test`、`npm run lint`、`npm run check:contrast`、`npm run smoke`、`npm run smoke:csp`、`npm run smoke:fleet`、`cargo test`、`cargo clippy --all-targets`、真机诊断 |
 
 **D4 必查项**：删掉 `src-tauri/src/fleet/types.rs` 顶部的 `#![allow(dead_code)]`，重跑 clippy 确认 0 新增警告。那行是 P4"契约先于实现"的临时豁免（当时 13 条 dead_code 来自尚未被 A 轨消费的类型）。若届时仍有字段没人读，**说明契约定多了，该删字段而不是留豁免**。
 
