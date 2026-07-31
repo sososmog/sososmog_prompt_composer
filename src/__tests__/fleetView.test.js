@@ -1664,6 +1664,55 @@ describe('createFleetView：E6 keyed 原地更新', function () {
     expect(titles[0].querySelector('.fw-fleet-group-count').textContent).toBe('1');
   });
 
+  it('前面的会话退出后，后面幸存卡片上的选区仍然存活', async function () {
+    // review 抓出来的真 bug，比原始症状更常见：cursor 停在"马上要被删掉"的
+    // 卡片上时不推进，轮到后面那张就判定"位置不对"而 insertBefore 搬一次，
+    // 搬动 = 重新挂载 = 选区当场没。触发条件只是"随便哪个前面的会话退出"。
+    var refs = mountSeq([
+      makeReport({ sessions: [makeSession({ sessionId: 'a', name: 'aaa' }), makeSession({ sessionId: 'b', name: 'bbb' })] }),
+      makeReport({ sessions: [makeSession({ sessionId: 'b', name: 'bbb' })] }),
+    ]);
+    await advance(0);
+
+    var cardB = cardOf(refs, 'b');
+    var textNode = cardB.querySelector('.fw-fleet-title-line').firstChild;
+    var range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 2);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    expect(sel.toString().length).toBe(2);
+
+    await advance(2000);
+
+    expect(cardOf(refs, 'a')).toBe(null);
+    expect(cardOf(refs, 'b')).toBe(cardB);
+    expect(sel.toString().length).toBe(2);
+  });
+
+  it('branch 行迟到时仍排在 job 摘要之前（与新建卡片的行序一致）', async function () {
+    // 后台会话可能先没有 gitBranch（transcript 未落盘），下一轮才读到。
+    // syncOptionalLine 若一律以 meta 为锚点，迟到的 branch 会插到 jobDetail
+    // 后面，于是同屏两张卡片一张 branch 在上、一张在下。
+    var base = makeSession({ sessionId: 's1', kind: 'background', job: { detail: '要我提交吗?', intent: null, state: 'blocked' } });
+    var noBranch = Object.assign({}, base, { transcript: Object.assign({}, base.transcript, { gitBranch: null }) });
+    var refs = mountSeq([
+      makeReport({ sessions: [noBranch] }),
+      makeReport({ sessions: [base] }),
+    ]);
+    await advance(0);
+    expect(cardOf(refs, 's1').querySelector('.fw-fleet-branch')).toBe(null);
+
+    await advance(2000);
+
+    var classes = Array.prototype.map.call(
+      cardOf(refs, 's1').children,
+      function (el) { return el.className; }
+    );
+    expect(classes.indexOf('fw-fleet-branch')).toBeLessThan(classes.indexOf('fw-fleet-job-detail'));
+  });
+
   it('子 agent 折叠区的展开状态不被轮询重绘打断', async function () {
     var subs = [
       { agentId: 'a1', parentId: null, description: '查代码', status: 'running', startedAt: 1000000, updatedAt: 1000000, model: 'claude-sonnet-5' },

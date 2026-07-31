@@ -520,7 +520,11 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     setText(r.titleLine, f.title);
     setTitle(r.titleLine, f.title);
 
-    r.branchLine = syncOptionalLine(card, r.branchLine, f.branch, 'fw-fleet-branch', '⎇ ', r.meta);
+    // 顺序必须是 branch → jobDetail → meta，与 buildCard 一致。branch 行迟到
+    // 时（后台会话先没 gitBranch、下一轮才读到）要插在 jobDetail **之前**，
+    // 所以锚点取"当前排在它后面的第一个节点"而不是一律用 meta——否则同屏两
+    // 张卡片会一张 branch 在上、一张 branch 在下。
+    r.branchLine = syncOptionalLine(card, r.branchLine, f.branch, 'fw-fleet-branch', '⎇ ', r.jobDetailLine || r.meta);
     r.jobDetailLine = syncOptionalLine(card, r.jobDetailLine, f.jobDetail, 'fw-fleet-job-detail', '', r.meta);
 
     setText(r.meta, f.metaText);
@@ -763,21 +767,51 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       existing.set(el.dataset.sessionId, el);
     }
 
+    // 这一轮结束后还会留在列表里的节点。必须在开始摆放**之前**就算出来：
+    // cursor 往前走的时候要能跳过注定要被删掉的节点，否则会出现这样一幕——
+    // cursor 停在"马上要退出的会话 a"上，轮到 b 时判定 cursor !== b，于是
+    // b 被 insertBefore 搬了一次，而搬动等于重新挂载，b 上面的选区当场没了。
+    // 症状：前面随便哪个会话一退出，它后面所有卡片的选区跟着遭殃——正是 E6
+    // 要修的那个 bug，只是换了个触发条件，而且比原来的更常见。
+    const survivors = new Set();
+    let survivorGroupCount = 0;
+    for (const group of groups) {
+      survivorGroupCount += 1;
+      for (const session of group.items) {
+        const el = existing.get(session.sessionId);
+        if (el) survivors.add(el);
+      }
+    }
+    for (const el of list.children) {
+      // 分组标题按序号复用，前 survivorGroupCount 个会留下（下面 place 时更新文字）
+      if (!el.classList.contains('fw-fleet-card') && Number(el.dataset.groupIndex) < survivorGroupCount) {
+        survivors.add(el);
+      }
+    }
+
     // 按目标顺序把节点逐个"码"到位：cursor 始终指向下一个该被占据的位置。
     // 节点已经在正确位置时连 insertBefore 都不调——重复插入同一个节点虽然
     // 不改变最终 DOM，但会先摘除再插入，同样会打断选区。
     let cursor = list.firstChild;
 
+    /** 把 cursor 推到下一个"活得下来"的节点上，跳过本轮注定被删的。 */
+    function skipDoomed() {
+      while (cursor && !survivors.has(cursor)) cursor = cursor.nextSibling;
+    }
+    skipDoomed();
+
     /** @param {Node} node */
     function place(node) {
       if (cursor === node) {
         cursor = node.nextSibling;
+        skipDoomed();
         return;
       }
       list.insertBefore(node, cursor);
     }
 
-    const seenCards = new Set();
+    /** 这一轮摆放过的全部节点（标题+卡片），收尾时据此清理残留。 */
+    const placed = new Set();
     let groupIndex = 0;
 
     for (const group of groups) {
@@ -799,6 +833,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       setText(h.firstChild, group.label);
       setText(h.lastChild, String(group.items.length));
       place(h);
+      placed.add(h);
       groupIndex += 1;
 
       for (const session of group.items) {
@@ -806,17 +841,16 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
         const old = existing.get(id);
         const card = old ? updateCard(old, session, def, report.scannedAt) : buildCard(session, def, report.scannedAt);
         place(card);
-        seenCards.add(card);
+        placed.add(card);
       }
     }
 
     // 清掉这一轮没被用到的旧节点：退出的会话、以及组变少后多出来的标题。
+    // 判据是"这一轮有没有摆过它"而不是"它是什么类型"——按类型判会给将来
+    // 往 list 里加第三种子节点留个静默失效的口子（Number(undefined) >= n 恒
+    // 为 false，那种节点会既不被清理也不参与摆放，永久滞留在列表里）。
     for (const el of Array.prototype.slice.call(list.children)) {
-      if (el.classList.contains('fw-fleet-card')) {
-        if (!seenCards.has(el)) el.remove();
-      } else if (Number(el.dataset.groupIndex) >= groupIndex) {
-        el.remove();
-      }
+      if (!placed.has(el)) el.remove();
     }
 
     syncWarnings(report.warnings);
