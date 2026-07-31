@@ -18,8 +18,14 @@
 <body>
 
   <div class="fw-card" id="fwCard" style="position:relative;">
+    <!-- 小球上的 agent 状态点：缩成 52×52 后卡片内容全部隐藏，这个点是唯一还能
+         告诉你"有 agent 在等你回话/出错了"的东西。必须放在 .fw-mini-orb **内部**
+         （小球是 is-mini 时唯一可见的元素），且 CSS 里带 pointer-events:none——
+         小球的展开/拖动是手动 mousedown 判定的，多一个能吃指针事件的子元素就会
+         把点击吞掉。亮不亮由 fleetView 按 ORB_DOT_MIN_PRIORITY 决定。 -->
     <button class="fw-mini-orb" id="fwMiniOrb" type="button" title="展开浮窗（可拖动）" aria-label="展开浮窗">
       <span class="fw-mini-orb-label">C</span>
+      <span class="fw-mini-orb-dot" id="fwMiniOrbDot" hidden></span>
     </button>
     <div class="fw-drag" data-tauri-drag-region>
       <span class="fw-title" data-tauri-drag-region>COMPOSER</span>
@@ -33,48 +39,64 @@
       </div>
     </div>
 
+    <!-- tab 栏：编写 / Agent。放在 .fw-drag 与 .fw-body 之间，两个 panel 平级包在
+         .fw-body 内部，切换只靠 float.js 切 is-active 类，不拆 DOM、不重新挂节点，
+         省得每次切 tab 都要重新 bindEvent。Agent 按钮上挂角标：有几个 agent 在等
+         你回话，为 0 时 fleetView 会给它加 hidden。 -->
+    <div class="fw-tabs" id="fwTabs" role="tablist">
+      <button class="fw-tab-btn is-active" id="fwTabComposeBtn" type="button" role="tab" aria-selected="true">编写</button>
+      <button class="fw-tab-btn" id="fwTabFleetBtn" type="button" role="tab" aria-selected="false">
+        Agent
+        <span class="fw-tab-badge" id="fwTabFleetBadge" hidden></span>
+      </button>
+    </div>
+
     <div class="fw-body">
-      <div class="fw-editor-wrap">
-        <div class="fw-editor-toolbar">
-          <div class="fw-toolbar-left">
-            <span class="fw-editor-label" id="fwEditorLabel">正文</span>
-            <label class="fw-autopaste" id="fwAutoPasteLabel" title="开启后，点击下方“常用句/插入模块”会在复制后自动粘贴到刚才聚焦的外部窗口">
-              <input type="checkbox" id="fwAutoPasteToggle" />
-              <span class="fw-autopaste-slider"></span>
-              <span class="fw-autopaste-text">点击即粘贴</span>
-            </label>
+      <div class="fw-panel is-active" id="fwPanelCompose">
+        <div class="fw-editor-wrap">
+          <div class="fw-editor-toolbar">
+            <div class="fw-toolbar-left">
+              <span class="fw-editor-label" id="fwEditorLabel">正文</span>
+              <label class="fw-autopaste" id="fwAutoPasteLabel" title="开启后，点击下方“常用句/插入模块”会在复制后自动粘贴到刚才聚焦的外部窗口">
+                <input type="checkbox" id="fwAutoPasteToggle" />
+                <span class="fw-autopaste-slider"></span>
+                <span class="fw-autopaste-text">点击即粘贴</span>
+              </label>
+            </div>
+            <div class="fw-toolbar-right">
+              <button class="fw-clear-btn" id="fwClearBtn" type="button" title="清空正文" aria-label="清空正文">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+                清空
+              </button>
+              <button class="fw-copy-btn" id="fwCopyBtn" type="button" title="复制编辑器内容">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                复制
+              </button>
+            </div>
           </div>
-          <div class="fw-toolbar-right">
-            <button class="fw-clear-btn" id="fwClearBtn" type="button" title="清空正文" aria-label="清空正文">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
-              清空
-            </button>
-            <button class="fw-copy-btn" id="fwCopyBtn" type="button" title="复制编辑器内容">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              复制
-            </button>
+          <div class="fw-hl-wrap">
+            <div class="fw-hl-overlay" id="fwHlOverlay" aria-hidden="true"></div>
+            <textarea class="fw-textarea" id="fwTextarea" placeholder="正文内容…" spellcheck="false"></textarea>
           </div>
         </div>
-        <div class="fw-hl-wrap">
-          <div class="fw-hl-overlay" id="fwHlOverlay" aria-hidden="true"></div>
-          <textarea class="fw-textarea" id="fwTextarea" placeholder="正文内容…" spellcheck="false"></textarea>
+
+        <div class="fw-lists">
+          <div>
+            <div class="fw-section-title">插入模块</div>
+            <div class="fw-pill-wrap" id="fwModuleWrap"></div>
+          </div>
+          <div>
+            <div class="fw-section-title">常用句</div>
+            <div class="fw-pill-wrap" id="fwSnippetWrap"></div>
+          </div>
+          <div>
+            <div class="fw-section-title">快速段落</div>
+            <div class="fw-quick-wrap" id="fwQuickWrap"></div>
+          </div>
         </div>
       </div>
 
-      <div class="fw-lists">
-        <div>
-          <div class="fw-section-title">插入模块</div>
-          <div class="fw-pill-wrap" id="fwModuleWrap"></div>
-        </div>
-        <div>
-          <div class="fw-section-title">常用句</div>
-          <div class="fw-pill-wrap" id="fwSnippetWrap"></div>
-        </div>
-        <div>
-          <div class="fw-section-title">快速段落</div>
-          <div class="fw-quick-wrap" id="fwQuickWrap"></div>
-        </div>
-      </div>
+      <div class="fw-panel" id="fwPanelFleet"></div>
     </div>
 
     <div class="fw-toast" id="fwToast" role="status" aria-live="polite"></div>

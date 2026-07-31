@@ -26,6 +26,7 @@ import { completionPool, commitLearningText } from './pool.js';
 import { createStateSync } from './sync.js';
 import { attachCompletion } from './completion.js';
 import { readState } from './statefile.js';
+import { createFleetView } from './fleetView.js';
 
   /* ============================================================
    * Tauri API 安全获取（浏览器预览时降级，不报错）
@@ -61,9 +62,15 @@ import { readState } from './statefile.js';
   var $closeBtn = document.getElementById('fwCloseBtn');
   var $minBtn = document.getElementById('fwMinBtn');
   var $orb = document.getElementById('fwMiniOrb');
+  var $orbDot = document.getElementById('fwMiniOrbDot');
   var $card = document.getElementById('fwCard');
   var $toast = document.getElementById('fwToast');
   var $autoPasteToggle = document.getElementById('fwAutoPasteToggle');
+  var $tabComposeBtn = document.getElementById('fwTabComposeBtn');
+  var $tabFleetBtn = document.getElementById('fwTabFleetBtn');
+  var $tabFleetBadge = document.getElementById('fwTabFleetBadge');
+  var $panelCompose = document.getElementById('fwPanelCompose');
+  var $panelFleet = document.getElementById('fwPanelFleet');
 
   var toastTimer = null;
   function showToast(msg) {
@@ -403,6 +410,9 @@ import { readState } from './statefile.js';
     renderQuickGroups();
     renderModuleGrid();
     renderSnippetGrid();
+    // Agent 面板总开关：不另开事件通道，同步/回填都汇聚到 renderAll，这里
+    // 顺带重新应用一次即可（定义见下方 §Agent tab，此时 fleetView 已构造好）。
+    applyFleetEnabled();
   }
 
   /* ============================================================
@@ -466,6 +476,7 @@ import { readState } from './statefile.js';
     // “窗口已变小但内容还是完整卡片”的残缺中间态。
     isMini = true;
     $card.classList.add('is-mini');
+    fleetView.refreshSchedule(); // 缩成小球：Agent tab 的轮询立刻降到精简档
     Promise.all([currentWin.innerSize(), currentWin.scaleFactor()]).then(function (r) {
       var s = r[0], f = r[1] || 1;
       prevSize = { w: Math.round(s.width / f), h: Math.round(s.height / f) };
@@ -484,6 +495,7 @@ import { readState } from './statefile.js';
     // 同 collapse：先恢复 UI，再放大窗口
     isMini = false;
     $card.classList.remove('is-mini');
+    fleetView.refreshSchedule(); // 恢复：若停在 Agent tab，轮询立刻回到全量档
     var t = prevSize || DEFAULT_SIZE;
     currentWin.setSize(LogicalSize(t.w, t.h)).then(function () {
       if (currentWin.setFocus) currentWin.setFocus().catch(function () {});
@@ -525,5 +537,102 @@ import { readState } from './statefile.js';
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   });
+
+  /* ============================================================
+   * Agent tab：分组展示本机在跑的 Claude Code 会话。
+   * ------------------------------------------------------------
+   * 判定/渲染/轮询调度全部委托给 fleetView.js（纯 DOM 层，判定逻辑
+   * 又全部来自 fleet.js），float.js 这里只做两件事：
+   *   1. tab 切换的 UI（哪个 panel 显示、哪个按钮高亮）+ localStorage
+   *      持久化，套路与 composer-fw-autopaste 一致：读不到时给默认值
+   *      （编写 tab），存不了就算了不影响当次使用。
+   *   2. 把会影响轮询档位的三个状态变化（tab 切换 / 缩成小球 / 恢复）
+   *      转发给 fleetView 的 refreshSchedule()，让它立刻按新档位重排
+   *      定时器，不必等旧间隔走完。
+   * ============================================================ */
+  var FW_TAB_STORAGE_KEY = 'composer-fw-tab';
+  function loadSavedTab() {
+    try {
+      var saved = window.localStorage.getItem(FW_TAB_STORAGE_KEY);
+      return saved === 'fleet' ? 'fleet' : 'compose'; // 没存过 / 存的是脏值都落回默认编写 tab
+    } catch (e) { return 'compose'; }
+  }
+
+  function applyTab(tab) {
+    var isFleetTab = tab === 'fleet';
+    $panelCompose.classList.toggle('is-active', !isFleetTab);
+    $panelFleet.classList.toggle('is-active', isFleetTab);
+    $tabComposeBtn.classList.toggle('is-active', !isFleetTab);
+    $tabFleetBtn.classList.toggle('is-active', isFleetTab);
+    $tabComposeBtn.setAttribute('aria-selected', isFleetTab ? 'false' : 'true');
+    $tabFleetBtn.setAttribute('aria-selected', isFleetTab ? 'true' : 'false');
+  }
+
+  // 用户主动切 tab 才需要 refreshSchedule()：fleetView 构造时已经会立即抓
+  // 一次数据，初始按存档 tab 摆放（见下方 applyTab(loadSavedTab())）不需要
+  // 再额外触发一轮抓取，否则等于把"立即抓一次"这个设计意图取消掉。
+  function switchTab(tab) {
+    applyTab(tab);
+    try { window.localStorage.setItem(FW_TAB_STORAGE_KEY, tab); } catch (e) { /* 存不了就算了，当次已生效 */ }
+    fleetView.refreshSchedule();
+  }
+
+  $tabComposeBtn.addEventListener('click', function () { switchTab('compose'); });
+  $tabFleetBtn.addEventListener('click', function () { switchTab('fleet'); });
+
+  // 非 Tauri 环境（浏览器预览）没有 invoke，fleetView 内部会据此渲染降级文案
+  // 并完全不启动轮询——同 canAutoPaste 的判空写法。
+  var fleetInvoke = (coreApi && coreApi.invoke)
+    ? function (cmd, args) { return coreApi.invoke(cmd, args); }
+    : null;
+
+  // 打开会话工作目录（E3）。权限 opener:allow-open-path 已在 capabilities 里。
+  // 失败反馈放在这里而不是 fleetView：面板里那条错误横条是留给"轮询失败"的，
+  // 一次点击没打开不该占用它（横条会一直挂着直到下次成功抓取）。toast 才是
+  // 这种一次性操作反馈的正确位置——顺带复用 backup.js 里打开配置目录同一套
+  // 失败话术。
+  var openerApi = TAURI && TAURI.opener;
+  var fleetOpenPath = (openerApi && typeof openerApi.openPath === 'function')
+    ? function (p) {
+        return openerApi.openPath(p).catch(function () { showToast('打开目录失败'); });
+      }
+    : null;
+
+  var fleetView = createFleetView({
+    root: $panelFleet,
+    tabButton: $tabFleetBtn,
+    badge: $tabFleetBadge,
+    orbDot: $orbDot,
+    invoke: fleetInvoke,
+    openPath: fleetOpenPath,
+    // Windows 上 window.hide() 是否触发 visibilitychange 未验证，但这只是
+    // 省电优化：判断失败最坏情况是浮窗隐藏时仍以精简档轮询，代价可忽略，
+    // 不把它当正确性问题（见 docs/agent-fleet.md §5 C4）。
+    getVisibility: function () { return document.visibilityState !== 'hidden'; },
+    onError: function (err) { console.warn('Agent fleet 轮询失败:', err); },
+    // 构造时的初始值——此刻 state 还是 defaultState()（真实存档要等
+    // restoreState() 落地才知道），默认开对应 defaultFleetSettings()。
+    // 真正生效的值由下面 applyFleetEnabled() 在每次 renderAll() 里重新
+    // 应用一次，这里只是避免"构造出来的一瞬间"是错误默认值。
+    enabled: state.settings.fleet.enabled,
+  });
+
+  /* Agent 面板总开关（settings.fleet.enabled）：关闭时隐藏 tab 按钮、
+   * 停止 fleetView 轮询；若此刻正停在 Agent tab 则强制切回编写 tab——
+   * 但用 applyTab 而不是 switchTab，不去动 localStorage 里"上次停留
+   * tab"的记忆。这是开关导致的被动切换，不是用户主动选择，重新打开
+   * 开关后应该按用户原本的偏好来，不能被这次自动切换污染成"编写"。
+   * 由 renderAll() 在每次同步 / 回填之后调用，复用现成的
+   * composer-state-changed 广播路径，不另开事件通道。 */
+  function applyFleetEnabled() {
+    var on = state.settings.fleet.enabled !== false;
+    $tabFleetBtn.hidden = !on;
+    if (!on && $panelFleet.classList.contains('is-active')) {
+      applyTab('compose');
+    }
+    fleetView.setEnabled(on);
+  }
+
+  applyTab(loadSavedTab());
 
   restoreState();

@@ -28,6 +28,32 @@
     --radius-sm:7px;
     --font-sans:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --font-mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* Agent fleet 状态色：对应 fleet.js 的 STATUS_DEFS 5 档 tone。
+       active/ok 都是"进展正常"，muted/unknown 都是"没什么可看的"，
+       视觉上分别复用同一色值即可，但各自开变量是为了卡片 CSS 只认
+       tone 名字、不用关心哪几个底色其实相同——改配色时也只用改这一处。 */
+    --fleet-attention:var(--amber);
+    --fleet-active:var(--ok);
+    --fleet-danger:#c0392b;
+    --fleet-muted:var(--muted);
+    --fleet-ok:var(--ok);
+    --fleet-unknown:var(--muted);
+    /* 色块上的文字色。**必须按主题分别取值**，不能统一成白字——
+       fleet-attention / fleet-danger 在深色主题下本身是浅色（它们的设计用途是
+       "深底上的前景文字"），当填充背景用时白字对比度会掉到 2.56 / 2.99，
+       连大字号 AA 的 3.0 都不到。下面每个值后面的数字是实测对比度，
+       改动前请重算，不要凭观感——这类问题肉眼只觉得"有点发灰"。 */
+    --fleet-on-attention:#1f1f1f;   /* 5.28 ✅（白字仅 3.12，角标是 9.5px 小字，不够） */
+    --fleet-on-danger:#ffffff;      /* 5.44 ✅（此处底色 #c0392b 够深，白字反而最好） */
+    /* 小球状态点专用色（压在 --surface 上的纯色圆点，按 WCAG 非文本对比 3:1 算）。
+       默认就等于卡片色条那套 --fleet-*，让同一状态在两处颜色一致；只有浅色主题的
+       attention 是例外：--fleet-attention(#d97757) 压在浅底 #f7f6f3 上只有 2.89，
+       换成同色系更深的 --amber-hi 才够（3.88）。深色主题不需要这个例外，所以那边
+       三个都直接引用 --fleet-*。三个都开变量而不是只给 attention 开特例，是为了让
+       check:contrast 检查的名字与 CSS 实际用的名字永远是同一个，改配色时不会漏检。 */
+    --fleet-dot-attention:var(--amber-hi);
+    --fleet-dot-active:var(--fleet-active);
+    --fleet-dot-danger:var(--fleet-danger);
   }
 
   [data-theme="dark"] {
@@ -49,6 +75,20 @@
     --shadow-card:0 10px 34px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.3);
     --shadow-orb:0 8px 24px rgba(0,0,0,0.42), 0 1px 2px rgba(0,0,0,0.3);
     --shadow-toast:0 6px 18px rgba(0,0,0,0.35);
+    --fleet-attention:var(--amber);
+    --fleet-active:var(--ok);
+    --fleet-danger:#e57373;
+    --fleet-muted:var(--muted);
+    --fleet-ok:var(--ok);
+    --fleet-unknown:var(--muted);
+    /* 见浅色块里的说明。深色主题两处都得用深墨字。 */
+    --fleet-on-attention:#1f1f1f;   /* 6.45 ✅（白字仅 2.56） */
+    --fleet-on-danger:#1f1f1f;      /* 5.52 ✅（白字仅 2.99） */
+    /* 深色底(#2b2b2b)上三个状态色本身就够亮（5.54 / 5.13 / 4.74），不需要浅色那边
+       的替换，直接跟卡片色条同色。 */
+    --fleet-dot-attention:var(--fleet-attention);
+    --fleet-dot-active:var(--fleet-active);
+    --fleet-dot-danger:var(--fleet-danger);
   }
 
   * { box-sizing:border-box; }
@@ -133,17 +173,73 @@
     font-family:var(--font-mono); font-weight:700; font-size:20px; letter-spacing:0.02em;
     pointer-events:none;
   }
+  /* 小球右上角的 agent 状态点。
+     位置：窗口 52×52（float.js 的 MINI），点 12px 放在 top/right 各 8px，
+     圆心落在 (38,14)，距小球圆心 (26,26) 是 17px，加半径 6 还是 23 < 26——
+     整个点完全落在圆内。别改大到溢出圆外：窗口背景是透明的，溢出的部分会
+     悬空在桌面上，看起来像渲染坏了。
+     pointer-events:none 是硬要求，理由见 float.html 里那段注释。 */
+  .fw-mini-orb-dot {
+    position:absolute; top:8px; right:8px;
+    width:12px; height:12px; border-radius:50%;
+    pointer-events:none;
+    /* 用 box-shadow 描边而不是 border：border 会把 12px 撑大，上面那套
+       "点在圆内"的算术就得重算一遍。 */
+    box-shadow:0 0 0 1.5px var(--surface);
+  }
+  .fw-mini-orb-dot[hidden] { display:none; }
+  /* 只有这三个 tone 会用到（见 fleet.js 的 ORB_DOT_MIN_PRIORITY），其余
+     档位根本不点亮，不必为它们准备灰点样式。 */
+  .fw-mini-orb-dot.tone-attention { background:var(--fleet-dot-attention); }
+  .fw-mini-orb-dot.tone-active { background:var(--fleet-dot-active); }
+  .fw-mini-orb-dot.tone-danger { background:var(--fleet-dot-danger); }
+  .fw-mini-orb-dot.is-animated { animation:fw-fleet-pulse 1.4s ease-in-out infinite; }
   .fw-card.is-mini { border-radius:50%; border-color:transparent; box-shadow:none; }
   .fw-card.is-mini .fw-drag,
+  .fw-card.is-mini .fw-tabs,
   .fw-card.is-mini .fw-body,
   .fw-card.is-mini .fw-toast { display:none; }
   .fw-card.is-mini .fw-mini-orb { display:flex; }
+
+  /* tab 栏：编写 / Agent。角标用绝对定位叠在按钮右上角，数字很少超过两位数，
+     不单独量 380px 宽度的余量。 */
+  .fw-tabs {
+    flex:none; display:flex; gap:2px;
+    padding:6px 10px 0; background:var(--surface);
+    border-bottom:1px solid var(--line);
+    -webkit-user-select:none; user-select:none;
+  }
+  .fw-tab-btn {
+    position:relative; flex:none;
+    border:none; background:transparent; color:var(--muted);
+    padding:6px 10px; font-size:11.5px; font-weight:600;
+    border-radius:6px 6px 0 0; cursor:pointer;
+    transition:background 0.14s ease, color 0.14s ease;
+  }
+  .fw-tab-btn:hover { color:var(--text-soft); }
+  .fw-tab-btn.is-active { color:var(--amber-hi); background:var(--surface-hi); }
+  .fw-tab-badge {
+    display:inline-flex; align-items:center; justify-content:center;
+    margin-left:5px; min-width:15px; height:15px; padding:0 4px;
+    font-family:var(--font-mono); font-size:9.5px; font-weight:700; line-height:15px;
+    color:var(--fleet-on-attention); background:var(--fleet-attention); border-radius:999px;
+  }
+  .fw-tab-badge[hidden] { display:none; }
 
   .fw-body {
     flex:1; min-height:0; display:flex; flex-direction:column;
     padding:10px 10px 8px;
     gap:8px;
   }
+
+  /* 两个 tab 面板平级挂在 .fw-body 下，同时只有一个 is-active 显示。
+     .fw-panel 自己接手原来 .fw-body 直接给内容用的 flex 列布局，
+     这样切 tab 只是切 display，编写区内部的 flex/gap 规则完全不用改。 */
+  .fw-panel {
+    display:none; flex:1; min-height:0; flex-direction:column; gap:8px;
+    overflow:hidden;
+  }
+  .fw-panel.is-active { display:flex; }
 
   /* 编辑区 */
   .fw-editor-wrap {
@@ -300,3 +396,158 @@
   }
   .fw-toast::before { content:''; width:6px; height:6px; border-radius:50%; background:var(--ok); flex:none; }
   .fw-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* ============================================================
+   * Agent tab（fleetView.js 渲染进 #fwPanelFleet）
+   * ------------------------------------------------------------
+   * fleetView.js 只管 innerHTML/textContent，样式全在这里。root 下固定
+   * 两个直属节点：.fw-fleet-error（瞬时失败提示，独立于内容区，重渲染
+   * 内容时不会被清掉）+ .fw-fleet-content（分组/卡片/空态，全量重建）。
+   * ============================================================ */
+  .fw-fleet-error {
+    flex:none; display:flex; align-items:center; gap:6px;
+    margin:0 0 6px; padding:5px 9px; border-radius:6px;
+    background:var(--fleet-danger); color:var(--fleet-on-danger);
+    font-size:10.5px; line-height:1.4;
+    opacity:0.9;
+  }
+  .fw-fleet-error[hidden] { display:none; }
+
+  .fw-fleet-content { flex:1; min-height:0; display:flex; flex-direction:column; }
+
+  .fw-fleet-empty {
+    flex:1; display:flex; align-items:center; justify-content:center;
+    color:var(--faint); font-size:11.5px; text-align:center; padding:20px 10px;
+  }
+  .fw-fleet-schema-error { color:var(--fleet-danger); }
+
+  .fw-fleet-list { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+
+  .fw-fleet-group-title {
+    flex:none; display:flex; align-items:center; gap:6px;
+    font-size:10px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase;
+    color:var(--muted); margin:6px 0 0;
+  }
+  .fw-fleet-list > .fw-fleet-group-title:first-child { margin-top:0; }
+  .fw-fleet-group-count {
+    font-family:var(--font-mono); font-weight:600; color:var(--faint);
+    background:var(--surface-inset); border-radius:999px; padding:0 6px;
+  }
+
+  .fw-fleet-card {
+    flex:none; display:flex; flex-direction:column; gap:2px;
+    border:1px solid var(--line); border-left:2px solid var(--card-tone, var(--line));
+    border-radius:var(--radius-sm); background:var(--surface);
+    padding:6px 9px;
+  }
+  /* tone 只决定左侧色条 + 图标颜色，卡片底色/边框保持中性——380px 宽的窄卡片
+     整块染色反而会让一屏内多种状态混杂时显得杂乱，色条足够扫一眼分辨。 */
+  .fw-fleet-card.tone-attention { --card-tone:var(--fleet-attention); }
+  .fw-fleet-card.tone-active { --card-tone:var(--fleet-active); }
+  .fw-fleet-card.tone-danger { --card-tone:var(--fleet-danger); }
+  .fw-fleet-card.tone-muted { --card-tone:var(--fleet-muted); }
+  .fw-fleet-card.tone-ok { --card-tone:var(--fleet-ok); }
+  .fw-fleet-card.tone-unknown { --card-tone:var(--fleet-unknown); }
+
+  .fw-fleet-card-head { display:flex; align-items:baseline; gap:5px; min-width:0; }
+  .fw-fleet-glyph { flex:none; color:var(--card-tone, var(--muted)); font-weight:700; }
+  .fw-fleet-glyph.is-animated { animation:fw-fleet-pulse 1.4s ease-in-out infinite; }
+  @keyframes fw-fleet-pulse { 0%, 100% { opacity:1; } 50% { opacity:0.35; } }
+  .fw-fleet-name {
+    flex:none; font-weight:600; color:var(--text);
+    max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .fw-fleet-model {
+    flex:1; min-width:0; font-family:var(--font-mono); font-size:10px; color:var(--faint);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;
+  }
+  /* 打开工作目录：head 行最右侧的图标按钮。align-self:center 是必需的——
+     head 是 align-items:baseline，图标没有文字基线，跟着 baseline 对会明显下沉。 */
+  .fw-fleet-open-cwd {
+    flex:none; align-self:center;
+    display:inline-flex; align-items:center; justify-content:center;
+    width:17px; height:17px; padding:0;
+    border:none; border-radius:4px; background:transparent;
+    color:var(--faint); cursor:pointer;
+    transition:background 0.14s ease, color 0.14s ease;
+  }
+  .fw-fleet-open-cwd:hover { background:var(--amber-soft); color:var(--amber-hi); }
+  .fw-fleet-open-cwd svg { width:11px; height:11px; }
+
+  .fw-fleet-title-line {
+    font-size:11px; color:var(--text-soft);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .fw-fleet-branch {
+    font-family:var(--font-mono); font-size:10px; color:var(--faint);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  /* 后台会话的官方状态摘要。用色条同色（--card-tone）的左边框把它与普通
+     正文区分开——它不是会话内容，是"这个任务当前什么情况"。 */
+  .fw-fleet-job-detail {
+    margin-top:2px; padding-left:6px;
+    border-left:2px solid var(--card-tone, var(--muted));
+    font-size:10.5px; line-height:1.45; color:var(--text-soft);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
+  .fw-fleet-meta {
+    font-size:10px; color:var(--faint);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
+  .fw-fleet-warnings { flex:none; margin-top:6px; font-size:10.5px; color:var(--faint); }
+  .fw-fleet-warnings summary {
+    cursor:pointer; color:var(--muted); padding:2px 0;
+  }
+  .fw-fleet-warnings-list { margin:4px 0 0; padding-left:16px; display:flex; flex-direction:column; gap:2px; }
+  .fw-fleet-warnings-list li {
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
+  /* ============================================================
+   * C9/C10：卡片底部子 agent 折叠区 + 树形渲染
+   * 交互词汇照抄 .fw-quick-block（同一时刻只展开一个、点头部切换），
+   * 但视觉上做得比快速段落更低调——子 agent 是大多数会话都没有的
+   * 次要信息，不该跟主卡片内容抢注意力。
+   * ============================================================ */
+  .fw-fleet-sub { margin-top:3px; }
+  .fw-fleet-sub-head {
+    width:100%; display:flex; align-items:center; gap:5px;
+    border:none; background:transparent; color:var(--faint);
+    padding:2px 0; font-size:10.5px; cursor:pointer; text-align:left;
+    transition:color 0.12s ease;
+  }
+  .fw-fleet-sub-head:hover { color:var(--amber-hi); }
+  .fw-fleet-sub-head-text { flex:1; min-width:0; }
+  .fw-fleet-sub-head-count {
+    flex:none; font-family:var(--font-mono); font-size:9.5px; color:var(--faint);
+    background:var(--surface-inset); border-radius:999px; padding:0 5px;
+  }
+  .fw-fleet-sub-caret { flex:none; display:inline-block; color:var(--faint); transition:transform 0.16s ease; }
+  .fw-fleet-sub-head.open .fw-fleet-sub-caret { transform:rotate(180deg); }
+
+  .fw-fleet-sub-tree {
+    display:flex; flex-direction:column; gap:3px;
+    margin-top:3px; padding-top:5px; border-top:1px solid var(--line);
+  }
+  .fw-fleet-sub-row {
+    display:flex; align-items:baseline; gap:5px; min-width:0; font-size:10.5px;
+  }
+  .fw-fleet-sub-glyph { flex:none; font-weight:700; }
+  .fw-fleet-sub-glyph.is-animated { animation:fw-fleet-pulse 1.4s ease-in-out infinite; }
+  .fw-fleet-sub-glyph.tone-attention { color:var(--fleet-attention); }
+  .fw-fleet-sub-glyph.tone-active { color:var(--fleet-active); }
+  .fw-fleet-sub-glyph.tone-danger { color:var(--fleet-danger); }
+  .fw-fleet-sub-glyph.tone-muted { color:var(--fleet-muted); }
+  .fw-fleet-sub-glyph.tone-ok { color:var(--fleet-ok); }
+  .fw-fleet-sub-glyph.tone-unknown { color:var(--fleet-unknown); }
+  .fw-fleet-sub-label {
+    flex:1; min-width:0; color:var(--text-soft);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .fw-fleet-sub-orphan { flex:none; color:var(--faint); font-size:9.5px; }
+  .fw-fleet-sub-row-meta {
+    flex:none; font-family:var(--font-mono); font-size:9.5px; color:var(--faint);
+  }
+  .fw-fleet-sub-more { color:var(--faint); font-style:italic; }

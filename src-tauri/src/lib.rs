@@ -1,3 +1,10 @@
+// Agent Fleet：扫描本机在跑的 Claude Code 会话，供浮窗的 Agent tab 展示。
+// 只读本地文件 + sysinfo，不改用户任何配置。详见 fleet/mod.rs 与 docs/agent-fleet.md。
+//
+// pub 而非私有：tests/fleet_real_machine.rs 要直接调用各采集层，对真实
+// ~/.claude 跑一遍看认出了什么。那个测试是格式漂移时的主要诊断手段。
+pub mod fleet;
+
 // ============================================================
 // Windows 专属：粘贴到外部窗口的底层实现。
 // 思路：用一条后台线程持续记录“最近一个不属于本进程的前台窗口”，
@@ -280,7 +287,12 @@ pub fn run() {
                 .build(),
         );
 
-    // Windows 专属状态：粘贴命令要用的“最近前台窗口”缓存。
+    // Agent Fleet 的长期状态：CPU 采样基准 + transcript 路径缓存。
+    // 用 Arc 托管（而不是直接托管 FleetState）是因为命令要把它 move 进
+    // spawn_blocking —— `State<'_, T>` 是借用的，move 不进去，Arc 才能 clone 出来。
+    let builder = builder.manage(std::sync::Arc::new(fleet::FleetState::new()));
+
+    // Windows 专属状态：粘贴命令要用的”最近前台窗口”缓存。
     #[cfg(windows)]
     let builder = builder.manage(win32::LastForeground(std::sync::Mutex::new(None)));
 
@@ -296,7 +308,7 @@ pub fn run() {
     // 全局快捷键仅在桌面端可用，移动端跳过相关插件与注册逻辑
     #[cfg(desktop)]
     let builder = {
-        use tauri::Manager;
+        use tauri::{Emitter, Manager};
         use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
         // 默认 Ctrl+Alt+C：呼出/隐藏浮窗。用户可在设置面板里改成任意组合，
@@ -319,6 +331,15 @@ pub fn run() {
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }
+                                // 广播新的可见性。此前只有浮窗自己的关闭键会广播
+                                // （float.js），热键这条路径一直是静默的——主窗口的
+                                // 浮窗按钮激活态要等下次获得焦点才更新，而 Agent tab
+                                // 的轮询更是无从知道自己已经被隐藏，会继续白跑。
+                                // 一个监控工具在看不见的时候还烧 CPU 属实讽刺。
+                                let _ = app.emit(
+                                    "composer-float-visibility",
+                                    serde_json::json!({ "visible": !is_visible }),
+                                );
                             }
                         }
                     })
@@ -361,6 +382,14 @@ pub fn run() {
                     });
                 }
 
+                // 预热 Agent Fleet 的 CPU 采样基准：CPU 百分比要两次采样才算得出来，
+                // 不预热的话用户第一次打开 Agent tab 看到的 CPU 全是"—"，得等下一轮。
+                // 内部自己起线程，不阻塞启动。
+                {
+                    let fleet_state = app.state::<std::sync::Arc<fleet::FleetState>>();
+                    fleet::spawn_cpu_prewarm(app.handle().clone(), fleet_state.inner().clone());
+                }
+
                 Ok(())
             })
     };
@@ -368,10 +397,14 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.invoke_handler(tauri::generate_handler![
         paste_to_active_window,
-        set_toggle_shortcut
+        set_toggle_shortcut,
+        fleet::list_agent_sessions
     ]);
     #[cfg(not(desktop))]
-    let builder = builder.invoke_handler(tauri::generate_handler![paste_to_active_window]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        paste_to_active_window,
+        fleet::list_agent_sessions
+    ]);
 
     builder
         .run(tauri::generate_context!())

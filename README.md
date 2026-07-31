@@ -1,6 +1,6 @@
 # Composer · 模块化提示词构建工具
 
-一个用 **Tauri 2.x** 构建的跨平台桌面应用，用于「像搭积木一样」组装 AI 提示词。前端为原生 HTML/CSS/JS（无框架、无打包器，原生 ESM 分模块），纯逻辑抽离进 `core.js`，运行时按 store（状态）/ render（渲染）/ quick（浮窗）/ events（装配入口）分层，供主窗口与浮窗共用；Rust 侧除应用壳外，还实现了全局热键、窗口记忆、自动粘贴到外部窗口等桌面能力，可打包为 macOS / Windows / Linux 桌面程序，并支持应用内自动更新。
+一个用 **Tauri 2.x** 构建的跨平台桌面应用，用于「像搭积木一样」组装 AI 提示词。前端为原生 HTML/CSS/JS（无框架、无打包器，原生 ESM 分模块），纯逻辑抽离进 `core.js`，运行时按 store（状态）/ render（渲染）/ quick（浮窗）/ events（装配入口）分层，供主窗口与浮窗共用；Rust 侧除应用壳外，还实现了全局热键、窗口记忆、自动粘贴到外部窗口、本机 agent 会话扫描等桌面能力，可打包为 macOS / Windows / Linux 桌面程序，并支持应用内自动更新。
 
 ## 功能一览
 
@@ -29,6 +29,45 @@
 - 窗口位置与尺寸会被记住，下次呼出恢复原位（不记忆可见性，默认仍是隐藏启动）
 - **自动粘贴到外部窗口**（Windows 已在真机验证；macOS 为未编译验证的草稿实现）：开启开关后，点击浮窗内容会先复制到剪贴板，再自动切回你刚才操作的窗口并模拟粘贴，粘贴前等待时长可配置
 - 粘贴失败会做一次重试，且不会因目标窗口已关闭而误操作到其它窗口
+
+### 浮窗的 Agent 面板
+
+浮窗展开后有两个 tab：「编写」是上面那套内容，「Agent」用来看**本机在跑的
+Claude Code 会话**。可在设置面板关掉（关掉后 tab 隐藏、轮询停止）。
+
+- 每个会话一张卡片：状态 / Claude 自己生成的会话标题 / git 分支 / 模型与思考档位 /
+  已运行时长 / CPU 占用 / 上下文 token 数
+- 按状态分组，**「等你回话」排在最前面**，tab 上带角标显示有几个在等你
+- 状态图标沿用 Claude Code 官方 agent view 的语义（`✻` 等你回话、`✽` 运行中、
+  `∙` 空闲、`✗` 出错），所以浮窗里看到的符号和你在终端里看到的一致
+- **subagent 树**：派过子 agent 的会话可展开，按层级显示每个子 agent 在干什么
+  （用的是 Claude Code 落在磁盘上的 `description`）、各自的 token 与活跃时间
+- 主会话在等你回话、但它的后台 subagent 还在跑时，卡片上会单独标出「N 个子 agent
+  在跑」——两件事不塌缩成一个状态
+
+**实现上的两条原则**：
+
+1. **只看不控。** 不启动、不终止会话，也不拦截权限请求。只做展示。
+2. **在 `~/.claude` 里零脚印，只读不写。** 不装 hook、不改 `settings.json`、
+   不写任何文件。这个面板挂掉了，Claude Code 毫无感知。
+
+代价是拿不到「花了多少钱」和「订阅额度用了多少」——那两样只能靠往
+`~/.claude/settings.json` 注册 statusLine 脚本取得，违反上面第 2 条。上下文
+token 数不受影响（自己按官方同一个公式算）。
+
+数据来自 Claude Code 写在本地的会话文件，属于**未公开的内部实现**，上游改格式
+就可能读不出来。所以做了失败降级（读不出就显示「状态未知」而不是猜），
+以及一个诊断命令，用来在格式漂移时看清到底哪一层断了：
+
+```bash
+cd src-tauri
+cargo test --test fleet_real_machine -- --ignored --nocapture
+```
+
+它会打印采集层在你机器上认出的全部内容。**输出含真实的会话标题、分支和工作目录，
+贴到 issue 之前先看一眼。**
+
+设计取舍、数据来源、以及踩过的坑都记在 [docs/agent-fleet.md](docs/agent-fleet.md)。
 
 ---
 
@@ -140,13 +179,20 @@ npm run test:cov  # 附带 v8 覆盖率（统计整个 src/）
 npm run lint      # eslint 全量检查
 ```
 
-另有两个**真浏览器**端到端冒烟脚本（需要本机有 playwright 的 chromium 缓存，
+另有几个**真浏览器**端到端冒烟脚本（需要本机有 playwright 的 chromium 缓存，
 因此不在 CI 里跑；路径可用 `PW_MODULE` / `PW_CHROME` 环境变量覆盖）：
 
 ```bash
-npm run smoke       # 起静态 server + Chromium 打开两份 HTML，跑 30 项交互断言
-npm run smoke:csp   # 额外把 tauri.conf.json 的 CSP 用 <meta> 注入，检查有无违规
+npm run smoke        # 起静态 server + Chromium 打开两份 HTML，跑 30 项交互断言
+npm run smoke:csp    # 额外把 tauri.conf.json 的 CSP 用 <meta> 注入，检查有无违规
+npm run smoke:fleet  # 浮窗 Agent 面板：tab 切换 + 非 Tauri 环境的降级路径
 ```
+
+> `smoke:fleet` 存在的理由是 jsdom 测不到"真浏览器里 `window.__TAURI__` 压根不存在
+> 且 ESM 模块图正常加载"这个组合——`float.js` 顶层就 import 了 Agent 面板的模块，
+> 任何一处对 Tauri 的无保护访问都会让整个模块挂掉、连编写区一起白屏。
+> 顺带记一个坑：这类脚本**必须走 http 而不是 `file://`**，后者会被 Chrome 的 CORS
+> 拦掉 `<script type="module">`，于是测试只是在验静态 HTML，功能坏了也看不出来。
 
 `npm run smoke` 覆盖的是「单测全绿但应用可能起不来」那一类问题：启动、样式生效、
 素材渲染、插入、Markdown 高亮、中英切换、预览分栏、设置面板各 tab、主题切换、
@@ -214,7 +260,8 @@ npm run tauri icon path/to/your-icon.png
 .
 ├── package.json              # 脚本与前端/CLI 依赖
 ├── docs/
-│   └── csp.md                 # CSP 最终字符串 + 每条指令的理由 + 真机验证清单
+│   ├── csp.md                 # CSP 最终字符串 + 每条指令的理由 + 真机验证清单
+│   └── agent-fleet.md         # 浮窗 Agent 面板的完整方案：数据来源/接口契约/失败降级/边界情况/实测记录
 ├── scripts/
 │   └── sync-version.mjs       # package.json / tauri.conf.json 的 version 字段校验与同步
 ├── .github/
@@ -230,6 +277,8 @@ npm run tauri icon path/to/your-icon.png
 │   ├── translate.js           # 一键翻译编排层（收集待翻块 → http 请求 → 解析写回）
 │   ├── guide.js               # 新手引导：首启动高亮遮罩引导 + 上下文轻提示
 │   ├── completion.js          # 行内自动补全交互层（ghost text 展示/键盘接管，纯逻辑在 core.js），主窗口与浮窗共用
+│   ├── fleet.js               # Agent 面板的纯判定层（无 DOM/无 Tauri）：会话状态推断、subagent 树重建、分组排序、格式化
+│   ├── fleetView.js           # Agent 面板的 DOM 层 + 轮询调度（分档/单飞/失败退避/焦点守卫），依赖全部由参数注入
 │   ├── materials.js           # 素材解析纯函数（按 id 合成模块/常用句，内置 patch 合并），主窗口与浮窗共用，避免两处实现漂移
 │   ├── pool.js                # 行内补全候选池合成 + 学习数据读写入口（纯逻辑），统一主窗口与浮窗的候选 key 算法
 │   ├── sync.js                # state 持久化 + 双窗口广播 + 回声过滤（工厂函数 + 依赖注入，可用假 fs/事件对象单测）
@@ -242,9 +291,9 @@ npm run tauri icon path/to/your-icon.png
 │   ├── styles.css             # 主窗口样式
 │   ├── float.css              # 浮窗样式（从 float.html 内联 style 搬出）
 │   ├── index.html             # 主窗口 UI：模块库/装配区/检视栏/快速段落/设置面板
-│   ├── float.html             # 浮窗 UI：置顶小窗、常用句/快速段落一键复制、行内自动补全、自动粘贴开关、一键缩小为悬浮小球
+│   ├── float.html             # 浮窗 UI：置顶小窗、编写/Agent 两个 tab、常用句一键复制、行内自动补全、自动粘贴开关、一键缩小为悬浮小球
 │   ├── main.js                # 唯一入口：模块图装配完成后调用 events.js 的 bootstrap()
-│   └── __tests__/             # Vitest 用例 + 两个真浏览器冒烟脚本（*.smoke.mjs）
+│   └── __tests__/             # Vitest 用例 + 真浏览器冒烟脚本（*.smoke.mjs）+ fixtures/（确定性夹具）
 └── src-tauri/
     ├── Cargo.toml             # Rust 依赖（tauri + fs/dialog/clipboard/updater/process/global-shortcut/window-state/http 插件 + enigo 等）
     ├── build.rs

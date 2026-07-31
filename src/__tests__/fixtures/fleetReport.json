@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 2,
+  "scannedAt": 1785416160000,
+  "configDir": "C:Usersdemo.claude",
+  "sessions": [
+    {
+      "pid": 42772,
+      "sessionId": "sid-needs-input",
+      "name": "demo-web-5b",
+      "cwd": "C:workdemo-web",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 0.2,
+        "memoryMb": 423,
+        "runTimeSec": 3600
+      },
+      "transcript": {
+        "sizeBytes": 318000,
+        "mtimeMs": 1785416124000,
+        "aiTitle": "占位：共享 aria-live 区域组件",
+        "lastPrompt": "占位：开分支做 live region",
+        "gitBranch": "main",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": "assistant",
+        "lastStopReason": "end_turn",
+        "lastTailKind": "text",
+        "lastToolNames": [],
+        "lastMsgTsMs": 1785416123000,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": 41000,
+        "parseErrors": 0
+      },
+      "subagents": [],
+      "job": null
+    },
+    {
+      "pid": 52052,
+      "sessionId": "sid-working",
+      "name": "demo-composer-18",
+      "cwd": "C:workdemo",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 12.4,
+        "memoryMb": 483,
+        "runTimeSec": 900
+      },
+      "transcript": {
+        "sizeBytes": 318000,
+        "mtimeMs": 1785416157000,
+        "aiTitle": "占位：多 agent 桌面进程显示",
+        "lastPrompt": "占位：继续",
+        "gitBranch": "feat/agent-fleet-monitor",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": "assistant",
+        "lastStopReason": "tool_use",
+        "lastTailKind": "tool_use",
+        "lastToolNames": [
+          "Bash"
+        ],
+        "lastMsgTsMs": 1785416156000,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": 70424,
+        "parseErrors": 0
+      },
+      "subagents": [
+        {
+          "agentId": "root1",
+          "agentType": "general-purpose",
+          "description": "占位：调研 agent dashboard 生态",
+          "parentAgentId": null,
+          "spawnDepth": 1,
+          "mtimeMs": 1785416140000,
+          "sizeBytes": 400000,
+          "lastRole": "assistant",
+          "lastStopReason": "tool_use",
+          "lastTailKind": "tool_use",
+          "lastMsgTsMs": 1785416139000,
+          "contextTokens": 41000
+        },
+        {
+          "agentId": "child1",
+          "agentType": "general-purpose",
+          "description": "占位：调研 Claude Squad / Crystal",
+          "parentAgentId": "root1",
+          "spawnDepth": 2,
+          "mtimeMs": 1785416140000,
+          "sizeBytes": 400000,
+          "lastRole": "assistant",
+          "lastStopReason": "tool_use",
+          "lastTailKind": "tool_use",
+          "lastMsgTsMs": 1785416139000,
+          "contextTokens": 41000
+        },
+        {
+          "agentId": "child2",
+          "agentType": "general-purpose",
+          "description": "占位：调研 CCManager / cui",
+          "parentAgentId": "root1",
+          "spawnDepth": 2,
+          "mtimeMs": 1785415680000,
+          "sizeBytes": 400000,
+          "lastRole": "assistant",
+          "lastStopReason": "end_turn",
+          "lastTailKind": "text",
+          "lastMsgTsMs": 1785416139000,
+          "contextTokens": 41000
+        },
+        {
+          "agentId": "child3",
+          "agentType": "general-purpose",
+          "description": "占位：调研 Omnara / Happy",
+          "parentAgentId": "root1",
+          "spawnDepth": 2,
+          "mtimeMs": 1785416140000,
+          "sizeBytes": 400000,
+          "lastRole": "assistant",
+          "lastStopReason": "tool_use",
+          "lastTailKind": "tool_use",
+          "lastMsgTsMs": 1785416139000,
+          "contextTokens": 41000
+        },
+        {
+          "agentId": "root2",
+          "agentType": "general-purpose",
+          "description": "占位：调研 Clawd-on-Desk",
+          "parentAgentId": null,
+          "spawnDepth": 1,
+          "mtimeMs": 1785416140000,
+          "sizeBytes": 400000,
+          "lastRole": "assistant",
+          "lastStopReason": "tool_use",
+          "lastTailKind": "tool_use",
+          "lastMsgTsMs": 1785416139000,
+          "contextTokens": 41000
+        }
+      ],
+      "job": null
+    },
+    {
+      "pid": 63340,
+      "sessionId": "sid-idle",
+      "name": "demo-web-c5",
+      "cwd": "C:workdemo-web",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 0,
+        "memoryMb": 350,
+        "runTimeSec": 7200
+      },
+      "transcript": {
+        "sizeBytes": 3735000,
+        "mtimeMs": 1785413700000,
+        "aiTitle": "占位：按设计规范审查前端页面",
+        "lastPrompt": null,
+        "gitBranch": "main",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": "assistant",
+        "lastStopReason": "end_turn",
+        "lastTailKind": "text",
+        "lastToolNames": [],
+        "lastMsgTsMs": 1785413700000,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": 70424,
+        "parseErrors": 0
+      },
+      "subagents": [],
+      "job": null
+    },
+    {
+      "pid": 5468,
+      "sessionId": "sid-fresh",
+      "name": "demo-web-44",
+      "cwd": "C:workdemo-web",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785416070000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 0,
+        "memoryMb": 348,
+        "runTimeSec": 90
+      },
+      "transcript": null,
+      "subagents": [],
+      "job": null
+    },
+    {
+      "pid": 61111,
+      "sessionId": "sid-failed",
+      "name": "demo-api-fail",
+      "cwd": "C:workdemo",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 0,
+        "memoryMb": 350,
+        "runTimeSec": 1800
+      },
+      "transcript": {
+        "sizeBytes": 318000,
+        "mtimeMs": 1785416150000,
+        "aiTitle": "占位：出错的会话",
+        "lastPrompt": null,
+        "gitBranch": "main",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": "assistant",
+        "lastStopReason": "stop_sequence",
+        "lastTailKind": "text",
+        "lastToolNames": [],
+        "lastMsgTsMs": 1785416156000,
+        "hasApiError": true,
+        "apiErrorStatus": "403",
+        "apiErrorCode": "oauth_org_not_allowed",
+        "contextTokens": 0,
+        "parseErrors": 0
+      },
+      "subagents": [],
+      "job": null
+    },
+    {
+      "pid": 62222,
+      "sessionId": "sid-no-cpu",
+      "name": "demo-no-cpu",
+      "cwd": "C:workdemo",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": null,
+        "memoryMb": 350,
+        "runTimeSec": 1800
+      },
+      "transcript": {
+        "sizeBytes": 318000,
+        "mtimeMs": 1785416157000,
+        "aiTitle": "占位：CPU 还没有基准",
+        "lastPrompt": null,
+        "gitBranch": "main",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": "assistant",
+        "lastStopReason": "tool_use",
+        "lastTailKind": "tool_use",
+        "lastToolNames": [
+          "Bash"
+        ],
+        "lastMsgTsMs": 1785416156000,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": 70424,
+        "parseErrors": 0
+      },
+      "subagents": [],
+      "job": null
+    },
+    {
+      "pid": 63333,
+      "sessionId": "sid-job",
+      "name": "demo-bg-job",
+      "cwd": "C:workdemo",
+      "entrypoint": "claude-vscode",
+      "kind": "background",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 0,
+        "memoryMb": 350,
+        "runTimeSec": 1800
+      },
+      "transcript": {
+        "sizeBytes": 318000,
+        "mtimeMs": 1785416157000,
+        "aiTitle": "占位：后台会话",
+        "lastPrompt": null,
+        "gitBranch": "main",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": "assistant",
+        "lastStopReason": "end_turn",
+        "lastTailKind": "text",
+        "lastToolNames": [],
+        "lastMsgTsMs": 1785416156000,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": 70424,
+        "parseErrors": 0
+      },
+      "subagents": [],
+      "job": {
+        "jobId": "56520b5f",
+        "state": "blocked",
+        "detail": "占位：要我顺手提交这条 fix 吗？",
+        "tempo": "idle",
+        "tokens": 91774,
+        "inFlight": {
+          "tasks": 0,
+          "queued": 0
+        },
+        "intent": "占位：原始 prompt",
+        "updatedAt": 1785416040000
+      }
+    },
+    {
+      "pid": null,
+      "sessionId": "sid-job-headless",
+      "name": "demo-bg-headless",
+      "cwd": "C:workdemo",
+      "entrypoint": "daemon",
+      "kind": "background",
+      "startedAt": 1785410000000,
+      "cliVersion": "2.1.220",
+      "liveness": "no-process",
+      "proc": null,
+      "transcript": null,
+      "subagents": [],
+      "job": {
+        "jobId": "aa11bb22",
+        "state": "working",
+        "detail": "占位：正在改测试",
+        "tempo": "steady",
+        "tokens": 40000,
+        "inFlight": {
+          "tasks": 2,
+          "queued": 1
+        },
+        "intent": "占位：后台任务的原始 prompt",
+        "updatedAt": 1785416150000
+      }
+    },
+    {
+      "pid": 64444,
+      "sessionId": "sid-unknown",
+      "name": "demo-unparsable",
+      "cwd": "C:workdemo",
+      "entrypoint": "claude-vscode",
+      "kind": "interactive",
+      "startedAt": 1785414360000,
+      "cliVersion": "2.1.220",
+      "liveness": "alive",
+      "proc": {
+        "cpuPercent": 0,
+        "memoryMb": 350,
+        "runTimeSec": 1800
+      },
+      "transcript": {
+        "sizeBytes": 318000,
+        "mtimeMs": 1785416157000,
+        "aiTitle": null,
+        "lastPrompt": null,
+        "gitBranch": "main",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "lastRole": null,
+        "lastStopReason": null,
+        "lastTailKind": null,
+        "lastToolNames": [],
+        "lastMsgTsMs": null,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": null,
+        "parseErrors": 12
+      },
+      "subagents": [],
+      "job": null
+    }
+  ],
+  "warnings": [
+    {
+      "code": "pid-reused",
+      "detail": "占位：pid 62222 的启动时间与名册记录不符"
+    },
+    {
+      "code": "transcript-unparsable",
+      "detail": "占位：64444.jsonl 尾部窗口无可解析消息"
+    }
+  ]
+}
