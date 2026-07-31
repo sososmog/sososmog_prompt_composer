@@ -45,6 +45,15 @@
        改动前请重算，不要凭观感——这类问题肉眼只觉得"有点发灰"。 */
     --fleet-on-attention:#1f1f1f;   /* 5.28 ✅（白字仅 3.12，角标是 9.5px 小字，不够） */
     --fleet-on-danger:#ffffff;      /* 5.44 ✅（此处底色 #c0392b 够深，白字反而最好） */
+    /* 小球状态点专用色（压在 --surface 上的纯色圆点，按 WCAG 非文本对比 3:1 算）。
+       默认就等于卡片色条那套 --fleet-*，让同一状态在两处颜色一致；只有浅色主题的
+       attention 是例外：--fleet-attention(#d97757) 压在浅底 #f7f6f3 上只有 2.89，
+       换成同色系更深的 --amber-hi 才够（3.88）。深色主题不需要这个例外，所以那边
+       三个都直接引用 --fleet-*。三个都开变量而不是只给 attention 开特例，是为了让
+       check:contrast 检查的名字与 CSS 实际用的名字永远是同一个，改配色时不会漏检。 */
+    --fleet-dot-attention:var(--amber-hi);
+    --fleet-dot-active:var(--fleet-active);
+    --fleet-dot-danger:var(--fleet-danger);
   }
 
   [data-theme="dark"] {
@@ -75,6 +84,11 @@
     /* 见浅色块里的说明。深色主题两处都得用深墨字。 */
     --fleet-on-attention:#1f1f1f;   /* 6.45 ✅（白字仅 2.56） */
     --fleet-on-danger:#1f1f1f;      /* 5.52 ✅（白字仅 2.99） */
+    /* 深色底(#2b2b2b)上三个状态色本身就够亮（5.54 / 5.13 / 4.74），不需要浅色那边
+       的替换，直接跟卡片色条同色。 */
+    --fleet-dot-attention:var(--fleet-attention);
+    --fleet-dot-active:var(--fleet-active);
+    --fleet-dot-danger:var(--fleet-danger);
   }
 
   * { box-sizing:border-box; }
@@ -159,6 +173,27 @@
     font-family:var(--font-mono); font-weight:700; font-size:20px; letter-spacing:0.02em;
     pointer-events:none;
   }
+  /* 小球右上角的 agent 状态点。
+     位置：窗口 52×52（float.js 的 MINI），点 12px 放在 top/right 各 8px，
+     圆心落在 (38,14)，距小球圆心 (26,26) 是 17px，加半径 6 还是 23 < 26——
+     整个点完全落在圆内。别改大到溢出圆外：窗口背景是透明的，溢出的部分会
+     悬空在桌面上，看起来像渲染坏了。
+     pointer-events:none 是硬要求，理由见 float.html 里那段注释。 */
+  .fw-mini-orb-dot {
+    position:absolute; top:8px; right:8px;
+    width:12px; height:12px; border-radius:50%;
+    pointer-events:none;
+    /* 用 box-shadow 描边而不是 border：border 会把 12px 撑大，上面那套
+       "点在圆内"的算术就得重算一遍。 */
+    box-shadow:0 0 0 1.5px var(--surface);
+  }
+  .fw-mini-orb-dot[hidden] { display:none; }
+  /* 只有这三个 tone 会用到（见 fleet.js 的 ORB_DOT_MIN_PRIORITY），其余
+     档位根本不点亮，不必为它们准备灰点样式。 */
+  .fw-mini-orb-dot.tone-attention { background:var(--fleet-dot-attention); }
+  .fw-mini-orb-dot.tone-active { background:var(--fleet-dot-active); }
+  .fw-mini-orb-dot.tone-danger { background:var(--fleet-dot-danger); }
+  .fw-mini-orb-dot.is-animated { animation:fw-fleet-pulse 1.4s ease-in-out infinite; }
   .fw-card.is-mini { border-radius:50%; border-color:transparent; box-shadow:none; }
   .fw-card.is-mini .fw-drag,
   .fw-card.is-mini .fw-tabs,

@@ -25,9 +25,12 @@
  * ============================================================ */
 import {
   STATUS_DEFS,
+  TONE_PRIORITY,
+  ORB_DOT_MIN_PRIORITY,
   groupSessions,
   lastActivityMs,
   countNeedsInput,
+  reduceFleetTone,
   formatAgo,
   formatTokens,
   formatCpu,
@@ -204,6 +207,8 @@ function countWorkingSubagents(subagents, scannedAt) {
  * @param {HTMLElement} opts.root        面板容器（#fwPanelFleet），本模块独占其内容
  * @param {HTMLElement} [opts.tabButton] Agent tab 按钮，用于回填角标数量的 title 提示
  * @param {HTMLElement} [opts.badge]     tab 按钮里的角标元素，数量为 0 时隐藏
+ * @param {HTMLElement} [opts.orbDot]    悬浮小球上的状态点（#fwMiniOrbDot），缩成
+ *        小球后唯一还能表达"有事发生"的元素。缺省则整个特性静默跳过
  * @param {(cmd: string, args?: object) => Promise<unknown>} [opts.invoke]
  *        Tauri 的 core.invoke。非 Tauri 环境传 null/undefined，本模块会渲染降级文案
  *        并且完全不启动轮询——playwright 冒烟跑在浏览器里，这一步不能报错。
@@ -216,7 +221,7 @@ function countWorkingSubagents(subagents, scannedAt) {
  *        定时器，之后由 setEnabled() 实时更新（见返回值说明）。
  * @returns {{ refreshSchedule: () => void, setEnabled: (v: boolean) => void, stop: () => void }}
  */
-export function createFleetView({ root, tabButton, badge, invoke, getVisibility, onError, enabled }) {
+export function createFleetView({ root, tabButton, badge, orbDot, invoke, getVisibility, onError, enabled }) {
   let errorBannerEl = null;
   let contentEl = null;
   let warningsOpen = false; // 警告折叠区展开状态，重渲染后要保持（同 openQuickGroupId 的做法）
@@ -263,6 +268,7 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
 
   function renderSchemaError(detail) {
     hideErrorBanner(); // 已经是终态提示，不需要瞬时错误条一起挂着
+    hideOrbDot(); // 版本对不上 = 数据不可信，小球上继续亮着一个旧状态点是在撒谎
     contentEl.innerHTML = '';
     const el = document.createElement('div');
     el.className = 'fw-fleet-empty fw-fleet-schema-error';
@@ -449,6 +455,36 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
     }
   }
 
+  const ORB_DOT_BASE_CLASS = 'fw-mini-orb-dot';
+
+  function hideOrbDot() {
+    if (!orbDot) return;
+    orbDot.hidden = true;
+    orbDot.className = ORB_DOT_BASE_CLASS; // 顺手清掉 tone-*/is-animated，不留上一轮的残迹
+  }
+
+  /**
+   * E2：把全部会话归约成一个状态，点亮/熄灭小球上的点。
+   *
+   * 与 updateBadge 一样跑在 applyReport 的焦点守卫**之前**——守卫防的是
+   * "正在输入时别重建面板 DOM"，而这个点和角标都不在面板里，跳过它们没
+   * 有任何好处，只会让缩成小球时的状态停在旧值上。
+   *
+   * @param {import('./fleet.js').AgentSession[]} sessions
+   * @param {number} scannedAt
+   */
+  function updateOrbDot(sessions, scannedAt) {
+    if (!orbDot) return;
+    const reduced = reduceFleetTone(sessions, scannedAt);
+    if (TONE_PRIORITY[reduced.code] < ORB_DOT_MIN_PRIORITY) {
+      hideOrbDot();
+      return;
+    }
+    const def = STATUS_DEFS[reduced.code];
+    orbDot.className = ORB_DOT_BASE_CLASS + ' tone-' + reduced.tone + (def.animated ? ' is-animated' : '');
+    orbDot.hidden = false;
+  }
+
   /**
    * 把报告画成分组+卡片，真正动手改 DOM 的地方。从 applyReport 拆出来，
    * 是因为子 agent 折叠区的点击也需要立即重渲染一次（见 buildSubagentSection），
@@ -509,6 +545,7 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   function applyReport(report) {
     lastReport = report;
     updateBadge(report.sessions, report.scannedAt);
+    updateOrbDot(report.sessions, report.scannedAt);
     hideErrorBanner();
 
     // C4 附：交互中不打断——面板里有焦点元素时，本次跳过内容重建，
@@ -525,6 +562,7 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   // invoke 而抛错，否则整个 float.html 都起不来。
   if (!invoke) {
     renderDegraded();
+    hideOrbDot();
     return { refreshSchedule: function () {}, setEnabled: function () {}, stop: function () {} };
   }
 
@@ -652,6 +690,10 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
       var next = v !== false;
       if (next === isEnabled) return; // 状态没变，不折腾定时器
       isEnabled = next;
+      // 关掉总开关必须立刻熄灭小球状态点。角标不需要这一步是因为 tab 按钮
+      // 整个被 float.js 隐藏了，而小球在任何时候都可见——留一个再也不会
+      // 更新的点在上面，比不显示更糟。
+      if (!next) hideOrbDot();
       if (stopped || inFlight) return; // 已终态 / 请求飞行中：下一轮自然生效，不用现在插手
       scheduleNext(0);
     },

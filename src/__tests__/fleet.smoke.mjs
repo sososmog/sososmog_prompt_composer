@@ -101,6 +101,57 @@ await page.locator('.fw-tabs button').nth(0).click();
 await page.waitForTimeout(200);
 assert(await page.locator('#fwTextarea').isVisible(), '切回后编写区仍可见');
 
+/* ---- E2：小球状态点 ----
+ * 两件 jsdom 验不了的事，都只有真实布局引擎能回答：
+ *   1. 点会不会溢出小球圆外（窗口背景是透明的，溢出部分会悬空在桌面上）；
+ *   2. 点会不会把小球的点击吃掉——小球的展开/拖动是手动 mousedown 判定的，
+ *      多一个能接指针事件的子元素就会让"单击展开"失效，而这种坏法在
+ *      截图里完全看不出来。
+ * 把 viewport 调成真实的 52×52（float.js 的 MINI 尺寸）才量得准：默认
+ * viewport 下 .fw-card 会撑满整页，小球变成一个巨大的椭圆，而点用的是固定
+ * px 偏移，算出来的比例毫无意义。
+ * 非 Tauri 环境下 fleetView 不会点亮这个点，所以手动摆出"等你回话"的状态。 */
+await page.setViewportSize({ width: 52, height: 52 });
+await page.evaluate(() => {
+  document.getElementById('fwCard').classList.add('is-mini');
+  const dot = document.getElementById('fwMiniOrbDot');
+  dot.hidden = false;
+  dot.className = 'fw-mini-orb-dot tone-attention';
+});
+await page.waitForTimeout(100);
+
+assert(await page.locator('#fwMiniOrb').isVisible(), 'is-mini 时小球可见');
+
+const geo = await page.evaluate(() => {
+  const orb = document.getElementById('fwMiniOrb').getBoundingClientRect();
+  const dot = document.getElementById('fwMiniOrbDot').getBoundingClientRect();
+  const cx = orb.left + orb.width / 2;
+  const cy = orb.top + orb.height / 2;
+  const dx = dot.left + dot.width / 2 - cx;
+  const dy = dot.top + dot.height / 2 - cy;
+  // 命中测试打在点的正中心：这里返回什么，就是用户点下去时事件真正落到谁身上
+  const hit = document.elementFromPoint(dot.left + dot.width / 2, dot.top + dot.height / 2);
+  return {
+    orbRadius: Math.min(orb.width, orb.height) / 2,
+    dotRadius: Math.min(dot.width, dot.height) / 2,
+    centerDist: Math.hypot(dx, dy),
+    size: dot.width,
+    hitId: hit ? hit.id : null,
+  };
+});
+
+assert(geo.size > 0, `状态点有实际尺寸（${geo.size}px）`);
+// 点也是圆的，所以最远点在"圆心连线"方向，不是外接矩形的角。
+// box-shadow 描边（1.5px）不计入 boundingRect，算上它仍在圆内（约 24.5 < 26）。
+assert(
+  geo.centerDist + geo.dotRadius <= geo.orbRadius,
+  `状态点完全落在小球圆内（离圆心 ${geo.centerDist.toFixed(1)} + 半径 ${geo.dotRadius} ≤ ${geo.orbRadius}）`
+);
+assert(
+  geo.hitId === 'fwMiniOrb',
+  `点在状态点上，事件仍落到小球本身（实际命中 ${JSON.stringify(geo.hitId)}；若是 fwMiniOrbDot 说明漏了 pointer-events:none）`
+);
+
 // ---- 最关键的一条：没有未捕获的页面错误 ----
 if (pageErrors.length) {
   console.error('  页面错误:', pageErrors.slice(0, 3));

@@ -18,8 +18,14 @@
 <body>
 
   <div class="fw-card" id="fwCard" style="position:relative;">
+    <!-- 小球上的 agent 状态点：缩成 52×52 后卡片内容全部隐藏，这个点是唯一还能
+         告诉你"有 agent 在等你回话/出错了"的东西。必须放在 .fw-mini-orb **内部**
+         （小球是 is-mini 时唯一可见的元素），且 CSS 里带 pointer-events:none——
+         小球的展开/拖动是手动 mousedown 判定的，多一个能吃指针事件的子元素就会
+         把点击吞掉。亮不亮由 fleetView 按 ORB_DOT_MIN_PRIORITY 决定。 -->
     <button class="fw-mini-orb" id="fwMiniOrb" type="button" title="展开浮窗（可拖动）" aria-label="展开浮窗">
       <span class="fw-mini-orb-label">C</span>
+      <span class="fw-mini-orb-dot" id="fwMiniOrbDot" hidden></span>
     </button>
     <div class="fw-drag" data-tauri-drag-region>
       <span class="fw-title" data-tauri-drag-region>COMPOSER</span>

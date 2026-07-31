@@ -127,12 +127,13 @@ function mountFleetDom() {
   document.documentElement.removeAttribute('data-theme');
 }
 
-/** @returns {{root: HTMLElement, tabButton: HTMLElement, badge: HTMLElement}} */
+/** @returns {{root: HTMLElement, tabButton: HTMLElement, badge: HTMLElement, orbDot: HTMLElement}} */
 function fleetRefs() {
   return {
     root: document.getElementById('fwPanelFleet'),
     tabButton: document.getElementById('fwTabFleetBtn'),
     badge: document.getElementById('fwTabFleetBadge'),
+    orbDot: document.getElementById('fwMiniOrbDot'),
   };
 }
 
@@ -1005,6 +1006,175 @@ describe('createFleetView：失败卡片错误码', function () {
 
     var meta = findCard(refs, 's1').querySelector('.fw-fleet-meta');
     expect(meta.textContent).not.toContain('oauth_org_not_allowed');
+  });
+});
+
+/* ============================================================
+ * E2：悬浮小球上的状态点
+ * ------------------------------------------------------------
+ * 这个点的价值全在"缩成小球之后"，而小球状态下 jsdom 里没有任何东西
+ * 能验证——所以这里测的是它的**数据契约**：什么状态点亮、点成什么颜色、
+ * 什么时候必须熄灭。归约本身（谁赢）由 fleet.test.js 的 reduceFleetTone
+ * 用例负责，这里只验 tone → class 的映射和熄灭时机。
+ * ============================================================ */
+describe('createFleetView：E2 小球状态点', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  function mount(sessions, extra) {
+    var refs = fleetRefs();
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: sessions }));
+    controller = createFleetView(
+      Object.assign(
+        {
+          root: refs.root,
+          tabButton: refs.tabButton,
+          badge: refs.badge,
+          orbDot: refs.orbDot,
+          invoke: invoke,
+          getVisibility: function () { return true; },
+        },
+        extra
+      )
+    );
+    return refs;
+  }
+
+  /** transcript 默认是 assistant + tool_use + mtime 等于 scannedAt，即 working。 */
+  function transcriptWith(overrides) {
+    return Object.assign({}, makeSession({}).transcript, overrides);
+  }
+
+  it('working：点亮成 tone-active，并带脉冲动画', async function () {
+    var refs = mount([makeSession({ sessionId: 's1' })]);
+    await advance(0);
+
+    expect(refs.orbDot.hidden).toBe(false);
+    expect(refs.orbDot.classList.contains('tone-active')).toBe(true);
+    expect(refs.orbDot.classList.contains('is-animated')).toBe(true);
+  });
+
+  it('needs-input：点亮成 tone-attention，不带动画', async function () {
+    var refs = mount([
+      makeSession({ sessionId: 's1', transcript: transcriptWith({ lastStopReason: 'end_turn' }) }),
+    ]);
+    await advance(0);
+
+    expect(refs.orbDot.hidden).toBe(false);
+    expect(refs.orbDot.classList.contains('tone-attention')).toBe(true);
+    expect(refs.orbDot.classList.contains('is-animated')).toBe(false);
+  });
+
+  it('failed：点亮成 tone-danger', async function () {
+    var refs = mount([
+      makeSession({
+        sessionId: 's1',
+        transcript: transcriptWith({ hasApiError: true, lastStopReason: 'stop_sequence' }),
+      }),
+    ]);
+    await advance(0);
+
+    expect(refs.orbDot.hidden).toBe(false);
+    expect(refs.orbDot.classList.contains('tone-danger')).toBe(true);
+  });
+
+  it('优先级最高的状态赢：failed + working 混合时点是 tone-danger', async function () {
+    var refs = mount([
+      makeSession({ sessionId: 's1' }),
+      makeSession({
+        sessionId: 's2',
+        transcript: transcriptWith({ hasApiError: true, lastStopReason: 'stop_sequence' }),
+      }),
+    ]);
+    await advance(0);
+
+    expect(refs.orbDot.classList.contains('tone-danger')).toBe(true);
+    expect(refs.orbDot.classList.contains('tone-active')).toBe(false);
+  });
+
+  it('idle / fresh / 无会话：都在门槛之下，点保持熄灭', async function () {
+    // idle：mtime 比 scannedAt 早了 10 分钟，超过 IDLE_MS
+    var refs = mount([
+      makeSession({ sessionId: 's1', transcript: transcriptWith({ mtimeMs: 1000000 - 10 * 60 * 1000, lastMsgTsMs: null }) }),
+      makeSession({ sessionId: 's2', transcript: null }), // fresh
+    ]);
+    await advance(0);
+    expect(refs.orbDot.hidden).toBe(true);
+
+    // 面板本身确实画出了这两张卡片——排除"根本没渲染成功所以点才没亮"这种假通过
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(2);
+  });
+
+  it('从点亮到熄灭：class 上不留 tone-*/is-animated 残迹', async function () {
+    var refs = fleetRefs();
+    var invoke = vi
+      .fn()
+      .mockResolvedValueOnce(makeReport({ sessions: [makeSession({ sessionId: 's1' })] }))
+      .mockResolvedValue(makeReport({ sessions: [] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge, orbDot: refs.orbDot,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    refs.root.classList.add('is-active');
+
+    await advance(0);
+    expect(refs.orbDot.hidden).toBe(false);
+
+    await advance(2000);
+    expect(refs.orbDot.hidden).toBe(true);
+    expect(refs.orbDot.className).toBe('fw-mini-orb-dot');
+  });
+
+  it('关掉总开关：点立刻熄灭（tab 按钮会被藏起来，但小球始终可见）', async function () {
+    var refs = mount([makeSession({ sessionId: 's1' })]);
+    await advance(0);
+    expect(refs.orbDot.hidden).toBe(false);
+
+    controller.setEnabled(false);
+    expect(refs.orbDot.hidden).toBe(true);
+  });
+
+  it('非 Tauri 环境：点始终熄灭', async function () {
+    var refs = fleetRefs();
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge, orbDot: refs.orbDot,
+      invoke: null, getVisibility: function () { return true; },
+    });
+    await advance(0);
+    expect(refs.orbDot.hidden).toBe(true);
+  });
+
+  it('schemaVersion 对不上：点熄灭，不留一个再也不会更新的旧状态', async function () {
+    var refs = fleetRefs();
+    var invoke = vi
+      .fn()
+      .mockResolvedValueOnce(makeReport({ sessions: [makeSession({ sessionId: 's1' })] }))
+      .mockResolvedValue(makeReport({ schemaVersion: 999, sessions: [] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge, orbDot: refs.orbDot,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    refs.root.classList.add('is-active');
+
+    await advance(0);
+    expect(refs.orbDot.hidden).toBe(false);
+
+    await advance(2000);
+    expect(refs.root.querySelector('.fw-fleet-schema-error')).not.toBe(null);
+    expect(refs.orbDot.hidden).toBe(true);
+  });
+
+  it('不传 orbDot 时一切照常，不抛错', async function () {
+    var refs = fleetRefs();
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: [makeSession({ sessionId: 's1' })] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    await advance(0);
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(1);
   });
 });
 

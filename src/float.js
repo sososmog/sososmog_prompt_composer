@@ -62,6 +62,7 @@ import { createFleetView } from './fleetView.js';
   var $closeBtn = document.getElementById('fwCloseBtn');
   var $minBtn = document.getElementById('fwMinBtn');
   var $orb = document.getElementById('fwMiniOrb');
+  var $orbDot = document.getElementById('fwMiniOrbDot');
   var $card = document.getElementById('fwCard');
   var $toast = document.getElementById('fwToast');
   var $autoPasteToggle = document.getElementById('fwAutoPasteToggle');
@@ -589,6 +590,7 @@ import { createFleetView } from './fleetView.js';
     root: $panelFleet,
     tabButton: $tabFleetBtn,
     badge: $tabFleetBadge,
+    orbDot: $orbDot,
     invoke: fleetInvoke,
     // Windows 上 window.hide() 是否触发 visibilitychange 未验证，但这只是
     // 省电优化：判断失败最坏情况是浮窗隐藏时仍以精简档轮询，代价可忽略，

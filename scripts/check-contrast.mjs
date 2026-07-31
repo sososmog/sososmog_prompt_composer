@@ -18,14 +18,40 @@ import fs from 'node:fs';
 
 const CSS_PATH = 'src/float.css';
 
-/** 被检查的组合：文字变量压在背景变量上，用在哪个选择器上（仅用于报错时定位）。 */
+/** 小字号 AA 要求 4.5:1。文字类组合全是小字，所以不给大字号的 3.0 开后门。 */
+const REQUIRED_TEXT = 4.5;
+/** 非文字的图形元素（WCAG 1.4.11 非文本对比）要求 3:1。 */
+const REQUIRED_GRAPHIC = 3;
+
+/**
+ * 被检查的组合：前景变量压在背景变量上，用在哪个选择器上（仅用于报错时定位）。
+ * required 缺省按文字算——漏写只会更严，不会放水。
+ */
 const PAIRS = [
   { fg: 'fleet-on-attention', bg: 'fleet-attention', where: '.fw-tab-badge（tab 角标，9.5px 小字）' },
   { fg: 'fleet-on-danger', bg: 'fleet-danger', where: '.fw-fleet-error（错误横条，10.5px 小字）' },
+  // 小球状态点：12px 的纯色圆点压在小球底色上，点上没有文字，按图形元素算。
+  // 它比色块上的文字更需要守卫——缩成小球后这个点是**唯一**的状态信息，
+  // 它要是和底色糊在一起，等于整个 E2 白做了。
+  {
+    fg: 'fleet-dot-active',
+    bg: 'surface',
+    where: '.fw-mini-orb-dot.tone-active（小球状态点·运行中）',
+    required: REQUIRED_GRAPHIC,
+  },
+  {
+    fg: 'fleet-dot-attention',
+    bg: 'surface',
+    where: '.fw-mini-orb-dot.tone-attention（小球状态点·等你回话）',
+    required: REQUIRED_GRAPHIC,
+  },
+  {
+    fg: 'fleet-dot-danger',
+    bg: 'surface',
+    where: '.fw-mini-orb-dot.tone-danger（小球状态点·出错）',
+    required: REQUIRED_GRAPHIC,
+  },
 ];
-
-/** 小字号 AA 要求 4.5:1。这里全是小字，所以不给大字号的 3.0 开后门。 */
-const REQUIRED = 4.5;
 
 const lines = fs.readFileSync(CSS_PATH, 'utf8').split('\n');
 
@@ -82,7 +108,8 @@ if (!light || !dark) {
   process.exit(1);
 }
 
-for (const { fg, bg, where } of PAIRS) {
+for (const { fg, bg, where, required } of PAIRS) {
+  const need = required ?? REQUIRED_TEXT;
   for (const [themeName, block] of [['浅色', light], ['深色', dark]]) {
     const fgVal = resolve(block, fg, light);
     const bgVal = resolve(block, bg, light);
@@ -92,10 +119,10 @@ for (const { fg, bg, where } of PAIRS) {
       continue;
     }
     const r = contrast(fgVal, bgVal);
-    const ok = r >= REQUIRED;
+    const ok = r >= need;
     if (!ok) failed += 1;
     console.log(
-      `${ok ? 'ok  ' : 'FAIL'} ${themeName} ${where}\n     ${fgVal} on ${bgVal} = ${r.toFixed(2)}:1（要求 ≥ ${REQUIRED}）`
+      `${ok ? 'ok  ' : 'FAIL'} ${themeName} ${where}\n     ${fgVal} on ${bgVal} = ${r.toFixed(2)}:1（要求 ≥ ${need}）`
     );
   }
 }
