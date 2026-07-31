@@ -15,7 +15,7 @@
 //! |----|------|--------|
 //! | L1 会话发现 | [`roster`] | `$CONFIG/sessions/<pid>.json` |
 //! | L2 活动与内容 | [`transcript`] | `$CONFIG/projects/<slug>/<sid>.jsonl` 尾部 |
-//! | L3 subagent 树 | `subagents`（阶段 2，未实现） | `<sid>/subagents/agent-*.{jsonl,meta.json}` |
+//! | L3 subagent 树 | [`subagents`] | `<sid>/subagents/agent-*.{jsonl,meta.json}` |
 //! | L4 后台会话 | `jobs`（阶段 4，未实现） | `$CONFIG/jobs/<id>/state.json` |
 //! | L5 进程指标 | [`proc`] | sysinfo，只刷 L1 拿到的 pid |
 //!
@@ -25,6 +25,7 @@
 pub mod config;
 pub mod proc;
 pub mod roster;
+pub mod subagents;
 pub mod transcript;
 pub mod types;
 
@@ -163,6 +164,9 @@ fn scan_blocking(
         //   ②jsonl 存在但 0 字节    → 同上，也是刚启动，不报
         //   ③读不了 / 解析不出来    → 真异常，报 warning，前端显示"状态未知"
         let mut transcript_digest = None;
+        // L3：本会话的 subagent 摘要。默认空数组——`opts.include_subagents()`
+        // 关掉、或者压根没有 transcript 时都停在这个默认值上。
+        let mut subagents = Vec::new();
         if let Some(path) = state.resolve_transcript(config_dir, &entry.session_id) {
             let is_empty = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(false);
             if !is_empty {
@@ -182,6 +186,21 @@ fn scan_blocking(
                     }
                 }
             }
+
+            // subagents_dir 从 transcript 路径的父目录推导，而不是再遍历一遍
+            // `projects/`——transcript 路径已经被 `resolve_transcript` 缓存过，
+            // 它的父目录就是项目目录。这条推导同时天然覆盖了「没有 transcript
+            // 的会话」：那种会话（已启动未开始）必然也没有子 agent，走不进这个
+            // `if let Some(path) = ...`分支，`subagents` 就停在上面的空数组默认值，
+            // 不需要再单独判一次「目录不存在」。
+            if opts.include_subagents() {
+                if let Some(project_dir) = path.parent() {
+                    let subagents_dir = project_dir.join(&entry.session_id).join("subagents");
+                    let sub_scan = subagents::scan(&subagents_dir, opts.tail_bytes());
+                    subagents = sub_scan.digests;
+                    warnings.extend(sub_scan.warnings);
+                }
+            }
         }
 
         sessions.push(AgentSession {
@@ -196,9 +215,9 @@ fn scan_blocking(
             liveness,
             proc: proc_metrics,
             transcript: transcript_digest,
-            // L3 / L4 由阶段 2 / 阶段 4 填。契约里已经留好位置，
-            // 前端现在拿到的就是空数组和 null，渲染逻辑不需要为此改动。
-            subagents: Vec::new(),
+            subagents,
+            // L4 由阶段 4 填。契约里已经留好位置，前端现在拿到的就是 null，
+            // 渲染逻辑不需要为此改动。
             job: None,
         });
     }

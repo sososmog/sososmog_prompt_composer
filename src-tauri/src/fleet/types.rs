@@ -27,8 +27,7 @@ pub const TEXT_LIMIT: usize = 200;
 pub struct FleetOptions {
     /// 默认 [`DEFAULT_TAIL_BYTES`]
     pub tail_bytes: Option<u64>,
-    /// 默认 `true`。**阶段 2**（subagent 树）接入后才有人读。
-    #[allow(dead_code)]
+    /// 默认 `true`。编排层用它决定要不要扫 `subagents/` 目录（见 `mod.rs`）。
     pub include_subagents: Option<bool>,
     /// 默认 `false`。**阶段 4**（后台会话）接入后才有人读。
     #[allow(dead_code)]
@@ -43,8 +42,6 @@ impl FleetOptions {
             .unwrap_or(DEFAULT_TAIL_BYTES)
             .clamp(4 * 1024, TAIL_BYTES_MAX)
     }
-    /// 阶段 2 才会被编排层调用；契约提前定好，好让前端不用等我们改接口。
-    #[allow(dead_code)]
     pub fn include_subagents(&self) -> bool {
         self.include_subagents.unwrap_or(true)
     }
@@ -102,8 +99,8 @@ pub enum WarningCode {
     TranscriptUnreadable,
     /// 读到了但尾部窗口里解析不出任何消息（格式漂移的信号）
     TranscriptUnparsable,
-    /// `<sid>/subagents/` 读不了 —— 阶段 2 接入 subagent 树后才会被构造
-    #[allow(dead_code)]
+    /// `<sid>/subagents/` 目录存在但读不了（权限问题一类），或其中某个
+    /// `meta.json` 解析失败
     SubagentsUnreadable,
     /// pid 存在但启动时间与 roster 的 startedAt 对不上 → 疑似 PID 被复用
     PidReused,
