@@ -127,11 +127,13 @@ fn dump_what_the_collector_sees_on_this_machine() {
 
     // ---------- L5 进程指标 ----------
     // CPU 要两次采样才有值，这里先 prime 再等一会儿，模拟真实轮询的节奏。
+    // 用 sample_with_descendants 而不是 sample：应用在全量档走的就是这条路
+    // （claude 跑 Bash 工具时 CPU 记在子进程上），诊断跑另一条路就失去意义了。
     let pids: Vec<u32> = scan.entries.iter().map(|e| e.pid).collect();
     let sampler = proc::CpuSampler::new();
     sampler.prime(&pids);
     std::thread::sleep(Duration::from_millis(1200));
-    let samples = sampler.sample(&pids);
+    let samples = sampler.sample_with_descendants(&pids);
 
     let mut alive = 0usize;
     let mut fresh = 0usize;
@@ -154,11 +156,15 @@ fn dump_what_the_collector_sees_on_this_machine() {
         let mem = sample
             .map(|s| format!("{} MB", s.memory_mb))
             .unwrap_or_else(|| "—".to_string());
+        // 子树规模：CPU 是把主进程和它的工具子进程合并算的，这里显示合并了
+        // 几个进程。如果这一列**永远是 1**，说明子树收集在本机失效了——那种
+        // 坏法不崩不报错，只表现为 CPU 偏低，光看百分比看不出来。
+        let subtree = sample.map(|s| s.sampled_pids).unwrap_or(0);
 
         println!("\n=== {} (pid {}) — {liveness:?}", e.name, e.pid);
         println!("    入口={} 类型={} 版本={}", e.entrypoint, e.kind, e.cli_version);
         println!("    cwd={}", e.cwd);
-        println!("    CPU={cpu}  内存={mem}");
+        println!("    CPU={cpu}（合并 {subtree} 个进程）  内存={mem}");
 
         if liveness == proc::LivenessCheck::Alive {
             alive += 1;

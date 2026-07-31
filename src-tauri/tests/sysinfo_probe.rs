@@ -213,3 +213,80 @@ fn probe_dead_pid_returns_none() {
         "不存在的 pid 居然查到了进程"
     );
 }
+
+/// 探针：全量刷新进程表的代价，以及父子关系是否可用。
+///
+/// E5（把工具子进程的 CPU 算进会话）需要 parent → children 映射，而建这个
+/// 映射必须**全量**刷进程——这与 `fleet/proc.rs` 现在刻意"只刷关心的那几个
+/// pid"是相反的取向。所以先量清楚代价：如果全量刷的耗时相对轮询间隔（快档
+/// 2s）不可忽略，就得改成缓存拓扑、每 N 次 tick 才重建一次。
+///
+/// 这里只打印数值、不断言耗时上限——机器忙闲差异很大，把某台机器上的数字
+/// 钉成阈值只会变成一个随机失败的测试。真正断言的是行为契约：parent 拿得到。
+#[test]
+fn probe_full_refresh_cost_and_parent_map() {
+    use std::collections::HashMap;
+
+    let mut sys = System::new();
+
+    // 冷启动（要建整张表）与稳态的代价不是一回事，分开量。
+    let t0 = Instant::now();
+    let n_cold = sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    let cold_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+    let t1 = Instant::now();
+    let n_warm = sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    let warm_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+    // E5 真正需要的口径：拓扑 + accumulated_cpu_time
+    let t2 = Instant::now();
+    let n_cpu = sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cpu(),
+    );
+    let cpu_ms = t2.elapsed().as_secs_f64() * 1000.0;
+
+    // 对照组：现在的做法（只刷一个 pid）
+    let me = Pid::from_u32(std::process::id());
+    let t3 = Instant::now();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[me]),
+        true,
+        ProcessRefreshKind::nothing().with_cpu().with_memory(),
+    );
+    let one_ms = t3.elapsed().as_secs_f64() * 1000.0;
+
+    let t4 = Instant::now();
+    let mut children: HashMap<Pid, Vec<Pid>> = HashMap::new();
+    let mut with_parent = 0usize;
+    for (pid, p) in sys.processes() {
+        if let Some(parent) = p.parent() {
+            with_parent += 1;
+            children.entry(parent).or_default().push(*pid);
+        }
+    }
+    let map_ms = t4.elapsed().as_secs_f64() * 1000.0;
+
+    println!("全量刷进程（仅拓扑）：冷 {cold_ms:.1}ms / {n_cold} 个，稳态 {warm_ms:.1}ms / {n_warm} 个");
+    println!("全量刷进程（带 CPU）：{cpu_ms:.1}ms / {n_cpu} 个");
+    println!("对照·只刷 1 个 pid（现在的做法）：{one_ms:.2}ms");
+    println!(
+        "建 parent→children 映射：{map_ms:.2}ms，{with_parent} 个进程有 parent，{} 个父节点",
+        children.len()
+    );
+
+    assert!(n_warm > 0, "全量刷新一个进程都没返回");
+    assert!(
+        with_parent > 0,
+        ">>> 拿不到 parent 的话 E5（CPU 含子进程）整条路走不通"
+    );
+}

@@ -115,8 +115,17 @@ fn scan_blocking(
     // 而拿 start_time 就得刷进程。`opts.cpu` 只决定**要不要把百分比报出去**，
     // 省不掉这次刷新。（诚实地说：这个开关的实际节省很小，真正的开销是下面
     // 逐个会话读 transcript 尾部。控制成本主要靠前端的轮询分档，不是靠这个开关。）
+    //
+    // 但它决定用哪一种采样口径：要报 CPU 时才走含子进程的那条路。claude 跑
+    // Bash 工具时 CPU 记在子进程上，不含子树的话面板会在机器风扇狂转时显示
+    // 0.1%。代价是多一次全量刷进程拿拓扑（本机实测 ~14ms），只在用户真的
+    // 看得到 CPU 的那一档轮询里付。
     let pids: Vec<u32> = scan.entries.iter().map(|e| e.pid).collect();
-    let samples = state.sampler.sample(&pids);
+    let samples = if opts.cpu() {
+        state.sampler.sample_with_descendants(&pids)
+    } else {
+        state.sampler.sample(&pids)
+    };
 
     let mut sessions = Vec::with_capacity(scan.entries.len());
 
