@@ -211,9 +211,12 @@ function countWorkingSubagents(subagents, scannedAt) {
  *        document.visibilityState 判断；本模块只在每次 tick 时读一下这个值）
  * @param {(err: unknown) => void} [opts.onError]  每次抓取失败时的旁路通知（比如
  *        float.js 想 console.warn 一下），与面板里显示的错误横条互不影响
- * @returns {{ refreshSchedule: () => void, stop: () => void }}
+ * @param {boolean} [opts.enabled]  settings.fleet.enabled 的初始值，默认 true。
+ *        关闭时与"不可见"走同一条早退路径——完全不发 invoke，只留低频自检
+ *        定时器，之后由 setEnabled() 实时更新（见返回值说明）。
+ * @returns {{ refreshSchedule: () => void, setEnabled: (v: boolean) => void, stop: () => void }}
  */
-export function createFleetView({ root, tabButton, badge, invoke, getVisibility, onError }) {
+export function createFleetView({ root, tabButton, badge, invoke, getVisibility, onError, enabled }) {
   let errorBannerEl = null;
   let contentEl = null;
   let warningsOpen = false; // 警告折叠区展开状态，重渲染后要保持（同 openQuickGroupId 的做法）
@@ -324,6 +327,22 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
     const workingSubs = countWorkingSubagents(session.subagents, scannedAt);
     if (workingSubs > 0) {
       metaText += ' · ' + workingSubs + ' 个子 agent 在跑';
+    }
+    // 失败会话追加错误码：塞进 meta 行末尾，不单独起一行——失败卡片一旦
+    // 比其它卡片高，一屏内高度参差就很难扫视（上一轮实现砍掉它就是为了
+    // 这个原因）。apiErrorStatus/apiErrorCode 都可能缺失，两个都没有时
+    // （hasApiError 为真但两个字段都是 null）什么都不追加，避免留一个
+    // 空的" · "分隔符。
+    const t = session.transcript;
+    if (t && t.hasApiError) {
+      const errParts = [];
+      if (t.apiErrorStatus) errParts.push(t.apiErrorStatus);
+      if (t.apiErrorCode) errParts.push(t.apiErrorCode);
+      if (errParts.length > 0) {
+        const errText = errParts.join(' ');
+        metaText += ' · ' + errText;
+        meta.title = errText; // 错误码可能很长，靠 title 看全文
+      }
     }
     meta.textContent = metaText;
     card.appendChild(meta);
@@ -506,7 +525,7 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   // invoke 而抛错，否则整个 float.html 都起不来。
   if (!invoke) {
     renderDegraded();
-    return { refreshSchedule: function () {}, stop: function () {} };
+    return { refreshSchedule: function () {}, setEnabled: function () {}, stop: function () {} };
   }
 
   renderInitialLoading();
@@ -515,6 +534,9 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   let inFlight = false;
   let failCount = 0;
   let stopped = false;
+  // 总开关：只接受布尔值，其余（含缺失）落回默认开，跟 core.js 里
+  // `fl.enabled !== false` 那套"false 才是唯一合法关闭值"的写法保持一致。
+  let isEnabled = enabled !== false;
 
   function isActiveTab() {
     return root.classList.contains(TAB_ACTIVE_CLASS);
@@ -562,10 +584,10 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   function tick() {
     if (stopped) return;
 
-    if (!getVisibility()) {
-      // 不可见：暂停抓取，但仍要留一个低频的自检时钟，否则浮窗重新可见时
-      // 没有任何东西会把轮询叫醒。这里的"暂停"指的是不发 invoke，不是
-      // 真的清空所有定时器。
+    if (!isEnabled || !getVisibility()) {
+      // 总开关关闭 或 不可见：暂停抓取，但仍要留一个低频的自检时钟，否则
+      // 开关重新打开/浮窗重新可见时没有任何东西会把轮询叫醒。这里的
+      // "暂停"指的是不发 invoke，不是真的清空所有定时器。
       scheduleNext(SLOW_MS);
       return;
     }
@@ -618,6 +640,20 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
     refreshSchedule: function () {
       if (stopped || inFlight) return;
       scheduleNext(currentTierMs());
+    },
+    /**
+     * float.js 在 settings.fleet.enabled 变化时调用（面板打开时的回填、
+     * 或主窗口改设置广播过来之后，都汇聚到 renderAll() 这一条路径，见
+     * float.js 的 applyFleetEnabled()）。关闭时立即让下一次 tick 落进
+     * "总开关关闭"的早退分支（不发 invoke）；重新开启时立即触发一次
+     * 抓取，不必等到下一个自然 tick，避免用户刚打开开关却要空等 8 秒。
+     */
+    setEnabled: function (v) {
+      var next = v !== false;
+      if (next === isEnabled) return; // 状态没变，不折腾定时器
+      isEnabled = next;
+      if (stopped || inFlight) return; // 已终态 / 请求飞行中：下一轮自然生效，不用现在插手
+      scheduleNext(0);
     },
     /** 停止轮询（目前只用于测试收尾，避免 fake timer 泄漏到下一个用例）。 */
     stop: function () {

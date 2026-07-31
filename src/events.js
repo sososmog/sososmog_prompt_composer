@@ -400,6 +400,11 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
                 '<span class="st-desc">启动后在后台问一次有没有新版本。查到了只会提示你（侧栏「设置」按钮上出现小红点），下载和安装始终要你在「关于」里手动点，不会自动升级。</span>' +
                 '<label class="st-tr-check"><input type="checkbox" id="stUpdateAutoCheck" /><span>启动时自动检查更新</span></label>' +
               '</div>' +
+              '<div class="st-field">' +
+                '<span class="st-label">Agent 面板</span>' +
+                '<span class="st-desc">浮窗里显示本机在跑的 Claude Code 会话（进度、是否需要你回话）。关闭后浮窗只保留编写功能，Agent tab 会隐藏，也不再后台轮询扫描。</span>' +
+                '<label class="st-tr-check"><input type="checkbox" id="stFleetEnabled" /><span>在浮窗显示 Agent 面板</span></label>' +
+              '</div>' +
             '</section>' +
             // ---- 翻译 ----
             '<section class="st-tab-page" data-tab="translate" role="tabpanel">' +
@@ -697,6 +702,17 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
         showToast($stUpdateAutoCheck.checked ? '已开启启动时自动检查更新' : '已关闭自动检查更新（仍可在「关于」里手动检查）');
       });
     }
+    // 通用 tab：浮窗 Agent 面板总开关。改动会经 scheduleSave 落盘并广播
+    // composer-state-changed，浮窗侧 float.js 在 renderAll() 里重新应用一次
+    // （隐藏 tab + 切回编写 tab + 停止轮询），不需要另开事件通道。
+    var $stFleetEnabled = $stOverlay.querySelector('#stFleetEnabled');
+    if ($stFleetEnabled) {
+      $stFleetEnabled.addEventListener('change', function () {
+        state.settings.fleet.enabled = $stFleetEnabled.checked;
+        scheduleSave();
+        showToast($stFleetEnabled.checked ? '已开启浮窗 Agent 面板' : '已关闭浮窗 Agent 面板（浮窗会隐藏该 tab 并停止轮询）');
+      });
+    }
 
     // 自学习 tab：列表 + 清空 + 导入导出
     bindLearningTab();
@@ -926,6 +942,8 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
     if ($stCompletionSegWord) $stCompletionSegWord.checked = state.settings.completion.segMode === 'word';
     var $stUpdateAutoCheck = $stOverlay.querySelector('#stUpdateAutoCheck');
     if ($stUpdateAutoCheck) $stUpdateAutoCheck.checked = !!(state.settings.update && state.settings.update.autoCheck);
+    var $stFleetEnabled = $stOverlay.querySelector('#stFleetEnabled');
+    if ($stFleetEnabled) $stFleetEnabled.checked = !!(state.settings.fleet && state.settings.fleet.enabled);
     renderUpdateState();
     renderTranslateSettings();
     // 若当前正停在某个管理 tab 且面板可见，远端同步后重新 mount 以反映最新数据。

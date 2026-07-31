@@ -234,6 +234,17 @@
     return { autoCheck: true };
   }
 
+  /* ============================================================
+   * 1.5 浮窗 Agent 面板总开关（默认开）
+   * ------------------------------------------------------------
+   * enabled 关掉后，浮窗隐藏 Agent tab 且停止轮询（见 float.js /
+   * fleetView.js），只是“不显示这个面板”，不影响本机 agent 进程本身
+   * ——纯前端展示层开关，不碰 fleet.js 的判定逻辑。
+   * ============================================================ */
+  function defaultFleetSettings() {
+    return { enabled: true };
+  }
+
   function defaultState() {
     return {
       lang: 'zh',
@@ -253,7 +264,8 @@
         translation: defaultTranslateSettings(),       // 翻译：LLM 提供商配置
         onboarding: defaultOnboarding(),                // 新手引导：是否已完成/各上下文提示是否看过
         completion: defaultCompletionSettings(),       // 行内补全（自学习）总开关，默认开
-        update: defaultUpdateSettings()                // 启动时自动检查更新（只提示，不自动安装）
+        update: defaultUpdateSettings(),                // 启动时自动检查更新（只提示，不自动安装）
+        fleet: defaultFleetSettings()                   // 浮窗 Agent 面板总开关，默认开
       },
       learning: defaultLearning()                      // v0.2：行内补全的本地自学习数据
     };
@@ -1089,7 +1101,7 @@
     }
 
     // 阶段4：设置项——快捷键 + 粘贴前等待时长，做好防御性校验，任何脏值都回退默认
-    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings(), onboarding: defaultOnboarding(), completion: defaultCompletionSettings(), update: defaultUpdateSettings() };
+    s.settings = { toggleShortcut: 'Ctrl+Alt+C', pasteDelayMs: 60, translation: defaultTranslateSettings(), onboarding: defaultOnboarding(), completion: defaultCompletionSettings(), update: defaultUpdateSettings(), fleet: defaultFleetSettings() };
     if (raw.settings && typeof raw.settings === 'object') {
       if (typeof raw.settings.toggleShortcut === 'string' && raw.settings.toggleShortcut.trim() !== '') {
         s.settings.toggleShortcut = raw.settings.toggleShortcut;
@@ -1120,6 +1132,13 @@
       var up = raw.settings.update;
       if (up && typeof up === 'object') {
         s.settings.update.autoCheck = up.autoCheck !== false;
+      }
+      // 浮窗 Agent 面板总开关：只接受布尔值，其余（缺失/字符串/null 等）回退默认开。
+      // 注意不能写成 `fl.enabled || true`——那样 false 会被当假值吞掉、永远算作 true；
+      // `!== false` 才是"只有明确布尔 false 才关，其它一切都当默认开"的正确写法。
+      var fl = raw.settings.fleet;
+      if (fl && typeof fl === 'object') {
+        s.settings.fleet.enabled = fl.enabled !== false;
       }
     }
 

@@ -222,8 +222,12 @@ describe('createFleetView：渲染', function () {
       });
     }).not.toThrow();
     expect(refs.root.querySelector('.fw-fleet-empty').textContent).toBe('此功能需要桌面端');
-    // 降级态下 refreshSchedule/stop 必须是安全的空操作
-    expect(function () { controller.refreshSchedule(); controller.stop(); }).not.toThrow();
+    // 降级态下 refreshSchedule/setEnabled/stop 必须是安全的空操作
+    expect(function () {
+      controller.refreshSchedule();
+      controller.setEnabled(false);
+      controller.stop();
+    }).not.toThrow();
   });
 
   it('report.warnings 非空时渲染可折叠区域，默认收起，标题带条数', async function () {
@@ -375,6 +379,75 @@ describe('createFleetView：轮询调度', function () {
     visible = false;
     await advance(60000);
     expect(invoke).toHaveBeenCalledTimes(before);
+  });
+
+  /* ============================================================
+   * D1：settings.fleet.enabled 总开关——停/启口子选的是 setEnabled(bool)
+   * 而不是"复用 getVisibility"，因为 getVisibility 的文档语义就是
+   * "浮窗是否可见"，硬塞进一个"用户在设置里关掉了"会让这个回调的
+   * 含义变得含糊。tick() 内部让总开关走的是与"不可见"完全相同的早退
+   * 分支（不发 invoke、只留 SLOW_MS 自检），所以行为上与"不可见时
+   * 完全不抓取"这条用例是对称的。
+   * ============================================================ */
+  it('总开关初始为 false 时，从一开始就不抓取', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(makeReport({}));
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+      enabled: false,
+    });
+    await advance(0);
+    expect(invoke).not.toHaveBeenCalled();
+    await advance(60000); // 不管过多久都不该抓取
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('setEnabled(false) 后停止抓取；setEnabled(true) 后立即恢复（不必等满一个 tier）', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(makeReport({}));
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    controller.setEnabled(false);
+    var before = invoke.mock.calls.length;
+    await advance(60000); // 关闭后无论等多久都不该再发
+    expect(invoke).toHaveBeenCalledTimes(before);
+
+    controller.setEnabled(true);
+    await advance(0); // 立即恢复抓取，不必等满 2s/8s 的 tier 间隔
+    expect(invoke).toHaveBeenCalledTimes(before + 1);
+  });
+
+  it('setEnabled 传同一个值时是空操作，不强行插队重排', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(makeReport({}));
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    controller.setEnabled(true); // 已经是 true，重复传入不该触发额外抓取
+    await advance(0);
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it('单飞：上一次请求未回来时，到点也不会重复发起', async function () {
@@ -816,6 +889,122 @@ describe('createFleetView：C9/C10 子 agent 折叠区与树形渲染', function
     // tone-attention 对应 needs-input——会话状态本身没有因为 subagent 在跑而改变
     expect(card.classList.contains('tone-attention')).toBe(true);
     expect(card.querySelector('.fw-fleet-meta').textContent).toContain('1 个子 agent 在跑');
+  });
+});
+
+/* ============================================================
+ * 失败卡片露出错误码：塞进 meta 行末尾，不单独起一行（见 buildCard
+ * 里的注释——失败卡片一旦比别的卡片高，一屏内高度参差就很难扫视）。
+ * apiErrorStatus/apiErrorCode 都可能缺失，覆盖四种组合。
+ * ============================================================ */
+describe('createFleetView：失败卡片错误码', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  /** @returns {HTMLElement|null} */
+  function findCard(refs, sessionId) {
+    return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sessionId + '"]');
+  }
+
+  function makeFailedSession(errOverrides) {
+    return makeSession({
+      sessionId: 's1',
+      transcript: Object.assign({}, makeSession({}).transcript, {
+        lastStopReason: 'stop_sequence',
+        hasApiError: true,
+        apiErrorStatus: null,
+        apiErrorCode: null,
+      }, errOverrides),
+    });
+  }
+
+  it('两个字段都有：都显示，格式为「状态码 空格 错误码」，且不单独起一行', async function () {
+    var refs = fleetRefs();
+    var session = makeFailedSession({ apiErrorStatus: '403', apiErrorCode: 'oauth_org_not_allowed' });
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: [session] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var card = findCard(refs, 's1');
+    expect(card.classList.contains('tone-danger')).toBe(true); // failed 状态
+    var metaEls = card.querySelectorAll('.fw-fleet-meta');
+    expect(metaEls.length).toBe(1); // 仍然只有一行 meta，没有为错误码另起一行
+    var meta = metaEls[0];
+    expect(meta.textContent).toContain('403 oauth_org_not_allowed');
+    expect(meta.title).toBe('403 oauth_org_not_allowed');
+  });
+
+  it('只有 apiErrorStatus：只显示状态码', async function () {
+    var refs = fleetRefs();
+    var session = makeFailedSession({ apiErrorStatus: '403', apiErrorCode: null });
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: [session] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var meta = findCard(refs, 's1').querySelector('.fw-fleet-meta');
+    expect(meta.textContent).toContain('403');
+    expect(meta.textContent).not.toContain('null');
+    expect(meta.title).toBe('403');
+  });
+
+  it('只有 apiErrorCode：只显示错误码', async function () {
+    var refs = fleetRefs();
+    var session = makeFailedSession({ apiErrorStatus: null, apiErrorCode: 'invalid_request' });
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: [session] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var meta = findCard(refs, 's1').querySelector('.fw-fleet-meta');
+    expect(meta.textContent).toContain('invalid_request');
+    expect(meta.title).toBe('invalid_request');
+  });
+
+  it('两个字段都缺失（hasApiError 仍为 true）：不追加任何内容，也没有空的分隔符', async function () {
+    var refs = fleetRefs();
+    var session = makeFailedSession({ apiErrorStatus: null, apiErrorCode: null });
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: [session] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var meta = findCard(refs, 's1').querySelector('.fw-fleet-meta');
+    // 不该有全是分隔符的悬空尾巴（如 "· · " 或结尾裸露一个 "·"）
+    expect(meta.textContent.trim().endsWith('·')).toBe(false);
+    expect(meta.title).toBe(''); // 没有额外追加内容，不该带 title
+  });
+
+  it('hasApiError 为 false 时（普通成功/进行中会话）不受影响，即使字段意外非空也不显示', async function () {
+    var refs = fleetRefs();
+    var session = makeSession({
+      sessionId: 's1',
+      transcript: Object.assign({}, makeSession({}).transcript, {
+        hasApiError: false,
+        apiErrorStatus: '403',
+        apiErrorCode: 'oauth_org_not_allowed',
+      }),
+    });
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: [session] }));
+    controller = createFleetView({
+      root: refs.root, tabButton: refs.tabButton, badge: refs.badge,
+      invoke: invoke, getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var meta = findCard(refs, 's1').querySelector('.fw-fleet-meta');
+    expect(meta.textContent).not.toContain('oauth_org_not_allowed');
   });
 });
 
