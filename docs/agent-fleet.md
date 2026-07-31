@@ -13,17 +13,23 @@
 | P1–P5 准备 | ✅ 完成 |
 | 阶段 0 轨 A（Rust 采集层 A1–A8） | ✅ 完成，含真机验证 |
 | 阶段 0 轨 B（JS 纯函数 B1–B5） | ✅ 完成 |
-| 阶段 1 轨 C（浮窗 UI） | ⬜ 未开始 |
-| 阶段 2 subagent 树 | ⬜ 未开始 |
-| 阶段 3 收尾 | ⬜ 未开始 |
+| 阶段 1 轨 C（浮窗 UI） | ✅ 完成，含真浏览器冒烟 + 用户真机验收 |
+| 阶段 2 subagent 树 | ✅ 完成，含真机验证 |
+| 阶段 3 收尾 | 🚧 进行中 |
 | 阶段 4 可选增强 | ⬜ 未开始 |
 
-当前规模：Rust 75 个测试 + 1 个默认跳过的真机诊断测试；前端 613 个测试；
-clippy 0 新增警告；lint 0/0。
+当前规模：Rust 83 个单测 + 4 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
+前端 642 个测试 + 3 个真浏览器冒烟脚本；clippy 0 新增警告；lint 0/0。
 
-**真机验证结果**（A8，`cargo test --test fleet_real_machine -- --ignored --nocapture`）：
-本机 6 个会话全部识别，4 个读到摘要（分支/模型/档位/尾部状态全对、坏行 0）、
-2 个无 transcript 正确落到「已启动 · 未开始」、存活校验 6/6 通过。
+**真机验证累计结果**（`cargo test --test fleet_real_machine -- --ignored --nocapture`）：
+
+- 会话识别：多轮都是名册里的会话全部识别、存活校验全通过；无 transcript 的会话
+  正确落到「已启动 · 未开始」（这是实测最常见的正常状态，不是错误）
+- 字段读取：分支 / 模型 / 思考档位 / 尾部状态全对，`parse_errors` 一直是 0
+- subagent 树：单会话 11 个子 agent 的两层树重建正确，缩进（按 `parentAgentId` 算）
+  与 `meta.json` 的 `spawnDepth` 完全吻合；两个会话共 15 个子 agent 全部读出
+- CPU：与 `Get-Process` 累计 CPU 秒数在 10 秒窗口上算出的真值同量级
+  （0.602% vs 我们的 0.2%，差异来自窗口长短——claude 是突发型负载）
 
 ---
 
@@ -891,11 +897,24 @@ CI：**`pr.yml` 已经在跑 `cargo test` 和 `cargo clippy --all-targets`**（u
 2. ~~`remove_dead_processes: true` 配 `Some(&pids)` 的确切语义~~ → **P3 已验：不会清掉未刷新的进程**，只能按 pid 单查。
 2b. 【P3 新增】sysinfo 的 `cpu_usage()` 在 **macOS / Linux** 上是否也坏。我们不用它，所以不影响；但如果哪天想换回去，需要先在那两个平台跑 `tests/sysinfo_probe.rs`。
 3. Windows 上 `window.hide()` 是否触发 `visibilitychange`（C4 验；不影响正确性）。
-4. 正在被 Claude Code 追加写入的 jsonl，Windows 上是否可能读到锁（A4 验；观察上没遇到）。
+4. ~~正在被 Claude Code 追加写入的 jsonl，Windows 上是否可能读到锁~~ → **实测未遇到**。
+   多轮真机诊断都在其它会话活跃写入时跑过（本会话自己的 jsonl 一直在被追加），
+   读尾部从未失败、`parse_errors` 一直是 0。Windows 上 Claude Code 显然没有用
+   独占锁打开这些文件。**但这是"没遇到"不是"证明不会"**，所以 `read_digest` 的
+   I/O 错误路径仍然保留并降级成 `transcript-unreadable`，不能删。
 5. macOS 全链路 —— 本机是 Windows，`sessions/*.json` 的路径在 macOS 上应当相同（`~/.claude`），但 sysinfo 行为和进程名差异需要真机验。**参照自动粘贴的 macOS 分支：不要假装验过了。**
-6. `entrypoint` 的完整取值集合（实测只见到 `claude-vscode`）。
+6. `entrypoint` 的完整取值集合（实测只见到 `claude-vscode`）。**注意采集层不依赖
+   它做任何判断**，只当展示字段，所以取值集合不全不构成风险。
 7. jsonl 里 `queue-operation` 能否可靠算出"排队中 N 条"（尾部窗口可能不含配对的 enqueue）→ 当前决定不做。
 8. 是否值得引入 `claude-code-transcripts` crate（docs.rs 上有）替代自己解析 —— 倾向不引，我们只需要尾部几个字段，引入等于把格式漂移风险交给第三方更新节奏。
+9. 【阶段 2 后新增】subagent 的 jsonl 数量会随会话变多（实测单个会话已达 11 个）。
+   目前每轮全量读尾部（窗口已收小到 16KB），本机 15 个子 agent 时没有感知延迟；
+   但会话多 + 子 agent 多时是否需要按 mtime 缓存跳过未变动的文件，**尚未实测过
+   压力场景**。真出现迟钝再优化，不预先做。
+10. 【阶段 3 新增】Agent 面板的深浅主题对比度：`fleet-attention` / `fleet-danger`
+   在深色主题下是**浅色**（它们本是为"深底上的前景文字"设计的），当背景用时白字
+   对比度只有 2.56 / 2.99，连大字号 AA（3.0）都不到。已改为按主题翻转文字色。
+   **教训是这类问题肉眼只觉得"有点发灰"，不会明显觉得坏，必须算。**
 
 ---
 
