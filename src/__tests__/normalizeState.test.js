@@ -201,4 +201,26 @@ describe('normalizeState', () => {
     expect(s.settings.onboarding.hintsSeen).not.toHaveProperty('evil');
     expect(s.settings.onboarding.hintsSeen).not.toHaveProperty('floatWindow');
   });
+
+  it('settings.fleet.enabled 默认开', () => {
+    expect(defaultState().settings.fleet.enabled).toBe(true);
+    expect(normalizeState({}).settings.fleet.enabled).toBe(true);
+  });
+
+  it('settings.fleet.enabled 为 false 时保留（false 是合法值，不能被当假值吞掉）', () => {
+    const s = normalizeState({ settings: { fleet: { enabled: false } } });
+    expect(s.settings.fleet.enabled).toBe(false);
+  });
+
+  it('settings.fleet.enabled 非布尔值一律回退默认开', () => {
+    expect(normalizeState({ settings: { fleet: { enabled: 'false' } } }).settings.fleet.enabled).toBe(true);
+    expect(normalizeState({ settings: { fleet: { enabled: 0 } } }).settings.fleet.enabled).toBe(true);
+    expect(normalizeState({ settings: { fleet: { enabled: null } } }).settings.fleet.enabled).toBe(true);
+    expect(normalizeState({ settings: { fleet: {} } }).settings.fleet.enabled).toBe(true);
+  });
+
+  it('settings.fleet 整个键缺失（老存档）时回退默认开', () => {
+    expect(normalizeState({ settings: { toggleShortcut: 'Ctrl+Alt+X' } }).settings.fleet.enabled).toBe(true);
+    expect(normalizeState({ settings: { fleet: 'nope' } }).settings.fleet.enabled).toBe(true);
+  });
 });

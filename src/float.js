@@ -409,6 +409,9 @@ import { createFleetView } from './fleetView.js';
     renderQuickGroups();
     renderModuleGrid();
     renderSnippetGrid();
+    // Agent 面板总开关：不另开事件通道，同步/回填都汇聚到 renderAll，这里
+    // 顺带重新应用一次即可（定义见下方 §Agent tab，此时 fleetView 已构造好）。
+    applyFleetEnabled();
   }
 
   /* ============================================================
@@ -592,7 +595,28 @@ import { createFleetView } from './fleetView.js';
     // 不把它当正确性问题（见 docs/agent-fleet.md §5 C4）。
     getVisibility: function () { return document.visibilityState !== 'hidden'; },
     onError: function (err) { console.warn('Agent fleet 轮询失败:', err); },
+    // 构造时的初始值——此刻 state 还是 defaultState()（真实存档要等
+    // restoreState() 落地才知道），默认开对应 defaultFleetSettings()。
+    // 真正生效的值由下面 applyFleetEnabled() 在每次 renderAll() 里重新
+    // 应用一次，这里只是避免"构造出来的一瞬间"是错误默认值。
+    enabled: state.settings.fleet.enabled,
   });
+
+  /* Agent 面板总开关（settings.fleet.enabled）：关闭时隐藏 tab 按钮、
+   * 停止 fleetView 轮询；若此刻正停在 Agent tab 则强制切回编写 tab——
+   * 但用 applyTab 而不是 switchTab，不去动 localStorage 里"上次停留
+   * tab"的记忆。这是开关导致的被动切换，不是用户主动选择，重新打开
+   * 开关后应该按用户原本的偏好来，不能被这次自动切换污染成"编写"。
+   * 由 renderAll() 在每次同步 / 回填之后调用，复用现成的
+   * composer-state-changed 广播路径，不另开事件通道。 */
+  function applyFleetEnabled() {
+    var on = state.settings.fleet.enabled !== false;
+    $tabFleetBtn.hidden = !on;
+    if (!on && $panelFleet.classList.contains('is-active')) {
+      applyTab('compose');
+    }
+    fleetView.setEnabled(on);
+  }
 
   applyTab(loadSavedTab());
 
