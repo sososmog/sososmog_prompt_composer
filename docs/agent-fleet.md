@@ -116,6 +116,16 @@ clippy 0 新增警告；lint 0/0。
 - **只在会话启动时写一次，不随活动更新**（mtime = 启动时间）。"最后活动时间"必须用 transcript 的 mtime。
 - 调研过的项目里**没有一个知道这个文件存在**（Clawd 靠 hook payload 带 `transcript_path` 过来）。
 
+**"名册比任何进程侧启发式都准"—— 一次实测把这条证死了。** 同一时刻在本机数：
+
+| 判据 | 得到几个 | 对不对 |
+|---|---|---|
+| 按进程名 `claude.exe` | **12 个** | ❌ 其中 8 个是 Claude **桌面版** Electron 进程，跟 agent 会话毫无关系 |
+| 只算 CLI 原生二进制（`native-binary` 路径） | 4 个 | ❌ 多出的那个是 `claude.exe --claude-in-chrome-mcp`，浏览器 MCP 桥，不是会话 |
+| **读 `sessions/*.json` 名册** | **3 个** | ✅ 正好是真实的交互会话 |
+
+所以进程侧只用来做"这个 pid 还活着吗 / 占多少 CPU"，**绝不用来发现会话**。
+
 ### L2 主 transcript —— `$CONFIG/projects/<slug>/<sessionId>.jsonl`
 
 实测 entry `type` 全集（扫 53 个真实会话文件）：`ai-title` `assistant` `attachment`
@@ -495,6 +505,13 @@ src/events.js + index.html 阶段 3：设置面板开关
 | `remove_dead_processes: true` + `Some(&pids)` | ⚠️ **不会**清掉未刷新的进程（510 个全留着）。所以只能按 pid 单查，`processes()` 的整体内容不可信 |
 | `cpu_usage()` | 🔴 **不可用**。烧满 1 核实测只返回 0.0003~0.002，换四种姿势（`with_cpu()` 250ms / 1000ms、`everything()`、`new_all()` 打底）全部差五个数量级 |
 | `accumulated_cpu_time()` 自算 | ✅ **正确**。`cpu_ms=1141 / wall_ms=1011 = 112.86%` 累加，除 32 核 = 3.53% |
+
+**真实数据上的交叉验证**（不只是合成的烧核测试）：拿 `Get-Process` 的累计 CPU
+秒数在 10 秒窗口上自己算真值 —— pid 52052 增量 1.938 秒 / 10.1 秒 = 19.26% 累加，
+除 32 核 = **0.602%**；我们的采集层在 1.2 秒窗口上报 0.2%。同量级，差异来自窗口
+不同（claude 进程是突发型负载：处理 API 响应时冲高、间隙空闲）。**这条验证的价值
+在于它用的是真实进程而非人造负载**——合成测试只能证明公式对，证不了在真实的
+突发型负载上读数不离谱。
 
 #### P5 详述：夹具
 
