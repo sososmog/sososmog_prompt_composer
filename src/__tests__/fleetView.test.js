@@ -89,6 +89,26 @@ function makeSession(overrides) {
   );
 }
 
+function makeSubagent(overrides) {
+  return Object.assign(
+    {
+      agentId: 'sub1',
+      agentType: 'general-purpose',
+      description: '占位描述',
+      parentAgentId: null,
+      spawnDepth: 1,
+      mtimeMs: 1000000,
+      sizeBytes: 1000,
+      lastRole: 'assistant',
+      lastStopReason: 'tool_use',
+      lastTailKind: 'tool_use',
+      lastMsgTsMs: 1000000,
+      contextTokens: 500,
+    },
+    overrides
+  );
+}
+
 function makeReport(overrides) {
   return Object.assign(
     {
@@ -287,7 +307,7 @@ describe('createFleetView：轮询调度', function () {
     expect(invoke).toHaveBeenCalledTimes(3);
   });
 
-  it('切到编写 tab 后降到 8s 一次，且参数带 cpu:false', async function () {
+  it('切到编写 tab 后降到 8s 一次，且参数带 cpu:false/includeSubagents:false', async function () {
     var refs = fleetRefs();
     refs.root.classList.add('is-active');
     var invoke = vi.fn().mockResolvedValue(makeReport({}));
@@ -311,7 +331,7 @@ describe('createFleetView：轮询调度', function () {
     expect(invoke).toHaveBeenCalledTimes(before); // 还没到 8s，不该发
     await advance(1);
     expect(invoke).toHaveBeenCalledTimes(before + 1);
-    expect(invoke).toHaveBeenLastCalledWith('list_agent_sessions', { opts: { cpu: false } });
+    expect(invoke).toHaveBeenLastCalledWith('list_agent_sessions', { opts: { cpu: false, includeSubagents: false } });
 
     var before2 = invoke.mock.calls.length;
     await advance(8000);
@@ -335,7 +355,7 @@ describe('createFleetView：轮询调度', function () {
     expect(invoke).toHaveBeenCalledTimes(1);
     await advance(6000); // 累计满 8s 才发第二次
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke).toHaveBeenLastCalledWith('list_agent_sessions', { opts: { cpu: false } });
+    expect(invoke).toHaveBeenLastCalledWith('list_agent_sessions', { opts: { cpu: false, includeSubagents: false } });
   });
 
   it('不可见时完全不抓取，不管过多久', async function () {
@@ -519,6 +539,283 @@ describe('createFleetView：重渲染不打断交互', function () {
     var newList = refs.root.querySelector('.fw-fleet-list');
     expect(newList).not.toBe(list); // 确认真的是全新节点，不是同一个元素凑巧值没变
     expect(newList.scrollTop).toBe(42);
+  });
+});
+
+/* ============================================================
+ * C9/C10：子 agent 折叠区 + 树形渲染
+ * ------------------------------------------------------------
+ * buildSubagentTree / deriveSubagentStatus 本身的分支已经在 fleet.test.js
+ * 钉死（环、孤儿、深度全部靠树结构算），这里只验"数据结构对了之后，
+ * DOM 画得对不对、展开态怎么管"。
+ * ============================================================ */
+describe('createFleetView：C9/C10 子 agent 折叠区与树形渲染', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  /** @returns {HTMLElement|null} */
+  function findCard(refs, sessionId) {
+    return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sessionId + '"]');
+  }
+
+  it('会话②（5 个 subagent）显示折叠行「子 agent 5」；subagents 为空的会话不渲染该行', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(cloneFixture());
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var head = findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-head');
+    expect(head).toBeTruthy();
+    expect(head.querySelector('.fw-fleet-sub-head-count').textContent).toBe('5');
+
+    // 夹具里其余会话 subagents 都是空数组——整行不该出现
+    expect(findCard(refs, 'sid-needs-input').querySelector('.fw-fleet-sub-head')).toBeNull();
+  });
+
+  it('点击展开后渲染出树；再点收起', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(cloneFixture());
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    expect(findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-tree')).toBeNull();
+    findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-head').click();
+    expect(findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-tree')).toBeTruthy();
+
+    findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-head').click();
+    expect(findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-tree')).toBeNull();
+  });
+
+  it('同时只展开一个：展开 A 再展开 B，A 自动收起', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var report = makeReport({
+      sessions: [
+        makeSession({ sessionId: 'a', subagents: [makeSubagent({ agentId: 'a-sub1' })] }),
+        makeSession({ sessionId: 'b', subagents: [makeSubagent({ agentId: 'b-sub1' })] }),
+      ],
+    });
+    var invoke = vi.fn().mockResolvedValue(report);
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    findCard(refs, 'a').querySelector('.fw-fleet-sub-head').click();
+    expect(findCard(refs, 'a').querySelector('.fw-fleet-sub-tree')).toBeTruthy();
+
+    findCard(refs, 'b').querySelector('.fw-fleet-sub-head').click();
+    expect(findCard(refs, 'b').querySelector('.fw-fleet-sub-tree')).toBeTruthy();
+    expect(findCard(refs, 'a').querySelector('.fw-fleet-sub-tree')).toBeNull();
+  });
+
+  it('展开态跨重渲染保持（走一个轮询 tick 后仍展开）', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(cloneFixture());
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-head').click();
+    expect(findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-tree')).toBeTruthy();
+
+    await advance(2000); // 轮询重建一整棵卡片树，展开态存在闭包变量里，不该丢
+    expect(findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-tree')).toBeTruthy();
+  });
+
+  it('树结构：2 个 root，root1 下 3 个 children，缩进按 depth', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var invoke = vi.fn().mockResolvedValue(cloneFixture());
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    findCard(refs, 'sid-working').querySelector('.fw-fleet-sub-head').click();
+
+    var rows = findCard(refs, 'sid-working').querySelectorAll('.fw-fleet-sub-row');
+    expect(rows.length).toBe(5); // root1 + root2 + 3 个 child
+
+    var depth1Rows = Array.prototype.filter.call(rows, function (r) { return r.style.paddingLeft === '0px'; });
+    var depth2Rows = Array.prototype.filter.call(rows, function (r) { return r.style.paddingLeft === '12px'; });
+    expect(depth1Rows.length).toBe(2); // root1、root2
+    expect(depth2Rows.length).toBe(3); // child1/2/3
+  });
+
+  it('orphans 被渲染出来且带父级缺失标记', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var report = makeReport({
+      sessions: [
+        makeSession({
+          sessionId: 's1',
+          subagents: [makeSubagent({ agentId: 'orphan1', parentAgentId: 'ghost-parent-not-exist' })],
+        }),
+      ],
+    });
+    var invoke = vi.fn().mockResolvedValue(report);
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    findCard(refs, 's1').querySelector('.fw-fleet-sub-head').click();
+
+    var row = findCard(refs, 's1').querySelector('.fw-fleet-sub-row');
+    expect(row).toBeTruthy();
+    expect(row.querySelector('.fw-fleet-sub-orphan').textContent).toBe('（父级缺失）');
+  });
+
+  it('深度超过 3 层 → 折叠成「更深层 N 个」', async function () {
+    var refs = fleetRefs();
+    refs.root.classList.add('is-active');
+    var report = makeReport({
+      sessions: [
+        makeSession({
+          sessionId: 's1',
+          subagents: [
+            makeSubagent({ agentId: 'd1', parentAgentId: null }),
+            makeSubagent({ agentId: 'd2', parentAgentId: 'd1' }),
+            makeSubagent({ agentId: 'd3', parentAgentId: 'd2' }),
+            makeSubagent({ agentId: 'd4', parentAgentId: 'd3' }),
+          ],
+        }),
+      ],
+    });
+    var invoke = vi.fn().mockResolvedValue(report);
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    findCard(refs, 's1').querySelector('.fw-fleet-sub-head').click();
+
+    var card = findCard(refs, 's1');
+    // d1/d2/d3（depth 1~3）正常渲染，d4（depth 4）折叠进摘要行
+    expect(card.querySelectorAll('.fw-fleet-sub-row:not(.fw-fleet-sub-more)').length).toBe(3);
+    var more = card.querySelector('.fw-fleet-sub-more');
+    expect(more).toBeTruthy();
+    expect(more.textContent).toBe('更深层 1 个');
+  });
+
+  it('description 缺失时回落 agentType，再缺失回落 agentId 前缀', async function () {
+    var refs = fleetRefs();
+    var report = makeReport({
+      sessions: [
+        makeSession({
+          sessionId: 's1',
+          subagents: [
+            makeSubagent({ agentId: 'has-desc', description: '有描述' }),
+            makeSubagent({ agentId: 'no-desc-has-type', description: null, agentType: '调研型' }),
+            makeSubagent({ agentId: 'agentid-1234567890', description: null, agentType: null }),
+          ],
+        }),
+      ],
+    });
+    var invoke = vi.fn().mockResolvedValue(report);
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    findCard(refs, 's1').querySelector('.fw-fleet-sub-head').click();
+
+    var labels = Array.prototype.map.call(
+      findCard(refs, 's1').querySelectorAll('.fw-fleet-sub-label'),
+      function (el) { return el.textContent; }
+    );
+    expect(labels).toContain('有描述');
+    expect(labels).toContain('调研型');
+    expect(labels).toContain('agentid-'); // agentId 前 8 位
+  });
+
+  it('mtimeMs 与 lastMsgTsMs 都为 null 时时间显示"—"，不出现 NaN', async function () {
+    var refs = fleetRefs();
+    var report = makeReport({
+      sessions: [
+        makeSession({
+          sessionId: 's1',
+          subagents: [makeSubagent({ agentId: 'no-time', mtimeMs: null, lastMsgTsMs: null })],
+        }),
+      ],
+    });
+    var invoke = vi.fn().mockResolvedValue(report);
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    findCard(refs, 's1').querySelector('.fw-fleet-sub-head').click();
+
+    var metaText = findCard(refs, 's1').querySelector('.fw-fleet-sub-row-meta').textContent;
+    expect(metaText).toContain('—');
+    expect(metaText).not.toContain('NaN');
+  });
+
+  it('§3.5：主会话 needs-input 但有 subagent 在 working 时，状态不塌缩，卡片上出现独立指示', async function () {
+    var refs = fleetRefs();
+    var session = makeSession({
+      sessionId: 's1',
+      transcript: Object.assign({}, makeSession({}).transcript, { lastStopReason: 'end_turn' }),
+      subagents: [makeSubagent({ agentId: 'sub-working', lastStopReason: 'tool_use' })],
+    });
+    var report = makeReport({ sessions: [session] });
+    var invoke = vi.fn().mockResolvedValue(report);
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+
+    var card = findCard(refs, 's1');
+    // tone-attention 对应 needs-input——会话状态本身没有因为 subagent 在跑而改变
+    expect(card.classList.contains('tone-attention')).toBe(true);
+    expect(card.querySelector('.fw-fleet-meta').textContent).toContain('1 个子 agent 在跑');
   });
 });
 

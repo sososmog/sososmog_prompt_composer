@@ -32,6 +32,8 @@ import {
   formatTokens,
   formatCpu,
   validateReport,
+  buildSubagentTree,
+  deriveSubagentStatus,
 } from './fleet.js';
 
 /** 可见 && 非小球 && 停在 Agent tab：全量轮询间隔。 */
@@ -40,6 +42,9 @@ const FAST_MS = 2000;
 const SLOW_MS = 8000;
 /** 连续失败退避阶梯，2s→4s→8s→16s→30s 封顶。 */
 const BACKOFF_STEPS_MS = [2000, 4000, 8000, 16000, 30000];
+/** 子 agent 树渲染深度上限。380px 宽的卡片到第 4 层缩进已经没地方放文字了，
+ * 更深的节点折叠成一行「更深层 N 个」而不是硬挤出来看不清。 */
+const MAX_SUBAGENT_DEPTH = 3;
 
 const TAB_ACTIVE_CLASS = 'is-active';
 const CARD_MINI_CLASS = 'is-mini';
@@ -72,6 +77,127 @@ function cardTitle(session) {
 }
 
 /**
+ * 子 agent 的展示文案：description 是官方现成的"在干什么"，最有信息量；
+ * 缺失时退一步用 agentType（至少知道是什么角色的 agent）；两者都没有
+ * 才落到 agentId 前 8 位（本来就是给人看的兜底，不追求可读）。
+ * @param {import('./fleet.js').SubagentDigest} sub
+ * @returns {string}
+ */
+function subagentLabel(sub) {
+  if (sub.description) return sub.description;
+  if (sub.agentType) return sub.agentType;
+  return sub.agentId.slice(0, 8);
+}
+
+/**
+ * 数一棵子树里"更深层"折叠起来的节点总数（不只是直接子节点，是全部
+ * 后代）——用户想知道的是"这一支底下到底还有多少东西"，不是"这一层
+ * 有几个直接孩子"。
+ * @param {import('./fleet.js').SubagentTreeNode} node
+ * @returns {number}
+ */
+function countSubagentDescendants(node) {
+  let n = 0;
+  for (const child of node.children) {
+    n += 1 + countSubagentDescendants(child);
+  }
+  return n;
+}
+
+/**
+ * @param {import('./fleet.js').SubagentTreeNode} node
+ * @param {number} scannedAt
+ * @param {boolean} isOrphanRoot  是否要挂「（父级缺失）」标记——只标在
+ *        orphans 数组里那个节点本身，它下面正常挂着的子节点不重复标。
+ * @returns {HTMLElement}
+ */
+function buildSubagentRow(node, scannedAt, isOrphanRoot) {
+  const status = deriveSubagentStatus(node, scannedAt);
+  const row = document.createElement('div');
+  row.className = 'fw-fleet-sub-row';
+  row.style.paddingLeft = (node.depth - 1) * 12 + 'px';
+
+  const glyph = document.createElement('span');
+  glyph.className = 'fw-fleet-sub-glyph tone-' + status.tone + (status.animated ? ' is-animated' : '');
+  glyph.textContent = status.glyph;
+  row.appendChild(glyph);
+
+  const label = document.createElement('span');
+  label.className = 'fw-fleet-sub-label';
+  const text = subagentLabel(node);
+  label.textContent = text;
+  label.title = text;
+  row.appendChild(label);
+
+  if (isOrphanRoot) {
+    const flag = document.createElement('span');
+    flag.className = 'fw-fleet-sub-orphan';
+    flag.textContent = '（父级缺失）';
+    row.appendChild(flag);
+  }
+
+  const meta = document.createElement('span');
+  meta.className = 'fw-fleet-sub-row-meta';
+  // mtimeMs / lastMsgTsMs 都缺失时不能把 NaN 传给 formatAgo——它只对
+  // "已经算出的毫秒差"负责，不负责判断输入合不合法。
+  const base = node.mtimeMs ?? node.lastMsgTsMs;
+  const ago = base == null ? '—' : formatAgo(scannedAt - base);
+  meta.textContent = formatTokens(node.contextTokens) + ' · ' + ago;
+  row.appendChild(meta);
+
+  return row;
+}
+
+/**
+ * @param {import('./fleet.js').SubagentTreeNode} node  折叠点本身（depth 已达上限的那个节点）
+ * @param {number} count
+ * @returns {HTMLElement}
+ */
+function buildSubagentMoreRow(node, count) {
+  const row = document.createElement('div');
+  row.className = 'fw-fleet-sub-row fw-fleet-sub-more';
+  row.style.paddingLeft = node.depth * 12 + 'px';
+  row.textContent = '更深层 ' + count + ' 个';
+  return row;
+}
+
+/**
+ * 递归把一棵子树铺成一串 DOM 行，超过深度上限的部分折叠成一行摘要。
+ * @param {HTMLElement} container
+ * @param {import('./fleet.js').SubagentTreeNode} node
+ * @param {number} scannedAt
+ * @param {boolean} isOrphanRoot
+ */
+function appendSubagentNode(container, node, scannedAt, isOrphanRoot) {
+  container.appendChild(buildSubagentRow(node, scannedAt, isOrphanRoot));
+  if (node.depth >= MAX_SUBAGENT_DEPTH) {
+    if (node.children.length > 0) {
+      container.appendChild(buildSubagentMoreRow(node, countSubagentDescendants(node)));
+    }
+    return;
+  }
+  for (const child of node.children) {
+    appendSubagentNode(container, child, scannedAt, false);
+  }
+}
+
+/**
+ * 有几个子 agent 正在 working——给 §3.5 的独立指示用。主会话状态该是
+ * 什么就是什么（比如 needs-input），这里只是补一条"顺带告诉你后台还有
+ * 东西在动"的事实，不参与状态判定本身。
+ * @param {import('./fleet.js').SubagentDigest[]} subagents
+ * @param {number} scannedAt
+ * @returns {number}
+ */
+function countWorkingSubagents(subagents, scannedAt) {
+  let n = 0;
+  for (const sub of subagents) {
+    if (deriveSubagentStatus(sub, scannedAt).code === 'working') n += 1;
+  }
+  return n;
+}
+
+/**
  * 装配浮窗的 Agent tab：渲染 + 轮询。
  *
  * @param {Object} opts
@@ -91,6 +217,8 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   let errorBannerEl = null;
   let contentEl = null;
   let warningsOpen = false; // 警告折叠区展开状态，重渲染后要保持（同 openQuickGroupId 的做法）
+  let openSubagentSessionId = null; // 当前展开子 agent 树的会话 id，同一时刻只有一个（同 openQuickGroupId 范式）
+  let lastReport = null; // 最近一次成功渲染的报告，供子 agent 折叠区点击后立即重渲染用
 
   function ensureSkeleton() {
     if (contentEl && errorBannerEl) return;
@@ -189,10 +317,78 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
     const ago = formatAgo(scannedAt - lastActivityMs(session));
     const cpu = formatCpu(session.proc ? session.proc.cpuPercent : null);
     const tokens = formatTokens(session.transcript ? session.transcript.contextTokens : null);
-    meta.textContent = def.label + ' · ' + ago + ' · CPU ' + cpu + ' · ' + tokens + ' tokens';
+    let metaText = def.label + ' · ' + ago + ' · CPU ' + cpu + ' · ' + tokens + ' tokens';
+    // §3.5：主会话状态（def.label）保持它本来该是什么样——哪怕它是
+    // "等你回话"、subagent 还在后台跑，也不塌缩成一个状态，只在这里
+    // 追加一条独立事实。
+    const workingSubs = countWorkingSubagents(session.subagents, scannedAt);
+    if (workingSubs > 0) {
+      metaText += ' · ' + workingSubs + ' 个子 agent 在跑';
+    }
+    meta.textContent = metaText;
     card.appendChild(meta);
 
+    const subSection = buildSubagentSection(session, scannedAt);
+    if (subSection) card.appendChild(subSection);
+
     return card;
+  }
+
+  /**
+   * C9：卡片底部的"子 agent N ▾"折叠区。大多数会话没有 subagent，数量
+   * 为 0 时整行不渲染——380px 宽里留个空行占位没意义。
+   * @param {import('./fleet.js').AgentSession} session
+   * @param {number} scannedAt
+   * @returns {HTMLElement|null}
+   */
+  function buildSubagentSection(session, scannedAt) {
+    const subagents = session.subagents;
+    if (!subagents || subagents.length === 0) return null;
+
+    const isOpen = openSubagentSessionId === session.sessionId;
+    const wrap = document.createElement('div');
+    wrap.className = 'fw-fleet-sub';
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'fw-fleet-sub-head' + (isOpen ? ' open' : '');
+    head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    const headText = document.createElement('span');
+    headText.className = 'fw-fleet-sub-head-text';
+    headText.textContent = '子 agent';
+    const headCount = document.createElement('span');
+    headCount.className = 'fw-fleet-sub-head-count';
+    headCount.textContent = String(subagents.length);
+    const headCaret = document.createElement('span');
+    headCaret.className = 'fw-fleet-sub-caret';
+    headCaret.textContent = '▾';
+    head.appendChild(headText);
+    head.appendChild(headCount);
+    head.appendChild(headCaret);
+    head.addEventListener('click', function () {
+      // 同一时刻只展开一个：点开自己就置为自己，点开的是自己就收起。
+      // 直接置换 id 就自动实现了"展开 B 时 A 跟着收起"——不需要另外
+      // 遍历"关掉其它展开项"，因为渲染时每张卡片都只认这一个 id。
+      openSubagentSessionId = isOpen ? null : session.sessionId;
+      // 用 renderContent 而不是 applyReport：这是用户主动点出来的重渲染，
+      // 不该被 C4 附的焦点守卫拦下（那条守卫防的是轮询自动重建打断
+      // 正在输入，不是这种一次性点击操作）。
+      if (lastReport) renderContent(lastReport);
+    });
+    wrap.appendChild(head);
+
+    if (isOpen) {
+      const tree = document.createElement('div');
+      tree.className = 'fw-fleet-sub-tree';
+      const { roots, orphans } = buildSubagentTree(subagents);
+      for (const node of roots) appendSubagentNode(tree, node, scannedAt, false);
+      // orphans 排在 roots 之后——它们是父 id 指向不存在的 agent、或成环
+      // 被摘出来的节点，正常不该出现，但丢掉就等于用户看不到那个 agent。
+      for (const node of orphans) appendSubagentNode(tree, node, scannedAt, true);
+      wrap.appendChild(tree);
+    }
+
+    return wrap;
   }
 
   /** @param {import('./fleet.js').FleetWarning[]} warnings */
@@ -234,14 +430,23 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
     }
   }
 
-  /** @param {import('./fleet.js').FleetReport} report */
-  function applyReport(report) {
-    updateBadge(report.sessions, report.scannedAt);
-    hideErrorBanner();
-
-    // C4 附：交互中不打断——面板里有焦点元素时，本次跳过内容重建，
-    // 数据已经拿到了，下一 tick 自然会再画一次。
-    if (root.contains(document.activeElement)) return;
+  /**
+   * 把报告画成分组+卡片，真正动手改 DOM 的地方。从 applyReport 拆出来，
+   * 是因为子 agent 折叠区的点击也需要立即重渲染一次（见 buildSubagentSection），
+   * 而那次重渲染不该经过 applyReport 里的焦点守卫。
+   * @param {import('./fleet.js').FleetReport} report
+   */
+  function renderContent(report) {
+    // 展开的会话如果这一轮报告里已经不存在了（会话退出/关闭），收起——
+    // 同 float.js 里 openQuickGroupId 的防御性检查。
+    if (
+      openSubagentSessionId &&
+      !report.sessions.some(function (s) {
+        return s.sessionId === openSubagentSessionId;
+      })
+    ) {
+      openSubagentSessionId = null;
+    }
 
     const prevList = contentEl.querySelector('.fw-fleet-list');
     const savedScrollTop = prevList ? prevList.scrollTop : 0;
@@ -281,6 +486,19 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
     }
   }
 
+  /** @param {import('./fleet.js').FleetReport} report */
+  function applyReport(report) {
+    lastReport = report;
+    updateBadge(report.sessions, report.scannedAt);
+    hideErrorBanner();
+
+    // C4 附：交互中不打断——面板里有焦点元素时，本次跳过内容重建，
+    // 数据已经拿到了，下一 tick 自然会再画一次。
+    if (root.contains(document.activeElement)) return;
+
+    renderContent(report);
+  }
+
   ensureSkeleton();
 
   // 非 Tauri 环境（浏览器预览 / playwright）：只显示降级文案，完全不建定时器。
@@ -311,9 +529,11 @@ export function createFleetView({ root, tabButton, badge, invoke, getVisibility,
   function currentTierMs() {
     return fastTier() ? FAST_MS : SLOW_MS;
   }
-  /** 精简档不传 cpu:true 的默认值，让 Rust 侧跳过 sysinfo 刷新，只喂角标需要的字段。 */
+  /** 精简档不传 cpu/subagents 的默认值：跳过 sysinfo 刷新和 subagent 目录扫描，
+   * 只喂角标需要的字段——subagent 现在是真实成本（每个子 agent 要读一次 jsonl
+   * 尾部），精简档没有树要画，没理由让 Rust 侧白扫。 */
   function currentOpts() {
-    return fastTier() ? undefined : { cpu: false };
+    return fastTier() ? undefined : { cpu: false, includeSubagents: false };
   }
 
   function scheduleNext(delayMs) {
