@@ -437,3 +437,50 @@
   .fw-fleet-warnings-list li {
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+
+  /* ============================================================
+   * C9/C10：卡片底部子 agent 折叠区 + 树形渲染
+   * 交互词汇照抄 .fw-quick-block（同一时刻只展开一个、点头部切换），
+   * 但视觉上做得比快速段落更低调——子 agent 是大多数会话都没有的
+   * 次要信息，不该跟主卡片内容抢注意力。
+   * ============================================================ */
+  .fw-fleet-sub { margin-top:3px; }
+  .fw-fleet-sub-head {
+    width:100%; display:flex; align-items:center; gap:5px;
+    border:none; background:transparent; color:var(--faint);
+    padding:2px 0; font-size:10.5px; cursor:pointer; text-align:left;
+    transition:color 0.12s ease;
+  }
+  .fw-fleet-sub-head:hover { color:var(--amber-hi); }
+  .fw-fleet-sub-head-text { flex:1; min-width:0; }
+  .fw-fleet-sub-head-count {
+    flex:none; font-family:var(--font-mono); font-size:9.5px; color:var(--faint);
+    background:var(--surface-inset); border-radius:999px; padding:0 5px;
+  }
+  .fw-fleet-sub-caret { flex:none; display:inline-block; color:var(--faint); transition:transform 0.16s ease; }
+  .fw-fleet-sub-head.open .fw-fleet-sub-caret { transform:rotate(180deg); }
+
+  .fw-fleet-sub-tree {
+    display:flex; flex-direction:column; gap:3px;
+    margin-top:3px; padding-top:5px; border-top:1px solid var(--line);
+  }
+  .fw-fleet-sub-row {
+    display:flex; align-items:baseline; gap:5px; min-width:0; font-size:10.5px;
+  }
+  .fw-fleet-sub-glyph { flex:none; font-weight:700; }
+  .fw-fleet-sub-glyph.is-animated { animation:fw-fleet-pulse 1.4s ease-in-out infinite; }
+  .fw-fleet-sub-glyph.tone-attention { color:var(--fleet-attention); }
+  .fw-fleet-sub-glyph.tone-active { color:var(--fleet-active); }
+  .fw-fleet-sub-glyph.tone-danger { color:var(--fleet-danger); }
+  .fw-fleet-sub-glyph.tone-muted { color:var(--fleet-muted); }
+  .fw-fleet-sub-glyph.tone-ok { color:var(--fleet-ok); }
+  .fw-fleet-sub-glyph.tone-unknown { color:var(--fleet-unknown); }
+  .fw-fleet-sub-label {
+    flex:1; min-width:0; color:var(--text-soft);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .fw-fleet-sub-orphan { flex:none; color:var(--faint); font-size:9.5px; }
+  .fw-fleet-sub-row-meta {
+    flex:none; font-family:var(--font-mono); font-size:9.5px; color:var(--faint);
+  }
+  .fw-fleet-sub-more { color:var(--faint); font-style:italic; }
