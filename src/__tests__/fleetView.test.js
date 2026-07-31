@@ -599,10 +599,9 @@ describe('createFleetView：重渲染不打断交互', function () {
     await advance(0);
 
     var list = refs.root.querySelector('.fw-fleet-list');
-    // jsdom 不做真实布局，scrollTop 的 getter/setter 在这里就是个纯存储槎，
+    // jsdom 不做真实布局，scrollTop 的 getter/setter 在这里就是个纯存储槽，
     // 用 defineProperty 显式给一对读写实现，避免依赖"jsdom 会不会自己
-    // clamp 到 0"这种未定义细节——只要证明"重建前读到的值 === 重建后
-    // 写回新节点的值"，就够了。
+    // clamp 到 0"这种未定义细节。
     var stored = 42;
     Object.defineProperty(list, 'scrollTop', {
       configurable: true,
@@ -610,9 +609,13 @@ describe('createFleetView：重渲染不打断交互', function () {
       set: function (v) { stored = v; },
     });
 
-    await advance(2000); // 触发下一轮重建（数据不变也会整体重建，MVP 全量重建）
+    await advance(2000);
     var newList = refs.root.querySelector('.fw-fleet-list');
-    expect(newList).not.toBe(list); // 确认真的是全新节点，不是同一个元素凑巧值没变
+    // E6 之前这里断言的是"必须是全新节点 + 把 scrollTop 写回去"（全量重建
+    // 下滚动位置只能靠存取一轮来保）。keyed 更新后列表容器本身不再被替换，
+    // 滚动位置压根没机会丢——保住的行为不变，机制换了，所以断言反过来：
+    // 容器必须是同一个节点，且没人动过它的 scrollTop。
+    expect(newList).toBe(list);
     expect(newList.scrollTop).toBe(42);
   });
 });
