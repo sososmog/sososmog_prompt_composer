@@ -224,6 +224,54 @@ function countWorkingSubagents(subagents, scannedAt) {
   return n;
 }
 
+/** 卡片上可能有用户的选区，标题上没有——搬动量打平时优先牺牲标题。 */
+export const CARD_WEIGHT = 100;
+export const TITLE_WEIGHT = 1;
+
+/**
+ * 挑出"可以原地不动"的那批节点：在保持相对顺序的前提下，让留下来的总权重
+ * 最大（加权最长上升子序列）。返回的是 oldIndex 数组里的下标。
+ *
+ * 为什么需要它：DOM 重排时"谁不动"是可选的，而**被移动 = 被重新挂载 =
+ * 落在它上面的用户选区当场消失**。所以这不是性能优化，是 E6 的正确性核心。
+ * 早先用的是一趟贪心 cursor（cursor 不等于当前节点就 insertBefore），它在
+ * "挡路的节点是活的、只是该往后排"时会去搬后面那张无辜的卡片——换组、组内
+ * 重排、整组消失这三件日常事都能触发。
+ *
+ * 权重而非长度：长度打平时普通 LIS 会随实现细节挑中搬卡片那一支。最简的
+ * 打平形态是相邻两项交换且后者是卡片（oldIndex 形如 [0,1,2,4,3]）。
+ *
+ * O(n²) DP。n 是屏幕上的行数（会话数量级），换 O(n log n) 要额外处理权重，
+ * 不值得。
+ *
+ * @param {number[]} oldIndex 每个目标节点在旧 DOM 里的下标，新节点为 -1
+ * @param {number[]} weights  同长度的权重数组
+ * @returns {number[]} 可以原地不动的下标，升序
+ */
+export function pickStayPut(oldIndex, weights) {
+  const n = oldIndex.length;
+  const best = new Array(n).fill(0);
+  const prev = new Array(n).fill(-1);
+  let bestEnd = -1;
+  for (let i = 0; i < n; i += 1) {
+    if (oldIndex[i] < 0) continue; // 新建的节点必然要插入，不参与
+    best[i] = weights[i];
+    for (let j = 0; j < i; j += 1) {
+      if (oldIndex[j] >= 0 && oldIndex[j] < oldIndex[i] && best[j] + weights[i] > best[i]) {
+        best[i] = best[j] + weights[i];
+        prev[i] = j;
+      }
+    }
+    if (bestEnd < 0 || best[i] > best[bestEnd]) bestEnd = i;
+  }
+  const out = [];
+  for (let i = bestEnd; i >= 0; i = prev[i]) {
+    out.push(i);
+    if (prev[i] < 0) break;
+  }
+  return out.reverse();
+}
+
 /**
  * 装配浮窗的 Agent tab：渲染 + 轮询。
  *
@@ -767,53 +815,16 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       existing.set(el.dataset.sessionId, el);
     }
 
-    // 这一轮结束后还会留在列表里的节点。必须在开始摆放**之前**就算出来：
-    // cursor 往前走的时候要能跳过注定要被删掉的节点，否则会出现这样一幕——
-    // cursor 停在"马上要退出的会话 a"上，轮到 b 时判定 cursor !== b，于是
-    // b 被 insertBefore 搬了一次，而搬动等于重新挂载，b 上面的选区当场没了。
-    // 症状：前面随便哪个会话一退出，它后面所有卡片的选区跟着遭殃——正是 E6
-    // 要修的那个 bug，只是换了个触发条件，而且比原来的更常见。
-    const survivors = new Set();
-    let survivorGroupCount = 0;
-    for (const group of groups) {
-      survivorGroupCount += 1;
-      for (const session of group.items) {
-        const el = existing.get(session.sessionId);
-        if (el) survivors.add(el);
-      }
-    }
-    for (const el of list.children) {
-      // 分组标题按序号复用，前 survivorGroupCount 个会留下（下面 place 时更新文字）
-      if (!el.classList.contains('fw-fleet-card') && Number(el.dataset.groupIndex) < survivorGroupCount) {
-        survivors.add(el);
-      }
-    }
-
-    // 按目标顺序把节点逐个"码"到位：cursor 始终指向下一个该被占据的位置。
-    // 节点已经在正确位置时连 insertBefore 都不调——重复插入同一个节点虽然
-    // 不改变最终 DOM，但会先摘除再插入，同样会打断选区。
-    let cursor = list.firstChild;
-
-    /** 把 cursor 推到下一个"活得下来"的节点上，跳过本轮注定被删的。 */
-    function skipDoomed() {
-      while (cursor && !survivors.has(cursor)) cursor = cursor.nextSibling;
-    }
-    skipDoomed();
-
-    /** @param {Node} node */
-    function place(node) {
-      if (cursor === node) {
-        cursor = node.nextSibling;
-        skipDoomed();
-        return;
-      }
-      list.insertBefore(node, cursor);
-    }
-
-    /** 这一轮摆放过的全部节点（标题+卡片），收尾时据此清理残留。 */
-    const placed = new Set();
+    // ---- 第一趟：把这一轮该有的节点按目标顺序攒出来（先不动 DOM）----
+    //
+    // 早先这里是一趟贪心 cursor：cursor 不等于当前节点就 insertBefore。
+    // 它有个隐蔽的失败模式——挡在 cursor 上的不一定是"要被删的"节点，也
+    // 可能是"活着但该排到后面去"的节点。贪心遇到这种情况会去搬**后面那张
+    // 无辜的卡片**，而搬动等于重新挂载，选区当场没。触发它的是最日常的三
+    // 件事：某个会话状态变了换组、组内按活动时间重排、某一整组消失。所以
+    // 改成两趟，用 LIS 挑出"最多能有多少节点原地不动"。
+    const target = [];
     let groupIndex = 0;
-
     for (const group of groups) {
       const def = STATUS_DEFS[group.key];
 
@@ -832,18 +843,45 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       }
       setText(h.firstChild, group.label);
       setText(h.lastChild, String(group.items.length));
-      place(h);
-      placed.add(h);
+      target.push(h);
       groupIndex += 1;
 
       for (const session of group.items) {
-        const id = session.sessionId;
-        const old = existing.get(id);
-        const card = old ? updateCard(old, session, def, report.scannedAt) : buildCard(session, def, report.scannedAt);
-        place(card);
-        placed.add(card);
+        const old = existing.get(session.sessionId);
+        const card = old
+          ? updateCard(old, session, def, report.scannedAt)
+          : buildCard(session, def, report.scannedAt);
+        target.push(card);
       }
     }
+
+    // ---- 第二趟：只搬必须搬的 ----
+    const domOrder = new Map();
+    Array.prototype.forEach.call(list.children, function (el, i) {
+      domOrder.set(el, i);
+    });
+    /** @type {number[]} 每个 target 元素在旧 DOM 里的下标，新节点为 -1 */
+    const oldIndex = target.map(function (el) {
+      const at = domOrder.get(el);
+      return at === undefined ? -1 : at;
+    });
+    const weights = target.map(function (el) {
+      return el.classList.contains('fw-fleet-card') ? CARD_WEIGHT : TITLE_WEIGHT;
+    });
+    const keepIdx = pickStayPut(oldIndex, weights);
+    const keep = new Set();
+    for (const i of keepIdx) keep.add(target[i]);
+
+    // 从后往前插：后面的节点已经就位，anchor 才是稳定的。
+    let anchor = null;
+    for (let i = target.length - 1; i >= 0; i -= 1) {
+      const node = target[i];
+      if (!keep.has(node)) list.insertBefore(node, anchor);
+      anchor = node;
+    }
+
+    /** 这一轮摆放过的全部节点（标题+卡片），收尾时据此清理残留。 */
+    const placed = new Set(target);
 
     // 清掉这一轮没被用到的旧节点：退出的会话、以及组变少后多出来的标题。
     // 判据是"这一轮有没有摆过它"而不是"它是什么类型"——按类型判会给将来

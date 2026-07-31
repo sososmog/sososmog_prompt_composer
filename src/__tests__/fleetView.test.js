@@ -28,7 +28,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createFleetView } from '../fleetView.js';
+import { createFleetView, pickStayPut, CARD_WEIGHT, TITLE_WEIGHT } from '../fleetView.js';
 import { STATUS_DEFS } from '../fleet.js';
 import fleetReportFixture from './fixtures/fleetReport.json';
 
@@ -1550,6 +1550,18 @@ describe('createFleetView：E6 keyed 原地更新', function () {
     return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sid + '"]');
   }
 
+  /** 在指定卡片的标题上拖蓝头两个字，返回 Selection 供后续断言。 */
+  function selectTitleOf(refs, sid) {
+    var textNode = cardOf(refs, sid).querySelector('.fw-fleet-title-line').firstChild;
+    var range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 2);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return sel;
+  }
+
   it('轮询重建后，标题上的文本选区仍然存活（E6 的原始症状）', async function () {
     var refs = mountSeq([
       makeReport({ sessions: [makeSession({ sessionId: 's1', name: 'demo' })] }),
@@ -1713,6 +1725,84 @@ describe('createFleetView：E6 keyed 原地更新', function () {
     expect(classes.indexOf('fw-fleet-branch')).toBeLessThan(classes.indexOf('fw-fleet-job-detail'));
   });
 
+  /* --------------------------------------------------------
+   * 旁观者场景：真正咬人的不是"被改动的那张卡"，而是它旁边那些
+   * 什么都没发生、却被顺手搬了一下的卡片。一趟贪心 cursor 修不了
+   * 这类，因为挡在 cursor 上的节点是活的、只是该往后排——必须靠
+   * LIS 挑出"最多能有多少节点原地不动"。
+   * 下面三条各自对应一种最日常的触发方式。
+   * -------------------------------------------------------- */
+
+  it('某个会话换组时，旁观者卡片上的选区仍然存活', async function () {
+    var tw = function (o) { return Object.assign({}, makeSession({}).transcript, o); };
+    var refs = mountSeq([
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'a', name: 'aaa' }),
+        makeSession({ sessionId: 'b', name: 'bbb' }),
+        makeSession({ sessionId: 'c', name: 'ccc' }),
+      ] }),
+      // b 从"运行中"掉进"失败"，a 和 c 什么都没变
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'a', name: 'aaa' }),
+        makeSession({ sessionId: 'b', name: 'bbb', transcript: tw({ hasApiError: true, apiErrorStatus: '529', lastStopReason: 'stop_sequence' }) }),
+        makeSession({ sessionId: 'c', name: 'ccc' }),
+      ] }),
+    ]);
+    await advance(0);
+    var sel = selectTitleOf(refs, 'c');
+    expect(sel.toString().length).toBe(2);
+
+    await advance(2000);
+    expect(sel.toString().length).toBe(2);
+  });
+
+  it('整整一组消失时，后面那组里旁观者卡片的选区仍然存活', async function () {
+    var tw = function (o) { return Object.assign({}, makeSession({}).transcript, o); };
+    var idle = tw({ lastRole: 'assistant', lastStopReason: 'end_turn', lastTailKind: 'text' });
+    var failed = tw({ hasApiError: true, apiErrorStatus: '529', lastStopReason: 'stop_sequence' });
+    var refs = mountSeq([
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'n', name: 'nnn', transcript: idle }),
+        makeSession({ sessionId: 'a', name: 'aaa' }),
+        makeSession({ sessionId: 'b', name: 'bbb', transcript: failed }),
+      ] }),
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'a', name: 'aaa' }),
+        makeSession({ sessionId: 'b', name: 'bbb', transcript: failed }),
+      ] }),
+    ]);
+    await advance(0);
+    var sel = selectTitleOf(refs, 'a');
+    expect(sel.toString().length).toBe(2);
+
+    await advance(2000);
+    expect(sel.toString().length).toBe(2);
+  });
+
+  it('组内按活动时间重排时，旁观者卡片的选区仍然存活', async function () {
+    var tw = function (o) { return Object.assign({}, makeSession({}).transcript, o); };
+    var refs = mountSeq([
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'a', name: 'aaa', transcript: tw({ mtimeMs: 1000000 }) }),
+        makeSession({ sessionId: 'b', name: 'bbb', transcript: tw({ mtimeMs: 999000 }) }),
+        makeSession({ sessionId: 'c', name: 'ccc', transcript: tw({ mtimeMs: 998000 }) }),
+      ] }),
+      // b 变旧、掉到 c 后面。活跃会话的 mtime 每轮都在动，这是轮询里
+      // 最常见的重排来源。
+      makeReport({ sessions: [
+        makeSession({ sessionId: 'a', name: 'aaa', transcript: tw({ mtimeMs: 1000000 }) }),
+        makeSession({ sessionId: 'b', name: 'bbb', transcript: tw({ mtimeMs: 990000 }) }),
+        makeSession({ sessionId: 'c', name: 'ccc', transcript: tw({ mtimeMs: 998000 }) }),
+      ] }),
+    ]);
+    await advance(0);
+    var sel = selectTitleOf(refs, 'c');
+    expect(sel.toString().length).toBe(2);
+
+    await advance(2000);
+    expect(sel.toString().length).toBe(2);
+  });
+
   it('子 agent 折叠区的展开状态不被轮询重绘打断', async function () {
     var subs = [
       { agentId: 'a1', parentId: null, description: '查代码', status: 'running', startedAt: 1000000, updatedAt: 1000000, model: 'claude-sonnet-5' },
@@ -1734,5 +1824,72 @@ describe('createFleetView：E6 keyed 原地更新', function () {
 
     expect(cardOf(refs, 's1').querySelector('.fw-fleet-sub-tree')).not.toBe(null);
     expect(cardOf(refs, 's1').querySelector('.fw-fleet-sub-head').getAttribute('aria-expanded')).toBe('true');
+  });
+});
+
+/* ============================================================
+ * pickStayPut：E6 的正确性核心，单独拎出来测
+ * ------------------------------------------------------------
+ * DOM 重排时"谁不动"是可选的，而被移动 = 被重新挂载 = 选区消失。
+ * 这个选择在 DOM 层很难构造到边界上（要拧出特定的 oldIndex 排列），
+ * 所以直接测纯函数——先前那条走真实 report 的"权重"测试是假绿的：
+ * 把权重改成 1:1 它照样通过，因为那个场景根本没打平。
+ * ============================================================ */
+describe('pickStayPut', function () {
+  /** 把 keep 下标翻译成"被搬动的下标"，断言起来更直观 */
+  function moved(oldIndex, weights) {
+    var keep = new Set(pickStayPut(oldIndex, weights));
+    var out = [];
+    for (var i = 0; i < oldIndex.length; i += 1) if (!keep.has(i)) out.push(i);
+    return out;
+  }
+  function allCards(n) {
+    return new Array(n).fill(CARD_WEIGHT);
+  }
+
+  it('顺序完全没变：一个都不用搬', function () {
+    expect(moved([0, 1, 2, 3], allCards(4))).toEqual([]);
+  });
+
+  it('中间删掉一个（下标出现空洞但仍递增）：一个都不用搬', function () {
+    expect(moved([0, 2, 3], allCards(3))).toEqual([]);
+  });
+
+  it('新节点（-1）永远算作要插入', function () {
+    expect(moved([0, -1, 1], allCards(3))).toEqual([1]);
+  });
+
+  it('全是新节点：全都要插入', function () {
+    expect(moved([-1, -1], allCards(2))).toEqual([0, 1]);
+  });
+
+  it('末位挪到首位：只搬那一个，不搬其余', function () {
+    // 目标顺序 [c,a,b]，旧 DOM 是 [a,b,c] → oldIndex [2,0,1]
+    expect(moved([2, 0, 1], allCards(3))).toEqual([0]);
+  });
+
+  it('相邻交换：只搬其中一个（等权重时保留先遇到的那个）', function () {
+    expect(moved([1, 0], allCards(2))).toEqual([1]);
+  });
+
+  it('打平时牺牲标题、保住卡片（权重的唯一作用）', function () {
+    // oldIndex [0,1,2,4,3]：最后两项交换，等长的保留方案有两种——
+    // 留前四项（搬 idx4）或留 [0,1,2,4]（搬 idx3）。末位是卡片时
+    // 必须搬标题那一个。
+    var oldIndex = [0, 1, 2, 4, 3];
+    var weights = [TITLE_WEIGHT, TITLE_WEIGHT, TITLE_WEIGHT, TITLE_WEIGHT, CARD_WEIGHT];
+    expect(moved(oldIndex, weights)).toEqual([3]); // 搬 idx3（标题），不是 idx4（卡片）
+  });
+
+  it('等权重时上一条会挑中卡片——证明权重确实在起作用', function () {
+    // 这条是上一条的对照组：同样的 oldIndex，权重拉平后结果就变了。
+    // 没有它，"打平时牺牲标题"那条测试是否真的在测权重无从判断。
+    var oldIndex = [0, 1, 2, 4, 3];
+    var flat = new Array(5).fill(1);
+    expect(moved(oldIndex, flat)).toEqual([4]);
+  });
+
+  it('空输入不炸', function () {
+    expect(pickStayPut([], [])).toEqual([]);
   });
 });
