@@ -16,10 +16,10 @@
 | 阶段 1 轨 C（浮窗 UI） | ✅ 完成，含真浏览器冒烟 + 用户真机验收 |
 | 阶段 2 subagent 树 | ✅ 完成，含真机验证 |
 | 阶段 3 收尾 | ✅ 完成 |
-| 阶段 4 可选增强 | ⬜ 未开始 |
+| 阶段 4 可选增强 | 🔶 E2/E3/E5 完成；E1 待决策，E6/E7/E8 待触发，E4 未开始 |
 
-当前规模：Rust 83 个单测 + 4 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
-前端 654 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本；
+当前规模：Rust 88 个单测 + 5 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
+前端 670 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本（10 项）；
 clippy 0 新增警告；lint 0/0。
 
 **D4 全量回归全绿**：前端 654 单测 / lint 0-0 / 对比度 4 项达标 / 主冒烟 30 项 /
@@ -44,7 +44,7 @@ CSP 冒烟 32 项 / Agent tab 冒烟 / cargo test 83+4 / clippy 0 新增。
 
 | # | 决策 | 取值 | 理由 |
 |---|---|---|---|
-| 1 | CPU 口径 | 归一化到 0–100%（除以核心数） | 与任务管理器一致。⚠️ **算法不是 `cpu_usage() / ncpu`** —— P3 实测那个 API 在 Windows 上是坏的，改成自己用 `accumulated_cpu_time()` 差值算，见 §1.3 与 §5 轨A |
+| 1 | CPU 口径 | 归一化到 0–100%（除以核心数），**含工具子进程**（E5） | 与任务管理器一致。⚠️ **算法不是 `cpu_usage() / ncpu`** —— P3 实测那个 API 在 Windows 上是坏的，改成自己用 `accumulated_cpu_time()` 差值算，见 §1.3 与 §5 轨A。子进程要算进来，否则 claude 跑 Bash 时面板显示 0.1% 而机器风扇狂转 |
 | 2 | idle 阈值 | 5 分钟无写入 | 常量 `IDLE_MS`，集中在 fleet.js 一处 |
 | 3 | 默认 tab | 记住上次停留 | localStorage `composer-fw-tab`，与 `composer-fw-autopaste` 同套路 |
 | 4 | subagent 树 | 做，独立成阶段 2 | 真正的"多 agent"；调研的 13 个项目无人做过 |
@@ -619,8 +619,32 @@ let start = size.saturating_sub(max_bytes);
 //   4. 更新 cpu_prev
 //
 // 启动时在后台线程预热一次（只为把 cpu_prev 填上），避免用户第一次打开 tab 看到 "—"。
-// 只刷关心的 pid，不做全量扫描。
 // processes() 的整体内容不可信（P3 实测：未刷新的进程会残留），只能按 pid 单查。
+```
+
+*E5 之后的修订：CPU 含工具子进程*
+```rust
+// 上面第 1 步在"要报 CPU"的那一档（opts.cpu）改成两次刷新：
+//   1a. refresh_processes_specifics(All, true, nothing())      仅拓扑，实测 14.4ms
+//       → 遍历 processes() 用 parent() 建 parent→children 映射（0.23ms）
+//       → 对每个目标 pid 收集子树（含自己），上限 MAX_SUBTREE_PIDS=256、带防环
+//   1b. refresh_processes_specifics(Some(&子树全体), true, ..with_cpu().with_memory())
+//
+// 为什么不图省事用一次 All + with_cpu()：实测 75.2ms，而分两次约 27ms。
+// 数据来自 tests/sysinfo_probe.rs 的 probe_full_refresh_cost_and_parent_map，
+// 换机器/换 sysinfo 版本重跑即可。
+//
+// 第 3 步改成：对子树里**每个进程各自**算差值再求和，而不是先求和再作差。
+// 后者在子进程生灭时会跳变（刚起的 bash 自带的历史 CPU 时间被整段计入一个窗口，
+// 打出虚高尖峰）。代价：新子进程首轮只建基准、贡献 0，存活不到一个轮询周期的
+// 短命子进程不会被计入——接受。
+//
+// cpu_prev 现在必须按轮清理（子进程 pid 是一次性的，否则表随运行时长无限膨胀）：
+// 本轮没读到的丢掉，但目标 pid 即使这轮查不到也保留（丢了基准要白等一轮）。
+//
+// 内存不合并：父子共享内存页会重复计算，且该字段前端不显示。
+// ProcSample.sampled_pids（不上报前端）记录本次合并了几个进程——子树收集失效时
+// 表现是"CPU 偏低"而不崩不报错，真机诊断打印这一列，永远是 1 就说明坏了。
 ```
 
 #### 轨 B（JS 纯函数）⇄ — 判定层
@@ -701,10 +725,12 @@ Rust 侧（A9–A10）与 UI 侧（C9–C10）可并行 ⇄，但都依赖阶段
 
 | 步 | 内容 | 节点 |
 |---|---|---|
-| D1 ⇄ | `settings.fleet = { enabled, showCpu }`，`core.js` 的 `normalizeState` 校验；主窗口设置面板加开关 | `normalizeState` 单测；关掉后 tab 隐藏、轮询停 |
+| D1 ⇄ | `settings.fleet = { enabled }`，`core.js` 的 `normalizeState` 校验；主窗口设置面板加开关 | `normalizeState` 单测；关掉后 tab 隐藏、轮询停 |
 | D2 ⇄ | 主题深浅色适配核对 | 两套主题各看一眼（照 PR #32 的做法） |
 | D3 ⇄ | 文案/空态/warning 展示打磨；README 补一节 | — |
 | D4 | 全量回归 | `npm test`、`npm run lint`、`npm run check:contrast`、`npm run smoke`、`npm run smoke:csp`、`npm run smoke:fleet`、`cargo test`、`cargo clippy --all-targets`、真机诊断 |
+
+> 原计划里 D1 是 `{ enabled, showCpu }`，实现时砍掉了 `showCpu`：实测该开关省不下什么（真正的开销是逐个会话读 transcript 尾部，控制成本靠前端轮询分档），而每多一个设置项就是一份长期维护成本。
 
 **D4 必查项**：删掉 `src-tauri/src/fleet/types.rs` 顶部的 `#![allow(dead_code)]`，重跑 clippy 确认 0 新增警告。那行是 P4"契约先于实现"的临时豁免（当时 13 条 dead_code 来自尚未被 A 轨消费的类型）。若届时仍有字段没人读，**说明契约定多了，该删字段而不是留豁免**。
 
@@ -712,15 +738,25 @@ Rust 侧（A9–A10）与 UI 侧（C9–C10）可并行 ⇄，但都依赖阶段
 
 ### 阶段 4 — 可选增强（互相独立，全部 ⇄）
 
-| 步 | 内容 | 备注 |
-|---|---|---|
-| E1 | L4 后台会话（`jobs/*/state.json` + `timeline.jsonl`） | 官方已算好 `state`/`detail`/`tokens`/`intent`。**本机现在没有后台会话，需要先 `claude --bg` 造一个才能验** |
-| E2 | 悬浮小球状态点（复用 `reduceFleetTone`） | 缩成小球后也能一眼看出"有人在等你" |
-| E3 | 点卡片打开该会话的 cwd（走已有的 `opener` 插件） | 注意 `opener:allow-open-path` 已在 capabilities 里 |
-| E4 | Codex 支持 | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`，首行 `session_meta` 带 `cwd`/`cli_version`/`originator`。加 `provider` 字段 |
-| E5 | CPU 含工具子进程 | 按 `parent()` 递归求和进程子树（执行 Bash 时的 `bash.exe`） |
-| E6 | keyed 原地更新替代全量重建 | 仅当阶段 3 手感不佳时做 |
-| E7 | `notify` 文件监听替代轮询 | 只监听已知会话的 jsonl，即时性更好；仅当轮询显得迟钝时做 |
+| 步 | 内容 | 状态 | 备注 |
+|---|---|---|---|
+| E2 | 悬浮小球状态点（复用 `reduceFleetTone`） | ✅ 已做 | 门槛 `ORB_DOT_MIN_PRIORITY=3`，只有 failed/needs-input/working 点亮；顺带修掉浅色主题下橙点 2.89:1 的对比度问题 |
+| E3 | 点卡片打开该会话的 cwd（走已有的 `opener` 插件） | ✅ 已做 | 独立小按钮而非整卡可点；点完必须 `blur()`，否则焦点守卫会让面板静默停更 |
+| E5 | CPU 含工具子进程 | ✅ 已做 | 全量刷拓扑 + 只对子树刷 CPU（14.4+12ms，而非一次性全量带 CPU 的 75ms）；按各进程分别算差值再求和 |
+| E1 | L4 后台会话（`jobs/*/state.json` + `timeline.jsonl`） | ⬜ 待决策 | 官方已算好 `state`/`detail`/`tokens`/`intent`。**契约决定未定：后台会话可能没有活进程，`pid` 要不要改 `Option<u32>`**（见下）。**本机现在没有后台会话，需要先 `claude --bg` 造一个才能验** |
+| E8 | subagent jsonl 按 mtime 缓存 | ⬜ 待触发 | 等"会话多 + 子 agent 多时轮询变迟钝"真的出现。缓存要有上限或按会话清理 |
+| E6 | keyed 原地更新替代全量重建 | ⬜ 待触发 | 触发条件很具体：全量重建会抹掉**文本选区**（焦点守卫护不住它），这是最可能先被感知到的症状 |
+| E7 | `notify` 文件监听替代轮询 | ⬜ 待触发 | 只监听已知会话的 jsonl，即时性更好；仅当轮询显得迟钝时做。**改成推送后要保留一个低频兜底轮询**——轮询自带"漏了下次补上"的自愈，监听器静默失效时界面会永久停在旧数据上 |
+| E4 | Codex 支持 | ⬜ 未开始 | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`，首行 `session_meta` 带 `cwd`/`cli_version`/`originator`。**与其余几项不是一个量级**：没有名册（拿不到 pid → 拿不到 CPU）、状态判据要另写一套、契约要加 `provider` 且升 SCHEMA_VERSION |
+
+**E1 的契约决定**（做之前必须先定）：后台会话可能没有活进程（daemon 托管，或进程已退出但作业还在），而契约里 `AgentSession.pid` 是必填 `u32`、`liveness` 只有 `alive`/`pid-reused`。
+
+- **方案 A 仅标注**：job 只挂到已有名册会话上（按 `sessionId` 匹配）。简单、不改契约；但没有活进程的后台会话根本不出现，等于功能只做一半。
+- **方案 B 独立成条**：job 可以自己成为一个 `AgentSession`。更有用；但要把 `pid` 改 `Option<u32>`、`liveness` 加一个值、前端各处判 pid 的地方跟着改，要升 `SCHEMA_VERSION`。
+
+倾向 B —— A 会让用户困惑（"我 `--bg` 起的活怎么不显示"）。
+
+> `timeline.jsonl` 是完美的状态变迁时间线数据源，但先别做时间线 UI：380px 宽塞不下，且 `state.json` 的 `detail` 一句摘要已经够用。
 
 ---
 
