@@ -26,7 +26,59 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use composer_lib::fleet::{proc, roster, transcript};
+use composer_lib::fleet::{proc, roster, subagents, transcript};
+
+/// 把扁平的 subagent 列表按 parentAgentId 打印成树。
+///
+/// 这里刻意**不复用前端 `buildSubagentTree` 的逻辑**（那是 JS，且有环检测/孤儿
+/// 归置等一整套规则）——这个函数的用途是"让人肉眼确认磁盘上的父子关系被正确读出
+/// 来了"，越笨越好。前端那套树重建规则由 fleet.test.js 用合成数据覆盖。
+fn print_tree(digests: &[composer_lib::fleet::types::SubagentDigest], scanned_at: i64) {
+    fn walk(
+        all: &[composer_lib::fleet::types::SubagentDigest],
+        parent: Option<&str>,
+        indent: usize,
+        scanned_at: i64,
+    ) {
+        for d in all.iter().filter(|d| d.parent_agent_id.as_deref() == parent) {
+            let ago = d
+                .mtime_ms
+                .or(d.last_msg_ts_ms)
+                .map(|t| format!("{}s前", (scanned_at - t) / 1000))
+                .unwrap_or_else(|| "无 jsonl".to_string());
+            println!(
+                "      {:indent$}{} {}  [{}] {} tok  {}  {}",
+                "",
+                d.spawn_depth.map(|n| n.to_string()).unwrap_or("?".into()),
+                &d.agent_id[..d.agent_id.len().min(9)],
+                d.last_stop_reason.as_deref().unwrap_or("-"),
+                d.context_tokens.map(|t| t.to_string()).unwrap_or("?".into()),
+                ago,
+                d.description.as_deref().unwrap_or("(无描述)"),
+                indent = indent
+            );
+            walk(all, Some(&d.agent_id), indent + 2, scanned_at);
+        }
+    }
+    walk(digests, None, 0, scanned_at);
+
+    // 父指针悬空的（父不在本次结果里）不会被上面的 walk 打到，单独列出来——
+    // 漏掉它们就等于"树里少了几个 agent 但没人知道"。
+    let ids: std::collections::HashSet<&str> =
+        digests.iter().map(|d| d.agent_id.as_str()).collect();
+    for d in digests.iter().filter(|d| {
+        d.parent_agent_id
+            .as_deref()
+            .is_some_and(|p| !ids.contains(p))
+    }) {
+        println!(
+            "      [孤儿] {} 父={} {}",
+            &d.agent_id[..d.agent_id.len().min(9)],
+            d.parent_agent_id.as_deref().unwrap_or("-"),
+            d.description.as_deref().unwrap_or("(无描述)")
+        );
+    }
+}
 
 /// 与 `fleet::config::resolve` 同样的规则，但不需要 Tauri 的 AppHandle。
 /// 这里刻意重写一遍而不是复用——`config::resolve` 要 `AppHandle`，
@@ -84,6 +136,13 @@ fn dump_what_the_collector_sees_on_this_machine() {
     let mut alive = 0usize;
     let mut fresh = 0usize;
     let mut with_digest = 0usize;
+    let mut subagent_total = 0usize;
+    // subagent 行的"多久前"要有个时间基准。这里用本地时钟即可——这是诊断输出，
+    // 不是产品逻辑（产品里前端一律用 Rust 报告里的 scannedAt，见契约注释）。
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
 
     for e in &scan.entries {
         let sample = samples.get(&e.pid);
@@ -146,6 +205,22 @@ fn dump_what_the_collector_sees_on_this_machine() {
                                 d.parse_errors
                             );
                         }
+
+                        // ---------- L3 subagent 树 ----------
+                        // subagents_dir 与编排层同样的推导方式：transcript 的父目录
+                        // 就是项目目录。
+                        if let Some(project_dir) = path.parent() {
+                            let dir = project_dir.join(&e.session_id).join("subagents");
+                            let scan = subagents::scan(&dir, 64 * 1024);
+                            if !scan.digests.is_empty() || !scan.warnings.is_empty() {
+                                println!("    子 agent {} 个：", scan.digests.len());
+                                print_tree(&scan.digests, now_ms);
+                                for w in &scan.warnings {
+                                    println!("      [warn] {:?} — {}", w.code, w.detail);
+                                }
+                                subagent_total += scan.digests.len();
+                            }
+                        }
                     }
                     Err(err) => {
                         println!("    ⚠️ transcript 读取/解析失败: {err:?}");
@@ -156,7 +231,7 @@ fn dump_what_the_collector_sees_on_this_machine() {
     }
 
     println!(
-        "\n---- 汇总：{} 条名册 / {alive} 个存活 / {fresh} 个未开始 / {with_digest} 个读到摘要",
+        "\n---- 汇总：{} 条名册 / {alive} 个存活 / {fresh} 个未开始 / {with_digest} 个读到摘要 / {subagent_total} 个子 agent",
         scan.entries.len()
     );
 
