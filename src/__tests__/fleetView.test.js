@@ -1502,3 +1502,185 @@ describe('float.js：tab 切换与持久化', function () {
     );
   });
 });
+
+/* ============================================================
+ * E6：keyed 原地更新
+ * ------------------------------------------------------------
+ * 触发这一项的不是性能，是一个具体的可感知缺陷：面板每 2s 全量重建
+ * 卡片树，而**文本选区不受焦点守卫保护**——拖蓝一段会话标题想复制，
+ * 下一轮轮询就把承载它的文本节点换掉，选区随之消失。
+ * activeElement 停在 <body>，root.contains() 为 false，守卫放行。
+ *
+ * 所以这里的断言分两层：
+ *   1. 行为层（真正要的东西）：选区跨轮询存活、DOM 节点身份不变；
+ *   2. 结构层：key 增删改后卡片顺序/内容仍然正确——原地更新最容易
+ *      在"顺序变了"和"节点复用错对象"上出错，全量重建天然没这问题。
+ * ============================================================ */
+describe('createFleetView：E6 keyed 原地更新', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  /** 让 invoke 每轮返回不同报告，模拟真实轮询里数据在变。 */
+  function mountSeq(reports) {
+    var refs = fleetRefs();
+    var i = 0;
+    var invoke = vi.fn(function () {
+      var r = reports[Math.min(i, reports.length - 1)];
+      i += 1;
+      return Promise.resolve(r);
+    });
+    refs.root.classList.add('is-active');
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      orbDot: refs.orbDot,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    return refs;
+  }
+
+  function cardOf(refs, sid) {
+    return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sid + '"]');
+  }
+
+  it('轮询重建后，标题上的文本选区仍然存活（E6 的原始症状）', async function () {
+    var refs = mountSeq([
+      makeReport({ sessions: [makeSession({ sessionId: 's1', name: 'demo' })] }),
+      // 第二轮：CPU 变了（真实轮询里每轮都会变），足以触发一次重绘
+      makeReport({
+        sessions: [
+          makeSession({
+            sessionId: 's1',
+            name: 'demo',
+            proc: { cpuPercent: 42, memoryMb: 100, runTimeSec: 20 },
+          }),
+        ],
+      }),
+    ]);
+    await advance(0);
+
+    var titleLine = cardOf(refs, 's1').querySelector('.fw-fleet-title-line');
+    var textNode = titleLine.firstChild;
+    expect(textNode).not.toBe(null);
+
+    // 用户拖蓝了标题里的一段。注意焦点仍在 body 上——这正是焦点守卫
+    // 拦不住这个场景的原因。
+    var range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 2);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    expect(refs.root.contains(document.activeElement)).toBe(false);
+    expect(sel.toString().length).toBe(2);
+
+    await advance(2000);
+
+    // 全量重建会把 textNode 从文档里摘掉，选区随之塌成空串。
+    expect(sel.rangeCount).toBe(1);
+    expect(sel.toString().length).toBe(2);
+    expect(titleLine.isConnected).toBe(true);
+  });
+
+  it('会话没变时复用同一个卡片 DOM 节点，只改变化了的字段', async function () {
+    var refs = mountSeq([
+      makeReport({ sessions: [makeSession({ sessionId: 's1', proc: { cpuPercent: 5, memoryMb: 100, runTimeSec: 10 } })] }),
+      makeReport({ sessions: [makeSession({ sessionId: 's1', proc: { cpuPercent: 42, memoryMb: 100, runTimeSec: 20 } })] }),
+    ]);
+    await advance(0);
+    var before = cardOf(refs, 's1');
+
+    await advance(2000);
+    var after = cardOf(refs, 's1');
+
+    expect(after).toBe(before); // 同一个对象，不是重建出来的新节点
+    expect(after.querySelector('.fw-fleet-meta').textContent).toContain('CPU 42%');
+  });
+
+  it('新增/删除/重排会话后，卡片集合与顺序仍然正确', async function () {
+    var refs = mountSeq([
+      makeReport({
+        sessions: [
+          makeSession({ sessionId: 's1', name: 'alpha' }),
+          makeSession({ sessionId: 's2', name: 'beta' }),
+        ],
+      }),
+      // s1 退出、s3 新来。注意报告里 s3 在前，但组内顺序由 fleet.js 的
+      // compareByActivityThenName 决定（活跃时间相同则按 name），所以
+      // 期望是 beta→gamma——这条断言同时钉住"keyed 更新不得篡改既有排序"。
+      makeReport({
+        sessions: [
+          makeSession({ sessionId: 's3', name: 'gamma' }),
+          makeSession({ sessionId: 's2', name: 'beta' }),
+        ],
+      }),
+    ]);
+    await advance(0);
+    var s2Before = cardOf(refs, 's2');
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(2);
+
+    await advance(2000);
+
+    var ids = Array.prototype.map.call(
+      refs.root.querySelectorAll('.fw-fleet-card'),
+      function (el) { return el.dataset.sessionId; }
+    );
+    expect(ids).toEqual(['s2', 's3']);
+    expect(cardOf(refs, 's1')).toBe(null);
+    expect(cardOf(refs, 's2')).toBe(s2Before); // 幸存者仍是同一个节点
+  });
+
+  it('状态变化时卡片换组，tone class 与分组标题跟着更新', async function () {
+    var working = makeSession({ sessionId: 's1' });
+    var idle = makeSession({
+      sessionId: 's1',
+      transcript: Object.assign({}, makeSession({}).transcript, {
+        lastRole: 'assistant',
+        lastStopReason: 'end_turn',
+        lastTailKind: 'text',
+      }),
+    });
+    var refs = mountSeq([
+      makeReport({ sessions: [working] }),
+      makeReport({ sessions: [idle] }),
+    ]);
+    await advance(0);
+    var toneBefore = cardOf(refs, 's1').className;
+
+    await advance(2000);
+
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(1);
+    expect(cardOf(refs, 's1').className).not.toBe(toneBefore);
+    // 分组标题只剩一个，且计数是 1——换组后不该留下空组
+    var titles = refs.root.querySelectorAll('.fw-fleet-group-title');
+    expect(titles.length).toBe(1);
+    expect(titles[0].querySelector('.fw-fleet-group-count').textContent).toBe('1');
+  });
+
+  it('子 agent 折叠区的展开状态不被轮询重绘打断', async function () {
+    var subs = [
+      { agentId: 'a1', parentId: null, description: '查代码', status: 'running', startedAt: 1000000, updatedAt: 1000000, model: 'claude-sonnet-5' },
+    ];
+    var refs = mountSeq([
+      makeReport({ sessions: [makeSession({ sessionId: 's1', subagents: subs })] }),
+      makeReport({
+        sessions: [makeSession({ sessionId: 's1', subagents: subs, proc: { cpuPercent: 9, memoryMb: 100, runTimeSec: 30 } })],
+      }),
+    ]);
+    await advance(0);
+
+    var head = cardOf(refs, 's1').querySelector('.fw-fleet-sub-head');
+    head.click();
+    head.blur(); // 焦点交出去，确保这条测的是重绘本身而不是焦点守卫
+    expect(cardOf(refs, 's1').querySelector('.fw-fleet-sub-tree')).not.toBe(null);
+
+    await advance(2000);
+
+    expect(cardOf(refs, 's1').querySelector('.fw-fleet-sub-tree')).not.toBe(null);
+    expect(cardOf(refs, 's1').querySelector('.fw-fleet-sub-head').getAttribute('aria-expanded')).toBe('true');
+  });
+});
