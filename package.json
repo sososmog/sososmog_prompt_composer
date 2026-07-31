@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "lint": "eslint .",
+    "check:contrast": "node scripts/check-contrast.mjs",
     "fonts": "node scripts/fetch-fonts.mjs",
     "smoke": "node src/__tests__/frontend.smoke.mjs",
     "smoke:csp": "node src/__tests__/frontend.smoke.mjs --csp",

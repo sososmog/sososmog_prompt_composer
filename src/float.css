@@ -38,6 +38,13 @@
     --fleet-muted:var(--muted);
     --fleet-ok:var(--ok);
     --fleet-unknown:var(--muted);
+    /* 色块上的文字色。**必须按主题分别取值**，不能统一成白字——
+       fleet-attention / fleet-danger 在深色主题下本身是浅色（它们的设计用途是
+       "深底上的前景文字"），当填充背景用时白字对比度会掉到 2.56 / 2.99，
+       连大字号 AA 的 3.0 都不到。下面每个值后面的数字是实测对比度，
+       改动前请重算，不要凭观感——这类问题肉眼只觉得"有点发灰"。 */
+    --fleet-on-attention:#1f1f1f;   /* 5.28 ✅（白字仅 3.12，角标是 9.5px 小字，不够） */
+    --fleet-on-danger:#ffffff;      /* 5.44 ✅（此处底色 #c0392b 够深，白字反而最好） */
   }
 
   [data-theme="dark"] {
@@ -65,6 +72,9 @@
     --fleet-muted:var(--muted);
     --fleet-ok:var(--ok);
     --fleet-unknown:var(--muted);
+    /* 见浅色块里的说明。深色主题两处都得用深墨字。 */
+    --fleet-on-attention:#1f1f1f;   /* 6.45 ✅（白字仅 2.56） */
+    --fleet-on-danger:#1f1f1f;      /* 5.52 ✅（白字仅 2.99） */
   }
 
   * { box-sizing:border-box; }
@@ -177,7 +187,7 @@
     display:inline-flex; align-items:center; justify-content:center;
     margin-left:5px; min-width:15px; height:15px; padding:0 4px;
     font-family:var(--font-mono); font-size:9.5px; font-weight:700; line-height:15px;
-    color:#fff; background:var(--fleet-attention); border-radius:999px;
+    color:var(--fleet-on-attention); background:var(--fleet-attention); border-radius:999px;
   }
   .fw-tab-badge[hidden] { display:none; }
 
@@ -362,7 +372,7 @@
   .fw-fleet-error {
     flex:none; display:flex; align-items:center; gap:6px;
     margin:0 0 6px; padding:5px 9px; border-radius:6px;
-    background:var(--fleet-danger); color:#fff;
+    background:var(--fleet-danger); color:var(--fleet-on-danger);
     font-size:10.5px; line-height:1.4;
     opacity:0.9;
   }
