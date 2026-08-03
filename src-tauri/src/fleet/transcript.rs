@@ -136,6 +136,9 @@ pub fn read_digest(path: &Path, tail_bytes: u64) -> Result<TranscriptDigest, Dig
                 api_error_status: extracted.api_error_status,
                 api_error_code: extracted.api_error_code,
                 context_tokens: extracted.context_tokens,
+                // Claude 侧给不出窗口大小（jsonl 区分不出 200k 还是 1M），
+                // 这个字段是 Codex 专属的，见 types.rs 里的说明。
+                context_window: None,
                 parse_errors: extracted.parse_errors,
             });
         }

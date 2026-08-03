@@ -457,6 +457,19 @@
     flex:none; font-weight:600; color:var(--text);
     max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+  /* provider 徽章：只给非 Claude 的会话标（Claude 是这个面板的默认居民）。
+     刻意用"描边 + 文字"而不是彩色色块——色块上有文字就欠一笔对比度校验，
+     而这个标签在深浅两个主题下都得可读（E2 那次浅色主题橙点 2.89:1 的教训）。
+     用 --faint / --line 跟着主题变量走，不写死颜色。
+     内容为空时（Claude 会话）整个收起，不占 gap。 */
+  .fw-fleet-provider {
+    flex:none; font-size:9px; line-height:1.5;
+    padding:0 4px; border-radius:3px;
+    border:1px solid var(--line); color:var(--faint);
+    white-space:nowrap;
+  }
+  .fw-fleet-provider:empty { display:none; }
+
   .fw-fleet-model {
     flex:1; min-width:0; font-family:var(--font-mono); font-size:10px; color:var(--faint);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;

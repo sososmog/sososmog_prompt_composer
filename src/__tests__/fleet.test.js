@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   SCHEMA_VERSION,
+  formatContext,
   IDLE_MS,
   STATUS_DEFS,
   GROUP_ORDER,
@@ -514,7 +515,10 @@ describe('groupSessions', () => {
     expect(byKey['needs-input'].items).toHaveLength(2); // sid-needs-input + sid-job(blocked)
     expect(byKey['needs-input'].label).toBe(STATUS_DEFS['needs-input'].label);
     // sid-working + sid-no-cpu + sid-job-headless（无进程的后台会话，job.state=working）
-    expect(byKey.working.items).toHaveLength(3);
+    // + sid-codex-working（v3：Codex 会话，采集层把 task_started 未配对翻译成
+    //   assistant + tool_use，于是走的是与 Claude 完全相同的判定路径——
+    //   这一条同时验证了"前端不需要为 provider 分支"这个设计前提）
+    expect(byKey.working.items).toHaveLength(4);
     expect(byKey.working.label).toBe(STATUS_DEFS.working.label);
     expect(byKey.failed.items).toHaveLength(1);
     expect(byKey.fresh.items).toHaveLength(1);
@@ -642,6 +646,34 @@ describe('formatAgo', () => {
       expect(formatAgo(ms)).toBe(expected);
     });
   }
+});
+
+describe('formatContext', () => {
+  it('知道窗口大小时显示占用率（Codex）', () => {
+    // 真机实测的那组数字：165900 / 258400 = 64.2%
+    expect(formatContext(165900, 258400)).toBe('166k/258k (64%)');
+  });
+
+  it('不知道窗口大小时维持原来的 "N tokens"（Claude）', () => {
+    expect(formatContext(78305, null)).toBe('78k tokens');
+    expect(formatContext(78305, undefined)).toBe('78k tokens');
+  });
+
+  it('tokens 缺失时不显示百分比，退回占位符', () => {
+    expect(formatContext(null, 258400)).toBe('— tokens');
+    expect(formatContext(null, null)).toBe('— tokens');
+  });
+
+  it('窗口为 0 或负数时当作不知道，而不是算出 Infinity%', () => {
+    // 退回的是 formatTokens 的口径，所以 1000 显示成 "1k"
+    expect(formatContext(1000, 0)).toBe('1k tokens');
+    expect(formatContext(1000, -1)).toBe('1k tokens');
+  });
+
+  it('超过 100% 如实显示，不 clamp', () => {
+    // 上下文该压缩了——这是用户需要知道的事实，抹平它等于把信号藏起来
+    expect(formatContext(300000, 258400)).toBe('300k/258k (116%)');
+  });
 });
 
 describe('formatTokens', () => {

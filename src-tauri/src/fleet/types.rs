@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 /// - v2：接入 L4 后台会话。`AgentSession.pid` 由 `u32` 改成 `Option<u32>`、
 ///   `Liveness` 增加 `NoProcess`——daemon 托管的 `/loop`、`--bg` 会话根本
 ///   没有对应进程，硬塞一个假 pid 会让存活校验和 CPU 采样一起说谎。
-pub const SCHEMA_VERSION: u32 = 2;
+/// - v3：接入 Codex 会话。`AgentSession` 加必填的 `provider`，
+///   `TranscriptDigest` 加可选的 `contextWindow`。前者是新增字段而非可选，
+///   因为「这张卡片是谁家的」不该有"不知道"这个状态。
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// 终态 job（`done`/`failed`/`stopped`）在列表里保留多久。
 ///
@@ -18,6 +21,28 @@ pub const SCHEMA_VERSION: u32 = 2;
 ///
 /// 进行中的 job（`working`/`blocked`）不受此限制，永远显示。
 pub const JOB_TERMINAL_RETENTION_MS: i64 = 60 * 60 * 1000;
+
+/// Codex 会话的保留窗口：mtime 早于这个时长的 rollout 不进列表。
+///
+/// `~/.codex/sessions/` 和 `jobs/` 一样是**只增不删的归档**（本机 56 个 rollout
+/// 里有 19 个是同一秒导入的历史），不设窗口面板就是个垃圾堆。
+///
+/// 8 小时的取舍：Codex 没有进程可查，"这个会话还算不算数"只能靠最后写入时间判断。
+/// 8 小时约等于一个工作日的跨度——早上开的会话下午还看得到，隔夜的就算历史了。
+/// 比 `IDLE_MS`（5 分钟）宽得多是故意的：idle 是"闲着但还在"，这里是"根本不该
+/// 再出现在面板上"，两个尺度不该对齐。
+pub const CODEX_RETENTION_MS: i64 = 8 * 60 * 60 * 1000;
+
+/// 最多进几个日期目录（`sessions/YYYY/MM/DD`）。
+///
+/// 只是为了给遍历成本封顶，不是保留策略——真正决定显不显示的是
+/// [`CODEX_RETENTION_MS`]。取 3 是因为 8 小时的窗口最多也就跨两个自然日
+/// （夜里跑的会话），留一个余量。
+///
+/// **按字典序取最后 N 个，不与当前日期比较**：用户几天没开 Codex 时，
+/// 按当前日期算会一个目录都取不到，而按排序取总能拿到最近的那几天——
+/// 反正超窗口的会在 mtime 那关被筛掉，多看几个目录不会多显示任何东西。
+pub const CODEX_DATE_DIRS_MAX: usize = 3;
 
 /// transcript 尾部默认读取字节数。
 ///
@@ -46,6 +71,11 @@ pub struct FleetOptions {
     pub include_subagents: Option<bool>,
     /// 默认 `true`（v2 起）。关掉就看不到 `/loop` 和 `--bg` 起的后台会话。
     pub include_jobs: Option<bool>,
+    /// 默认 `true`（v3 起）。关掉就只看 Claude Code 的会话。
+    ///
+    /// 存在的意义和 `include_jobs` 一样：没装 Codex 的机器上这一路本来就静默
+    /// 返回空，**不需要**靠这个开关去省成本；它是给"我只想看 Claude"的用户的。
+    pub include_codex: Option<bool>,
     /// 默认 `true`
     pub cpu: Option<bool>,
 }
@@ -61,6 +91,9 @@ impl FleetOptions {
     }
     pub fn include_jobs(&self) -> bool {
         self.include_jobs.unwrap_or(true)
+    }
+    pub fn include_codex(&self) -> bool {
+        self.include_codex.unwrap_or(true)
     }
     pub fn cpu(&self) -> bool {
         self.cpu.unwrap_or(true)
@@ -120,6 +153,14 @@ pub enum WarningCode {
     JobsUnreadable,
     /// 单个 `jobs/<id>/state.json` 解析失败（跳过该条，其余照常）
     JobEntryInvalid,
+    /// Codex 的 `sessions/` 目录存在但读不了（权限问题一类），或某个 rollout
+    /// 文件打不开。
+    ///
+    /// 注意**没有** `CodexNoSessionsDir`：没装 Codex 的机器上那个目录本来就不
+    /// 存在，那是正常状态不是错误，静默跳过（同 `TranscriptNotFound` 那条的理由）。
+    CodexRolloutUnreadable,
+    /// Codex rollout 读到了，但尾部窗口里解析不出任何消息（格式漂移的信号）
+    CodexRolloutUnparsable,
 }
 
 // 关于这里**没有**哪两个 code，理由值得留着，否则以后会有人"顺手补上"：
@@ -137,9 +178,23 @@ pub enum WarningCode {
 /// L1 字段来自 `sessions/<pid>.json`，必有；其余各层可能为 null，
 /// 且 **null 不等于错误**——最典型的是 `transcript: null` 表示"已启动但一句话
 /// 没说"，这是实测存在的真实状态（本机 5 个会话里有 2 个是这样）。
+/// 这个会话是哪个 CLI 的。v3 起。
+///
+/// 不做成 `Option`：每张卡片必然属于某一家，"不知道是谁的"不是一个有意义的
+/// 状态。真有第三家进来时该加枚举变体，而不是靠 null 表示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Claude,
+    Codex,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSession {
+    /// v3 新增。前端据此显示徽章，并把它拼进 keyed 更新的身份键。
+    pub provider: Provider,
+
     // ---- L1：名册 ----
     /// **`None` = 这个会话没有对应进程**，不是"没采到"。daemon 托管的后台
     /// 会话（`/loop`、`--bg`）就是这样：作业还在，执行它的进程可能压根不
@@ -263,6 +318,14 @@ pub struct TranscriptDigest {
     /// `opus[1m]`，**从 jsonl 里区分不出 200k 还是 1M 窗口**，显示错的百分比比不
     /// 显示更糟。
     pub context_tokens: Option<u64>,
+
+    /// 模型上下文窗口大小。**只有 Codex 侧有**（`task_started` 和 `token_count`
+    /// 都明确写了这个数字），Claude 侧恒为 `None`。
+    ///
+    /// 有了它前端才能显示真实的占用百分比。Claude 侧之所以给不出，见上面
+    /// `context_tokens` 的注释：从 jsonl 里区分不出 200k 还是 1M 窗口，
+    /// 显示错的百分比比不显示更糟。
+    pub context_window: Option<u64>,
 
     /// 尾部解析失败的行数。>0 说明格式可能漂移了，是我们唯一的诊断信号。
     pub parse_errors: u32,
@@ -451,6 +514,7 @@ mod tests {
                 "pid 62222 的启动时间与名册记录不符",
             )],
             sessions: vec![AgentSession {
+                provider: Provider::Claude,
                 pid: Some(52052),
                 session_id: "11111111-2222-3333-4444-555555555555".into(),
                 name: "demo-proj-18".into(),
@@ -482,6 +546,7 @@ mod tests {
                     api_error_status: None,
                     api_error_code: None,
                     context_tokens: Some(68_000),
+                    context_window: None,
                     parse_errors: 0,
                 }),
                 subagents: vec![SubagentDigest {

@@ -29,15 +29,20 @@
 
 /**
  * @typedef {Object} FleetWarning
- * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'} code
+ * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'|'codex-rollout-unreadable'|'codex-rollout-unparsable'} code
  * @property {string} detail
  */
 
 /**
  * @typedef {Object} AgentSession
+ * @property {'claude'|'codex'} provider  这张卡片是谁家的（v3 起）。不是可选——
+ *                                每个会话必然属于某一家，"不知道"不是有效状态。
+ *                                Codex 会话恒为 pid:null / liveness:'no-process' /
+ *                                proc:null / subagents:[] / job:null，那不是缺陷，
+ *                                是数据源就没有这些东西
  * @property {number|null} pid    null = 这个会话没有对应进程（daemon 托管的后台
- *                                会话），不是"没采到"。前端不读它，留在这里是为了
- *                                让契约完整
+ *                                会话，或任何 Codex 会话），不是"没采到"。
+ *                                前端不读它，留在这里是为了让契约完整
  * @property {string} sessionId
  * @property {string} name
  * @property {string} cwd
@@ -83,6 +88,10 @@
  * @property {string|null} apiErrorStatus    源数据里是数字且可能缺失，采集侧已归一化成字符串
  * @property {string|null} apiErrorCode      如 oauth_org_not_allowed / invalid_request
  * @property {number|null} contextTokens     官方口径：input + cache_creation + cache_read
+ * @property {number|null} contextWindow     模型上下文窗口（v3 起）。**只有 Codex 有**，
+ *                                           Claude 侧恒为 null——jsonl 区分不出 200k
+ *                                           还是 1M 窗口，显示错的百分比比不显示更糟。
+ *                                           有值时才算占用率
  * @property {number} parseErrors            >0 = 格式可能漂移了
  */
 
@@ -136,8 +145,13 @@
  * 常量
  * ============================================================ */
 
-/** 必须与 src-tauri/src/fleet/types.rs 的 SCHEMA_VERSION 一致。 */
-export const SCHEMA_VERSION = 2;
+/**
+ * 必须与 src-tauri/src/fleet/types.rs 的 SCHEMA_VERSION 一致。
+ * fleet.test.js 有一条测试直接读那个文件比对，改漏一边会立刻变红。
+ *
+ * v3：接入 Codex，`AgentSession.provider` 与 `TranscriptDigest.contextWindow`。
+ */
+export const SCHEMA_VERSION = 3;
 
 /**
  * 多久没有写入算"空闲"。
@@ -631,6 +645,34 @@ export function formatTokens(n) {
     return `${k}k`;
   }
   return `${(n / 1000000).toFixed(1)}M`;
+}
+
+/**
+ * 上下文占用的显示文本。
+ *
+ * 两种形态，取决于**知不知道窗口有多大**：
+ * - 知道（Codex）：`166k/258k (64%)`
+ * - 不知道（Claude）：`166k tokens` —— 维持原样
+ *
+ * Claude 侧之所以给不出窗口，见 types.rs 里 `context_tokens` 的注释：
+ * jsonl 里 `message.model` 记的是 `claude-opus-5`，而用户实际可能设的是
+ * `opus[1m]`，从记录里区分不出 200k 还是 1M。显示错的百分比比不显示更糟。
+ *
+ * 百分比**不做 clamp**：真超过 100% 就如实显示。那是"上下文该压缩了"的信号，
+ * 抹平它等于把一个用户需要知道的事实藏起来。
+ *
+ * @param {number|null|undefined} tokens
+ * @param {number|null|undefined} window  模型上下文窗口，只有 Codex 有
+ * @returns {string}
+ */
+export function formatContext(tokens, window) {
+  // window 为 0 时同样落到这条分支——除零会算出 Infinity%，
+  // 而"窗口是 0"本身就是个无意义的值，当作不知道处理。
+  if (tokens == null || window == null || window <= 0) {
+    return formatTokens(tokens) + ' tokens';
+  }
+  const pct = Math.round((tokens / window) * 100);
+  return formatTokens(tokens) + '/' + formatTokens(window) + ' (' + pct + '%)';
 }
 
 /**

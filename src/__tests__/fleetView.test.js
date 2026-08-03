@@ -29,6 +29,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createFleetView, pickStayPut, CARD_WEIGHT, TITLE_WEIGHT, SELECTED_WEIGHT } from '../fleetView.js';
+import { SCHEMA_VERSION } from '../fleet.js';
 import { STATUS_DEFS, groupSessions } from '../fleet.js';
 import fleetReportFixture from './fixtures/fleetReport.json';
 
@@ -50,9 +51,15 @@ function cloneFixture() {
   return JSON.parse(JSON.stringify(fleetReportFixture));
 }
 
+/** 与 fleetView.js 内部的 sessionKey 同口径。卡片的 dataset 存的是这个。 */
+function keyOf(session) {
+  return session.provider + ':' + session.sessionId;
+}
+
 function makeSession(overrides) {
   return Object.assign(
     {
+      provider: 'claude',
       pid: 1000,
       sessionId: 's1',
       name: 'demo',
@@ -80,6 +87,7 @@ function makeSession(overrides) {
         apiErrorStatus: null,
         apiErrorCode: null,
         contextTokens: 1000,
+        contextWindow: null,
         parseErrors: 0,
       },
       subagents: [],
@@ -112,7 +120,9 @@ function makeSubagent(overrides) {
 function makeReport(overrides) {
   return Object.assign(
     {
-      schemaVersion: 2,
+      // 引用常量而不是写死数字：上一次升版本时这里被漏掉，60 个用例一起变红，
+      // 而症状（列表渲染成空）离原因很远。
+      schemaVersion: SCHEMA_VERSION,
       scannedAt: 1000000,
       configDir: 'C:/demo/.claude',
       sessions: [],
@@ -194,7 +204,7 @@ describe('createFleetView：渲染', function () {
     expect(labels).not.toContain(STATUS_DEFS.completed.label);
     expect(labels).not.toContain(STATUS_DEFS.stopped.label);
 
-    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(9);
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(10);
   });
 
   it('无会话时显示空态文案', async function () {
@@ -635,7 +645,7 @@ describe('createFleetView：C9/C10 子 agent 折叠区与树形渲染', function
 
   /** @returns {HTMLElement|null} */
   function findCard(refs, sessionId) {
-    return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sessionId + '"]');
+    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude:' + sessionId + '"]');
   }
 
   it('会话②（5 个 subagent）显示折叠行「子 agent 5」；subagents 为空的会话不渲染该行', async function () {
@@ -910,7 +920,7 @@ describe('createFleetView：失败卡片错误码', function () {
 
   /** @returns {HTMLElement|null} */
   function findCard(refs, sessionId) {
-    return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sessionId + '"]');
+    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude:' + sessionId + '"]');
   }
 
   function makeFailedSession(errOverrides) {
@@ -1081,7 +1091,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([makeJobSession()]);
     await advance(0);
 
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"]');
     expect(card, 'no-process 的后台会话必须画出来').not.toBe(null);
     expect(card.classList.contains('tone-active')).toBe(true); // job.state=working
   });
@@ -1112,7 +1122,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([makeJobSession()]);
     await advance(0);
 
-    var title = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"] .fw-fleet-title-line');
+    var title = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"] .fw-fleet-title-line');
     expect(title.textContent).toBe('占位：后台任务的原始 prompt');
     expect(title.textContent).not.toBe('（无标题）');
   });
@@ -1122,7 +1132,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([withTranscript]);
     await advance(0);
 
-    var title = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"] .fw-fleet-title-line');
+    var title = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"] .fw-fleet-title-line');
     expect(title.textContent).toBe('占位标题');
   });
 
@@ -1130,7 +1140,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([makeJobSession()]);
     await advance(0);
 
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"]');
     expect(card.querySelector('.fw-fleet-model').textContent).toBe('后台');
     // 没有进程 ≠ 0% 占用，这个区别正是 cpuPercent 用 Option 的原因
     expect(card.querySelector('.fw-fleet-meta').textContent).toContain('CPU —');
@@ -1140,7 +1150,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
   it('后台会话有 model 时不覆盖它', async function () {
     var refs = mount([makeJobSession({ transcript: makeSession({}).transcript })]);
     await advance(0);
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-id="sid-bg"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"]');
     expect(card.querySelector('.fw-fleet-model').textContent).toBe('claude-opus-5');
   });
 
@@ -1160,6 +1170,163 @@ describe('createFleetView：E1 后台会话卡片', function () {
  * 什么时候必须熄灭。归约本身（谁赢）由 fleet.test.js 的 reduceFleetTone
  * 用例负责，这里只验 tone → class 的映射和熄灭时机。
  * ============================================================ */
+describe('createFleetView：E4 Codex 会话', function () {
+  beforeEach(function () {
+    mountFleetDom();
+    vi.useFakeTimers();
+  });
+
+  /** 一个形态完整的 Codex 会话：没有进程、没有 subagent、没有 job。 */
+  function makeCodexSession(overrides) {
+    return makeSession(
+      Object.assign(
+        {
+          provider: 'codex',
+          sessionId: 'sid-cx',
+          name: 'demo-site',
+          pid: null,
+          liveness: 'no-process',
+          entrypoint: 'Codex Desktop / vscode',
+          cliVersion: '0.146.0-alpha.9.2',
+          proc: null,
+          subagents: [],
+          job: null,
+        },
+        overrides
+      )
+    );
+  }
+
+  function mount(sessions) {
+    var refs = fleetRefs();
+    var invoke = vi.fn().mockResolvedValue(makeReport({ sessions: sessions }));
+    refs.root.classList.add('is-active');
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    return refs;
+  }
+
+  it('Codex 卡片带 provider 徽章，Claude 卡片不带', async function () {
+    // 只给非 Claude 的会话打标：Claude 是这个面板的默认居民，给它也挂徽章
+    // 等于每张卡片都多一坨噪声。
+    var refs = mount([
+      makeSession({ sessionId: 'c1' }),
+      makeCodexSession({ sessionId: 'x1' }),
+    ]);
+    await advance(0);
+
+    var claudeBadge = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="claude:c1"] .fw-fleet-provider');
+    var codexBadge = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="codex:x1"] .fw-fleet-provider');
+
+    expect(codexBadge).not.toBe(null);
+    expect(codexBadge.textContent).toBe('Codex');
+    // 节点存在但内容为空（CSS :empty 负责收起），不是不建节点——
+    // 逐字段更新要求建和更新两条路径的节点结构一致。
+    expect(claudeBadge).not.toBe(null);
+    expect(claudeBadge.textContent).toBe('');
+    // CSS 靠 :empty 把它收起来，而 :empty 要求**没有子节点**——留一个空文本
+    // 节点就不成立，徽章会变成一个占着 gap 的空盒子。直接钉住这个前提，
+    // 免得哪天 setText 改成 appendChild(textNode) 时静默失效。
+    expect(claudeBadge.childNodes.length).toBe(0);
+  });
+
+  it('没有进程的 Codex 会话照常渲染，CPU 显示占位而不是 undefined', async function () {
+    var refs = mount([makeCodexSession({})]);
+    await advance(0);
+
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:sid-cx"]');
+    expect(card, 'liveness=no-process 的 Codex 会话必须画出来').not.toBe(null);
+    var meta = card.querySelector('.fw-fleet-meta').textContent;
+    expect(meta).toContain('CPU —');
+    expect(meta).not.toContain('undefined');
+    expect(meta).not.toContain('NaN');
+  });
+
+  it('meta 行显示上下文占用率；Claude 卡片维持 "N tokens"', async function () {
+    var refs = mount([
+      makeSession({
+        sessionId: 'c1',
+        transcript: Object.assign(makeSession({}).transcript, {
+          contextTokens: 78305,
+          contextWindow: null,
+        }),
+      }),
+      makeCodexSession({
+        sessionId: 'x1',
+        transcript: Object.assign(makeSession({}).transcript, {
+          contextTokens: 165900,
+          contextWindow: 258400,
+        }),
+      }),
+    ]);
+    await advance(0);
+
+    var claudeMeta = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="claude:c1"] .fw-fleet-meta').textContent;
+    var codexMeta = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="codex:x1"] .fw-fleet-meta').textContent;
+
+    expect(codexMeta).toContain('166k/258k (64%)');
+    // Claude 侧判不出窗口大小，不能凭空显示一个百分比。
+    // 只匹配 "(NN%)" 这个占用率专用的形式——meta 行里本来就有 "CPU 5%"，
+    // 拿裸 '%' 去断言会永远失败（第一版就是这么写的）。
+    expect(claudeMeta).toContain('78k tokens');
+    expect(claudeMeta).not.toMatch(/\(\d+%\)/);
+  });
+
+  it('两家 sessionId 相同也不会互相覆盖', async function () {
+    // 身份键带 provider 的意义。真撞上时的症状是两张卡片轮流覆盖对方的内容，
+    // 那种 bug 从界面上根本看不出是 id 冲突。
+    var refs = mount([
+      makeSession({ sessionId: 'same', name: 'claude-side' }),
+      makeCodexSession({ sessionId: 'same', name: 'codex-side' }),
+    ]);
+    await advance(0);
+
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(2);
+    var a = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:same"]');
+    var b = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:same"]');
+    expect(a).not.toBe(null);
+    expect(b).not.toBe(null);
+    expect(a).not.toBe(b);
+    expect(a.querySelector('.fw-fleet-name').textContent).toBe('claude-side');
+    expect(b.querySelector('.fw-fleet-name').textContent).toBe('codex-side');
+  });
+
+  it('Codex 会话跨轮询复用同一个节点（keyed 更新对它同样生效）', async function () {
+    var refs = fleetRefs();
+    var invoke = vi
+      .fn()
+      .mockResolvedValueOnce(makeReport({ sessions: [makeCodexSession({})] }))
+      .mockResolvedValue(
+        makeReport({ sessions: [makeCodexSession({ name: 'demo-site-renamed' })] })
+      );
+    refs.root.classList.add('is-active');
+    controller = createFleetView({
+      root: refs.root,
+      tabButton: refs.tabButton,
+      badge: refs.badge,
+      invoke: invoke,
+      getVisibility: function () { return true; },
+    });
+    await advance(0);
+    var before = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:sid-cx"]');
+
+    await advance(2000);
+    var after = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:sid-cx"]');
+
+    expect(after).toBe(before);
+    expect(after.querySelector('.fw-fleet-name').textContent).toBe('demo-site-renamed');
+  });
+});
+
 describe('createFleetView：E2 小球状态点', function () {
   beforeEach(function () {
     mountFleetDom();
@@ -1358,7 +1525,7 @@ describe('createFleetView：E3 打开工作目录', function () {
     var refs = mount([makeSession({ sessionId: 's1', cwd: 'D:/proj/alpha' })], { openPath: openPath });
     await advance(0);
 
-    var btn = refs.root.querySelector('.fw-fleet-card[data-session-id="s1"] .fw-fleet-open-cwd');
+    var btn = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:s1"] .fw-fleet-open-cwd');
     expect(btn).not.toBe(null);
     expect(btn.title).toContain('D:/proj/alpha');
 
@@ -1378,7 +1545,7 @@ describe('createFleetView：E3 打开工作目录', function () {
     );
     await advance(0);
 
-    refs.root.querySelector('.fw-fleet-card[data-session-id="s2"] .fw-fleet-open-cwd').click();
+    refs.root.querySelector('.fw-fleet-card[data-session-key="claude:s2"] .fw-fleet-open-cwd').click();
     expect(openPath).toHaveBeenCalledWith('D:/proj/beta');
   });
 
@@ -1547,7 +1714,7 @@ describe('createFleetView：E6 keyed 原地更新', function () {
   }
 
   function cardOf(refs, sid) {
-    return refs.root.querySelector('.fw-fleet-card[data-session-id="' + sid + '"]');
+    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude:' + sid + '"]');
   }
 
   /** 在指定卡片的标题上拖蓝头两个字，返回 Selection 供后续断言。 */
@@ -1642,9 +1809,9 @@ describe('createFleetView：E6 keyed 原地更新', function () {
 
     var ids = Array.prototype.map.call(
       refs.root.querySelectorAll('.fw-fleet-card'),
-      function (el) { return el.dataset.sessionId; }
+      function (el) { return el.dataset.sessionKey; }
     );
-    expect(ids).toEqual(['s2', 's3']);
+    expect(ids).toEqual(['claude:s2', 'claude:s3']);
     expect(cardOf(refs, 's1')).toBe(null);
     expect(cardOf(refs, 's2')).toBe(s2Before); // 幸存者仍是同一个节点
   });
@@ -1828,9 +1995,9 @@ describe('createFleetView：E6 keyed 原地更新', function () {
     // 顺序照常变（该换就换），只是选区那张没被拿去当代价
     var ids = Array.prototype.map.call(
       refs.root.querySelectorAll('.fw-fleet-card'),
-      function (el) { return el.dataset.sessionId; }
+      function (el) { return el.dataset.sessionKey; }
     );
-    expect(ids).toEqual(['B', 'A']);
+    expect(ids).toEqual(['claude:B', 'claude:A']);
     expect(sel.toString().length).toBe(2);
   });
 
@@ -2024,11 +2191,11 @@ describe('createFleetView：E6 fuzz', function () {
       var sel = null;
       var watchedId = null;
       var prevById = {};
-      cur.sessions.forEach(function (s) { prevById[s.sessionId] = JSON.stringify(s); });
+      cur.sessions.forEach(function (s) { prevById[keyOf(s)] = JSON.stringify(s); });
 
       if (cards.length > 0) {
         var c = cards[Math.floor(rnd() * cards.length)];
-        watchedId = c.dataset.sessionId;
+        watchedId = c.dataset.sessionKey;
         var tn = c.querySelector('.fw-fleet-title-line').firstChild;
         if (tn && tn.textContent.length >= 2) {
           var rg = document.createRange();
@@ -2045,16 +2212,16 @@ describe('createFleetView：E6 fuzz', function () {
 
       var expected = [];
       groupSessions(cur.sessions, cur.scannedAt).forEach(function (g) {
-        g.items.forEach(function (s) { expected.push(s.sessionId); });
+        g.items.forEach(function (s) { expected.push(keyOf(s)); });
       });
       var actual = Array.prototype.map.call(
         refs.root.querySelectorAll('.fw-fleet-card'),
-        function (e) { return e.dataset.sessionId; }
+        function (e) { return e.dataset.sessionKey; }
       );
       if (JSON.stringify(actual) !== JSON.stringify(expected)) orderFail += 1;
 
       if (sel && watchedId) {
-        var still = cur.sessions.filter(function (s) { return s.sessionId === watchedId; })[0];
+        var still = cur.sessions.filter(function (s) { return keyOf(s) === watchedId; })[0];
         if (still && JSON.stringify(still) === prevById[watchedId]) {
           selTotal += 1;
           if (sel.toString().length !== 2) selLost += 1;
