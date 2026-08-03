@@ -296,6 +296,22 @@ pub struct TranscriptDigest {
     pub ai_title: Option<String>,
     /// `type:"last-prompt"` 的 `lastPrompt`。截断到 TEXT_LIMIT。
     pub last_prompt: Option<String>,
+
+    /// 「这个会话现在在干什么」的一句人话。v4 新增，**目前只有 Antigravity 侧有**。
+    ///
+    /// 来源是 Antigravity 自己写给它的 UI 看的 `toolSummary` / `toolAction`
+    /// 字段（实测 `Find log date range`、`Read skill document`），
+    /// 不是我们从工具参数里编的。
+    ///
+    /// 为什么单开一个字段而不是塞进 `ai_title` 或 `last_prompt`：那两个有明确
+    /// 语义（会话标题 / 用户最后的提问），而这句话两者都不是。把它塞进去能少
+    /// 改一次契约，但那正是这个功能反复否决过的事——`defaultBranch` 冒充
+    /// `gitBranch` 也是同一类错误。
+    ///
+    /// 前端把它用在标题位的兜底上（`aiTitle` → `lastPrompt` → 这个 →
+    /// `job.intent` → `（无标题）`），理由与 `job.intent` 那条兜底完全一致：
+    /// 它回答的正是标题该回答的问题。
+    pub activity_summary: Option<String>,
     pub git_branch: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -551,6 +567,7 @@ mod tests {
                     mtime_ms: 1_785_416_160_000,
                     ai_title: Some("占位标题".into()),
                     last_prompt: Some("占位提问".into()),
+                    activity_summary: None,
                     git_branch: Some("main".into()),
                     model: Some("claude-opus-5".into()),
                     effort: Some("xhigh".into()),
