@@ -230,6 +230,16 @@ describe('手动检查的其它结果', function () {
     await flush();
     expect(document.getElementById('stUpdateBody').hidden).toBe(true);
   });
+
+  it('查到的 update 对象缺 version 时，视为没查到新版本（不留下裸的"v"按钮）', async function () {
+    await boot({ update: { version: '', body: '修了几个坑' } });
+    events.openSettingsPanel();
+    document.getElementById('stCheckUpdate').click();
+    await flush();
+    expect(document.getElementById('stInstallUpdate').hidden).toBe(true);
+    expect(document.getElementById('stUpdateNote').hidden).toBe(true);
+    expect(document.getElementById('btnEditorSettings').classList.contains('has-update')).toBe(false);
+  });
 });
 
 /* ---------------- 开关 ---------------- */

@@ -1368,7 +1368,11 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
    *   - 关于页显示版本号、更新说明，以及「下载并安装」按钮
    * 面板是懒建的，$stOverlay 还没建出来时只更新侧栏红点。 */
   function renderUpdateState() {
-    var has = !!pendingUpdate;
+    // pendingUpdate 存在但 version 缺失，说明 updater 返回了残缺数据（网络异常/
+    // latest.json 格式问题等）。此时不当作"查到新版本"，否则会显示裸的 v。
+    // pendingUpdate 存在但 version 缺失，说明 updater 返回了残缺数据（网络异常/
+    // latest.json 格式问题等）。此时不当作"查到新版本"，否则会显示裸的 v。
+    var has = !!(pendingUpdate && pendingUpdate.version);
     var $btnEditorSettings = document.getElementById('btnEditorSettings');
     if ($btnEditorSettings) $btnEditorSettings.classList.toggle('has-update', has);
     if (!$stOverlay) return;
@@ -1391,7 +1395,7 @@ import { openExportFlow, openImportFlow, openConfigFolder, getConfigFilePath } f
       if (installLabel) {
         installLabel.textContent = installingUpdate
           ? '正在下载…'
-          : '下载并安装 v' + (pendingUpdate ? pendingUpdate.version : '');
+          : '下载并安装 v' + (has ? pendingUpdate.version : '');
       }
     }
 
