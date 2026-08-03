@@ -13,7 +13,7 @@ Codex 会话也纳进同一个面板的方案。主方案见 [agent-fleet.md](./
 | 阶段 | 状态 |
 |---|---|
 | 调研（本机 56 个 rollout 实测） | ✅ 完成 |
-| E4a Rust 采集层 | 🔶 config + discover + rollout 完成（40 单测 + 真机验证）；index.rs 待做 |
+| E4a Rust 采集层 | ✅ 完成：config / discover / rollout / index，45 个单测 + 真机验证（9 个会话全部解析成功、标题全部匹配） |
 | E4b 契约升 3 + 前端接入 | ⬜ 未开始 |
 | E4c 上下文百分比 + 保留窗口调优 | ⬜ 未开始 |
 | E4d approval / error 精确状态 | ⬜ 阻塞：缺样本 |

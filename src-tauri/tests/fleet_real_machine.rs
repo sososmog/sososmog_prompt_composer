@@ -370,6 +370,11 @@ fn dump_codex_rollouts_on_this_machine() {
         }
     }
 
+    // ---- 会话标题索引 ----
+    let titles = codex::index::load_titles(&codex_dir);
+    println!("
+=== session_index.jsonl → {} 条标题 ===", titles.len());
+
     // ---- 逐个真实 rollout 跑一遍解析 ----
     //
     // 这一段才是这个测试的重点。单测吃的是手写夹具，只能证明"代码符合我对格式的
@@ -404,6 +409,10 @@ fn dump_codex_rollouts_on_this_machine() {
                         println!("    ⚠️ 文件名 id 与 session_meta.session_id 不一致：{inner}");
                     }
                 }
+                println!(
+                    "    标题: {}",
+                    titles.get(&e.session_id).map(String::as_str).unwrap_or("（索引里没有）")
+                );
                 match &parsed.digest {
                     None => println!("    （只有 session_meta，未开始）"),
                     Some(d) => {
