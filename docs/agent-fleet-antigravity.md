@@ -17,10 +17,17 @@ Agent tab 目前认两家：Claude Code（`~/.claude`，五层采集）和 Codex
 | 阶段 | 状态 |
 |---|---|
 | 调研（本机 18 个会话库实测，两个安装） | ✅ 完成 |
-| E9a Rust 采集层 | ⬜ 未开始 |
-| E9b 契约升 4 + 前端接入 | ⬜ 未开始 |
-| E9c 项目名与分支 | ⬜ 未开始 |
-| E9d 精确状态（working/needs-input 区分） | ⬜ **阻塞：缺样本，且是本方案唯一的真问题** |
+| E9a Rust 采集层 | ✅ 完成：config / discover / payload / trajectory，40 个单测 + 真机验证 18/18 |
+| E9b 契约升 4 + 前端接入 | ✅ 完成：provider / install / activitySummary、徽章查表、身份键带 install，前端 723 测试全绿 |
+| E9c 项目名与分支 | ✅ 完成，**且比计划的好**：拿到了真实当前分支，见 §9.1 |
+| E9d 精确状态（working/needs-input 区分） | ⬜ 阻塞：缺样本。**这仍是本方案唯一的真问题** |
+
+实现规模：Rust 新增 40 个单测（总 208 个）+ 1 个真机诊断；前端新增 7 条（总 723）；
+clippy 0 新增警告；lint 0/0；三个冒烟脚本全过。
+
+**真机验证结果**（`cargo test --test fleet_real_machine dump_antigravity -- --ignored`）：
+两个 install 共 18 个会话库**全部解析成功，`parseErrors` 全为 0，warnings 0 条**。
+项目名 / cwd / 分支 / 模型 / 活动摘要 / 工具名逐项肉眼核对无误。
 
 ---
 
@@ -41,6 +48,14 @@ Agent tab 目前认两家：Claude Code（`~/.claude`，五层采集）和 Codex
 所以第一版**只能把所有 Antigravity 会话显示成 `needs-input` 或 `idle`（靠 mtime）**，
 不显示 `working`。这是数据源的硬限制。详见 §2.2，那里也写了为什么"猜一个"比
 "不猜"糟。
+
+**实现后要改的三处结论**（原文保留在下面各节，修正记在 §9）：
+
+| 初稿说 | 实际 |
+|---|---|
+| `gitBranch` 只能填 `None` | **拿到了真实当前分支**，见 §9.1 |
+| 要写 `projects.rs` 读项目名 | **不需要**，folderUri 就在库里且覆盖更全，见 §9.2 |
+| 状态判据按 `step_type` 查表 | **改成内容判定**，那个编号不是工具身份，见 §9.3 |
 
 反过来白捡了三样：
 - **真实的项目名和 git 分支**（`config/projects/*.json` 直接给 `gitFolder.folderUri`
@@ -556,3 +571,99 @@ WAL 模式下等于自己实现 WAL 重放。用 `rusqlite` + `bundled`。
 
 ### 按进程名匹配拿 CPU
 同一个坑的第三次。Antigravity 是 Electron，"会话主进程"不存在。§2.1。
+
+---
+
+## 9. 实现过程中修正的结论
+
+方案是照调研写的，实现时又多看了几眼数据，有三处结论变了。原文各节没有回改
+（那样会看不出为什么变），修正集中记在这里。
+
+### 9.1 `gitBranch` 能填，而且是真的当前分支
+
+§2.7 说这个字段只能留空，理由是 `config/projects/*.json` 的 `defaultBranch`
+是仓库配置而不是 HEAD。**那个理由对，但结论错了**——分支根本不在那个文件里，
+而是在会话库自己的 `trajectory_metadata_blob` 里，紧跟在 git 仓库 URL 之后：
+
+```
+…sososmog/sososmog-component-page.git" feature/cyber-emerald-components
+                                      ↑ 0x22 = 下一个字符串字段的 tag
+```
+
+判它是真分支而不是默认分支的证据：同一个仓库的三个会话分别是 `main` /
+`codex/prototype` / `feature/cyber-emerald-components`。会变说明它跟着 HEAD。
+本机 9/18 个会话有（其余是没有 git 的 scratch 项目或 outside-of-project）。
+
+诚实的限制：它是**会话捕获 workspace 那一刻**的分支，会话开着期间用户切分支
+大概率不更新。Claude 侧的 `gitBranch` 也是从 transcript 里读的历史值，
+两边同样失真，不是这一侧特有的问题。
+
+于是 §2.7 末尾那个"留作 E9c 可选项、去读 `.git/HEAD`"的方案**作废**——
+不用在用户仓库里做额外 I/O 了。
+
+### 9.2 不需要 `projects.rs`
+
+§4 的文件清单里那一个模块**没有写**。workspace 的 folderUri 就在
+`trajectory_metadata_blob` 里（10/18），项目名取它最后一段即可。
+
+而 `config/projects/*.json` 反而**覆盖更差**：6 个 `antigravity-ide` 会话的
+项目 uuid 压根不在那个共享目录里（实测 `proj_hits=[]`）。§2.7 把它当成
+"两个 install 共享的项目定义"是对的，但它只登记了正式版建的项目。
+
+`config.rs` 里 `antigravity_projects_dir()` 仍然留着（有单测钉住它不在
+install 目录下面），因为 E9 之后要做标题一类的东西可能还会用到它。
+
+### 9.3 状态判据不按 `step_type` 查表
+
+§1.6 那张 step_type 表**不能当工具身份用**，§2.2 那个按 type 分类的判定表
+因此也不成立。两条实测理由：
+
+1. 编号不是工具身份。同一个 `type=15` 既出现在纯文本输出上（1007 步里的大
+   多数），也出现在带工具入参的步骤上。
+2. 那张表本身不全。全量扫下来是 17 种 type（5/7/8/9/14/15/17/21/23/31/33/
+   85/90/98/99/101/132），比 §1.6 列的多 6 种——而那 17 种也只覆盖我用过的功能。
+
+改成**内容判定**：这一步的 `metadata` 里有没有工具入参 JSON。没有 type 表要
+维护，上游加一个 type 也不会失效。
+
+§2.2 的核心结论**没变**：实测 18/18 个会话的尾部都不是工具调用，所以现实里
+几乎恒定落在 `needs-input`/`idle` 两态，而"拿 mtime 猜 working"依然是否决的。
+
+### 9.4 `payload` 必须读 `metadata` 列，不是 `step_payload`
+
+这一条方案里压根没提到，是实现时才发现的，而且是**最容易写错**的一处。
+
+`metadata` 的内容就是 `step_payload` 里那个 per-step 子消息（实测恒为它的
+子串，偏移 7），但 `step_payload` 还额外裹了**别的步骤的历史上下文**
+（见过 `Summary of the trajectory so far:` 后面整段引用早先的工具调用）。
+
+| 扫描范围 | 有 JSON 的步骤 | 其中带 toolSummary |
+|---|---|---|
+| `step_payload`（错） | 1846 / 2752 = 67.1% | 1843（多出来的都是别人的） |
+| `metadata`（对） | 922 / 2752 = 33.5% | **922 / 922 全部自洽** |
+
+覆盖率掉一半不是退步：掉掉的本来就是串台数据，而 `metadata` 这一列
+100% 自洽正是"范围对了"的证据。
+
+### 9.5 真机诊断必须能注入保留窗口
+
+E9a 的诊断测试第一次跑就炸了，而且**炸对了**：磁盘上 18 个库、解析出 0 条。
+原因是本机会话都是几天前的，默认 8 小时保留窗口全筛掉了。
+
+保留窗口本身是对的，是诊断需要"把磁盘上的全部读一遍"。所以 `scan` 之外另开
+了 `scan_with_retention`（同 Codex 侧把窗口作为参数传给 `discover` 的路子）。
+
+值得记一笔的是**如果没有那条硬断言**（"磁盘上有 N 个库却解析出 0 条就 fail"），
+这个测试会打印一片空结果然后绿着过去，而我会以为链路是通的。
+
+---
+
+## 10. 下一步
+
+E9d 仍然阻塞在样本上，解法只有一个：**在 Antigravity 里跑一个长任务，
+趁它正在跑把 `conversations/` 整个复制出来**。那一份快照同时能解开两件事：
+
+- 正在跑的会话尾部长什么样（§2.2 的 working 判据）
+- `has_subtrajectory=1` 的步骤旁边有没有子轨迹内容（§2.5 的 subagent 树）
+
+在那之前，面板上的 Antigravity 卡片不会显示"运行中"。这是已知的、有意的缺口。
