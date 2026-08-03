@@ -648,6 +648,34 @@ export function formatTokens(n) {
 }
 
 /**
+ * 上下文占用的显示文本。
+ *
+ * 两种形态，取决于**知不知道窗口有多大**：
+ * - 知道（Codex）：`166k/258k (64%)`
+ * - 不知道（Claude）：`166k tokens` —— 维持原样
+ *
+ * Claude 侧之所以给不出窗口，见 types.rs 里 `context_tokens` 的注释：
+ * jsonl 里 `message.model` 记的是 `claude-opus-5`，而用户实际可能设的是
+ * `opus[1m]`，从记录里区分不出 200k 还是 1M。显示错的百分比比不显示更糟。
+ *
+ * 百分比**不做 clamp**：真超过 100% 就如实显示。那是"上下文该压缩了"的信号，
+ * 抹平它等于把一个用户需要知道的事实藏起来。
+ *
+ * @param {number|null|undefined} tokens
+ * @param {number|null|undefined} window  模型上下文窗口，只有 Codex 有
+ * @returns {string}
+ */
+export function formatContext(tokens, window) {
+  // window 为 0 时同样落到这条分支——除零会算出 Infinity%，
+  // 而"窗口是 0"本身就是个无意义的值，当作不知道处理。
+  if (tokens == null || window == null || window <= 0) {
+    return formatTokens(tokens) + ' tokens';
+  }
+  const pct = Math.round((tokens / window) * 100);
+  return formatTokens(tokens) + '/' + formatTokens(window) + ' (' + pct + '%)';
+}
+
+/**
  * @param {number|null|undefined} pct   已归一化到 0–100
  * @returns {string}
  */

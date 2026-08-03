@@ -1249,6 +1249,38 @@ describe('createFleetView：E4 Codex 会话', function () {
     expect(meta).not.toContain('NaN');
   });
 
+  it('meta 行显示上下文占用率；Claude 卡片维持 "N tokens"', async function () {
+    var refs = mount([
+      makeSession({
+        sessionId: 'c1',
+        transcript: Object.assign(makeSession({}).transcript, {
+          contextTokens: 78305,
+          contextWindow: null,
+        }),
+      }),
+      makeCodexSession({
+        sessionId: 'x1',
+        transcript: Object.assign(makeSession({}).transcript, {
+          contextTokens: 165900,
+          contextWindow: 258400,
+        }),
+      }),
+    ]);
+    await advance(0);
+
+    var claudeMeta = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="claude:c1"] .fw-fleet-meta').textContent;
+    var codexMeta = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="codex:x1"] .fw-fleet-meta').textContent;
+
+    expect(codexMeta).toContain('166k/258k (64%)');
+    // Claude 侧判不出窗口大小，不能凭空显示一个百分比。
+    // 只匹配 "(NN%)" 这个占用率专用的形式——meta 行里本来就有 "CPU 5%"，
+    // 拿裸 '%' 去断言会永远失败（第一版就是这么写的）。
+    expect(claudeMeta).toContain('78k tokens');
+    expect(claudeMeta).not.toMatch(/\(\d+%\)/);
+  });
+
   it('两家 sessionId 相同也不会互相覆盖', async function () {
     // 身份键带 provider 的意义。真撞上时的症状是两张卡片轮流覆盖对方的内容，
     // 那种 bug 从界面上根本看不出是 id 冲突。

@@ -33,6 +33,7 @@ import {
   reduceFleetTone,
   formatAgo,
   formatTokens,
+  formatContext,
   formatCpu,
   validateReport,
   buildSubagentTree,
@@ -414,8 +415,9 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
 
     const ago = formatAgo(scannedAt - lastActivityMs(session));
     const cpu = formatCpu(session.proc ? session.proc.cpuPercent : null);
-    const tokens = formatTokens(t ? t.contextTokens : null);
-    let metaText = def.label + ' · ' + ago + ' · CPU ' + cpu + ' · ' + tokens + ' tokens';
+    // 有窗口大小时显示占用率（只有 Codex 给得出），否则维持"N tokens"。
+    const tokens = formatContext(t ? t.contextTokens : null, t ? t.contextWindow : null);
+    let metaText = def.label + ' · ' + ago + ' · CPU ' + cpu + ' · ' + tokens;
     // §3.5：主会话状态（def.label）保持它本来该是什么样——哪怕它是
     // "等你回话"、subagent 还在后台跑，也不塌缩成一个状态，只在这里
     // 追加一条独立事实。

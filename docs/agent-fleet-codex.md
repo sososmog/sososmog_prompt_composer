@@ -15,7 +15,7 @@ Codex 会话也纳进同一个面板的方案。主方案见 [agent-fleet.md](./
 | 调研（本机 56 个 rollout 实测） | ✅ 完成 |
 | E4a Rust 采集层 | ✅ 完成：config / discover / rollout / index，45 个单测 + 真机验证（9 个会话全部解析成功、标题全部匹配） |
 | E4b 契约升 3 + 前端接入 | ✅ 完成：provider 字段 / contextWindow / 徽章 / keyed 身份键，前端 709 测试全绿 |
-| E4c 上下文百分比显示 | ⬜ 未开始（数据已到前端，差渲染） |
+| E4c 上下文百分比显示 | ✅ 完成：formatContext，Codex 显示 166k/258k (64%)，Claude 维持 N tokens |
 | E4d approval / error 精确状态 | ⬜ 阻塞：缺样本 |
 
 ---
@@ -319,7 +319,7 @@ src-tauri/src/fleet/
 |---|---|---|
 | **E4a** | `config.rs` + `discover.rs` + `rollout.rs`，纯 Rust，单测吃真实 fixture | `cargo test`；解析出本机 56 个会话的正确 digest |
 | **E4b** | 契约升 3 + 编排层接入 + 前端徽章 | 面板同时出现 Claude 和 Codex 卡片，状态正确 |
-| **E4c** | 上下文百分比 + 保留窗口调优 | 归档会话（06-12 那 19 个）不进列表 |
+| **E4c** | 上下文百分比 | ✅ Codex 卡片显示 `166k/258k (64%)`，Claude 维持 `N tokens` |
 | **E4d** | approval / error 事件的精确状态 | 阻塞，需先抓到样本 |
 
 E4a 是大头，也是唯一有真实技术难度的一段。它不碰契约、不碰前端，可以独立验证。
