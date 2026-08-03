@@ -16,7 +16,7 @@
 | 阶段 1 轨 C（浮窗 UI） | ✅ 完成，含真浏览器冒烟 + 用户真机验收 |
 | 阶段 2 subagent 树 | ✅ 完成，含真机验证 |
 | 阶段 3 收尾 | ✅ 完成 |
-| 阶段 4 可选增强 | 🔶 E1/E2/E3/E5/E6 完成；E7/E8 待触发；E4（Codex）方案已定，见 [agent-fleet-codex.md](./agent-fleet-codex.md) |
+| 阶段 4 可选增强 | 🔶 E1/E2/E3/E5/E6 完成；E4（Codex）a/b/c 完成、d 缺样本阻塞，见 [agent-fleet-codex.md](./agent-fleet-codex.md)；E7/E8 待触发 |
 
 当前规模：Rust 102 个单测 + 5 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
 前端 705 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本（10 项）；
@@ -755,7 +755,7 @@ Rust 侧（A9–A10）与 UI 侧（C9–C10）可并行 ⇄，但都依赖阶段
 | E8 | subagent jsonl 按 mtime 缓存 | ⬜ 待触发 | 等"会话多 + 子 agent 多时轮询变迟钝"真的出现。缓存要有上限或按会话清理 |
 | E6 | keyed 原地更新替代全量重建 | ✅ 已做 | 按 `sessionId` 复用节点 + 加权 LIS 决定谁不动。**重点不是性能，是选区**——见下面那节，这一项踩的坑比预想多得多 |
 | E7 | `notify` 文件监听替代轮询 | ⬜ 待触发 | 只监听已知会话的 jsonl，即时性更好；仅当轮询显得迟钝时做。**改成推送后要保留一个低频兜底轮询**——轮询自带"漏了下次补上"的自愈，监听器静默失效时界面会永久停在旧数据上 |
-| E4 | Codex 支持 | 📋 方案已定，见 [agent-fleet-codex.md](./agent-fleet-codex.md) | 体量太大，独立成文。调研结论修正了这里原先的判断：**状态判据不用另写**——Codex 的 `task_started`/`task_complete` 配对可以在采集层翻译成现有 digest 形状，前端 `statusCodeFromDigest` 一行不改。「没有名册 → 拿不到 CPU」属实，走 E1 趟平的 `pid: Option` + `no-process` 降级；契约仍要加 `provider` 并升 SCHEMA 3 |
+| E4 | Codex 支持 | ✅ E4a/E4b/E4c 已做，见 [agent-fleet-codex.md](./agent-fleet-codex.md) | 体量太大，独立成文。调研结论修正了这里原先的判断：**状态判据不用另写**——Codex 的 `task_started`/`task_complete` 配对可以在采集层翻译成现有 digest 形状，前端 `statusCodeFromDigest` 一行不改。「没有名册 → 拿不到 CPU」属实，走 E1 趟平的 `pid: Option` + `no-process` 降级；契约仍要加 `provider` 并升 SCHEMA 3 |
 
 #### E6 的实现记录：这一项的难度全在"谁不动"
 
