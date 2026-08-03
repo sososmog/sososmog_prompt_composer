@@ -1,5 +1,7 @@
 # Composer · 模块化提示词构建工具
 
+[English](README.en.md) | 中文
+
 像搭积木一样组装 AI 提示词的桌面应用。支持 Windows、macOS、Linux。
 
 <!-- 如果有截图，取消注释下面这行：
