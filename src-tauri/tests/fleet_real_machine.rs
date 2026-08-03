@@ -30,7 +30,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use composer_lib::fleet::{codex, jobs, proc, roster, subagents, transcript, types};
+use composer_lib::fleet::{
+    antigravity, codex, jobs, proc, roster, subagents, transcript, types,
+};
 
 /// 把扁平的 subagent 列表按 parentAgentId 打印成树。
 ///
@@ -552,4 +554,142 @@ fn walk_has_rollout(dir: &std::path::Path) -> bool {
         }
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// E9：Antigravity（两个安装 channel）
+// ---------------------------------------------------------------------------
+
+/// 本机的 `~/.gemini` 根。同 `real_codex_dir` 的理由：这里刻意不走
+/// `config::resolve_antigravity`（那要 AppHandle），自己拼一遍。
+fn real_gemini_dir() -> Option<PathBuf> {
+    if let Ok(v) = std::env::var("GEMINI_HOME") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return Some(PathBuf::from(v));
+        }
+    }
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .map(|h| PathBuf::from(h).join(".gemini"))
+}
+
+/// 真机诊断：把两个 install 的会话库全部解析一遍并打印。
+///
+/// 这是 E9 唯一能验证「上游格式还是那个格式」的手段——单测吃的是合成 blob，
+/// 那些 blob 的排布是照实测造的，但保证不了 Antigravity 没改版。
+#[test]
+#[ignore]
+fn dump_antigravity_sessions_on_this_machine() {
+    let Some(root) = real_gemini_dir() else {
+        println!("拿不到 home 目录，跳过");
+        return;
+    };
+    let installs = composer_lib::fleet::config::antigravity_installs(&root);
+    let opts = types::FleetOptions::default();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    // 用一个极大的保留窗口：本机的会话库常常是几天前的，走默认的 8 小时窗口
+    // 会一条都读不出来，那样这个诊断就完全验不到解析层。保留窗口本身由
+    // discover 的单测覆盖，这里要的是"把磁盘上的全部读一遍"。
+    let (sessions, warnings) =
+        antigravity::scan_with_retention(&installs, &opts, now_ms, i64::MAX / 2);
+
+    println!("\n=== Antigravity：{} 条会话 ===", sessions.len());
+    for s in &sessions {
+        let t = s.transcript.as_ref();
+        println!(
+            "\n[{}] {} ({})",
+            s.install.as_deref().unwrap_or("?"),
+            s.name,
+            &s.session_id[..8]
+        );
+        println!("    cwd        : {}", if s.cwd.is_empty() { "（无）" } else { &s.cwd });
+        println!("    entrypoint : {}", s.entrypoint);
+        println!(
+            "    分支       : {}",
+            t.and_then(|d| d.git_branch.as_deref()).unwrap_or("（无）")
+        );
+        println!(
+            "    模型       : {}",
+            t.and_then(|d| d.model.as_deref()).unwrap_or("（无）")
+        );
+        println!(
+            "    活动摘要   : {}",
+            t.and_then(|d| d.activity_summary.as_deref()).unwrap_or("（无）")
+        );
+        println!(
+            "    工具       : {:?}",
+            t.map(|d| d.last_tool_names.clone()).unwrap_or_default()
+        );
+        println!(
+            "    尾部状态   : role={:?} stop={:?} kind={:?}",
+            t.and_then(|d| d.last_role),
+            t.and_then(|d| d.last_stop_reason.as_deref()),
+            t.and_then(|d| d.last_tail_kind),
+        );
+        println!(
+            "    parseErrors: {}",
+            t.map(|d| d.parse_errors).unwrap_or(0)
+        );
+    }
+
+    println!("\n=== warnings：{} 条 ===", warnings.len());
+    for w in &warnings {
+        println!("    {:?} {}", w.code, w.detail);
+    }
+
+    // 硬断言：只在磁盘上确实有会话库时才生效。
+    // 前提判定刻意不复用 discover 的逻辑——用被测代码证明被测代码的前提
+    // 是循环论证。
+    let on_disk: usize = installs
+        .iter()
+        .map(|(_, d)| count_db_files(&d.join("conversations")))
+        .sum();
+    println!("\n磁盘上的 .db 文件数：{on_disk}");
+    if on_disk == 0 {
+        println!("（没装 Antigravity 或没有会话，跳过硬断言）");
+        return;
+    }
+
+    assert!(
+        !sessions.is_empty(),
+        "磁盘上有 {on_disk} 个会话库，却一条都没解析出来——发现层或解析层在真机上失效了"
+    );
+    // 每条会话都该有个非空抬头，否则列表里会出现看不见的一行。
+    for s in &sessions {
+        assert!(!s.name.is_empty(), "会话 {} 的 name 是空串", s.session_id);
+    }
+    // parse_errors 全为 0 是格式没漂移的信号。
+    let total_parse_errors: u32 = sessions
+        .iter()
+        .filter_map(|s| s.transcript.as_ref())
+        .map(|d| d.parse_errors)
+        .sum();
+    assert_eq!(
+        total_parse_errors, 0,
+        "有 {total_parse_errors} 个 step 解析失败——上游格式可能漂移了"
+    );
+}
+
+/// 数一个目录下的 `.db` 文件。故意写得笨，不认 uuid 形状——
+/// 这样它与 `discover::parse_db_filename` 完全独立。
+fn count_db_files(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|x| x.to_str())
+                .map(|x| x == "db")
+                .unwrap_or(false)
+        })
+        .count()
 }

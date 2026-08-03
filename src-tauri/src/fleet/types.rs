@@ -10,7 +10,11 @@ use serde::{Deserialize, Serialize};
 /// - v3：接入 Codex 会话。`AgentSession` 加必填的 `provider`，
 ///   `TranscriptDigest` 加可选的 `contextWindow`。前者是新增字段而非可选，
 ///   因为「这张卡片是谁家的」不该有"不知道"这个状态。
-pub const SCHEMA_VERSION: u32 = 3;
+/// - v4：接入 Antigravity 会话。`Provider` 加 `Antigravity` 变体，
+///   `AgentSession` 加可选的 `install`（区分 `antigravity` / `antigravity-ide`
+///   两个安装 channel），`TranscriptDigest` 加可选的 `activitySummary`
+///   （Antigravity 自带的一句人话活动摘要，前端用在标题位兜底）。
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// 终态 job（`done`/`failed`/`stopped`）在列表里保留多久。
 ///
@@ -86,6 +90,11 @@ pub struct FleetOptions {
     /// 存在的意义和 `include_jobs` 一样：没装 Codex 的机器上这一路本来就静默
     /// 返回空，**不需要**靠这个开关去省成本；它是给"我只想看 Claude"的用户的。
     pub include_codex: Option<bool>,
+    /// 默认 `true`（v4 起）。关掉就不看 Antigravity 的会话。
+    ///
+    /// 同 `include_codex`：没装 Antigravity 的机器上这一路本来就静默返回空，
+    /// 这个开关是给"我只想看某几家"的用户的，不是用来省成本的。
+    pub include_antigravity: Option<bool>,
     /// 默认 `true`
     pub cpu: Option<bool>,
 }
@@ -104,6 +113,9 @@ impl FleetOptions {
     }
     pub fn include_codex(&self) -> bool {
         self.include_codex.unwrap_or(true)
+    }
+    pub fn include_antigravity(&self) -> bool {
+        self.include_antigravity.unwrap_or(true)
     }
     pub fn cpu(&self) -> bool {
         self.cpu.unwrap_or(true)
@@ -204,6 +216,11 @@ pub enum WarningCode {
 pub enum Provider {
     Claude,
     Codex,
+    /// v4 起。两个安装 channel（`antigravity` / `antigravity-ide`）**共用这一个
+    /// 变体**，具体是哪个看 [`AgentSession::install`]——它们是同一个产品的两条
+    /// 发布线，数据格式完全同构，做成两个变体会让所有按 provider 分支的地方
+    /// 都要写两遍。
+    Antigravity,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -211,6 +228,14 @@ pub enum Provider {
 pub struct AgentSession {
     /// v3 新增。前端据此显示徽章，并把它拼进 keyed 更新的身份键。
     pub provider: Provider,
+
+    /// 同一个 provider 下的安装 channel。v4 新增，**只有 Antigravity 侧有值**
+    /// （`antigravity` / `antigravity-ide`），其余 provider 恒 `None`。
+    ///
+    /// 为什么不复用 `entrypoint`：那个字段在 Claude 侧的语义是"怎么启动的"
+    /// （`claude-vscode` 一类），塞安装 channel 进去是语义污染；而且前端的
+    /// keyed 身份键需要它是个独立字段，混在一起就得靠字符串切分。
+    pub install: Option<String>,
 
     // ---- L1：名册 ----
     /// **`None` = 这个会话没有对应进程**，不是"没采到"。daemon 托管的后台
@@ -548,6 +573,7 @@ mod tests {
             )],
             sessions: vec![AgentSession {
                 provider: Provider::Claude,
+                install: None,
                 pid: Some(52052),
                 session_id: "11111111-2222-3333-4444-555555555555".into(),
                 name: "demo-proj-18".into(),

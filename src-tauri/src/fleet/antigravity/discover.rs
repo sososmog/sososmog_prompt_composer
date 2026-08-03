@@ -142,7 +142,8 @@ pub fn discover_install(
 
     // 新的在前，同 Codex 侧。前端自己还会按状态分组，但一个稳定且有意义的
     // 初始顺序能让"没有 transcript 的会话"不至于随机跳位置。
-    scan.entries.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
+    scan.entries
+        .sort_by_key(|e| std::cmp::Reverse(e.mtime_ms));
     scan
 }
 
