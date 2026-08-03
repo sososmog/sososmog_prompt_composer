@@ -370,6 +370,86 @@ fn dump_codex_rollouts_on_this_machine() {
         }
     }
 
+    // ---- 逐个真实 rollout 跑一遍解析 ----
+    //
+    // 这一段才是这个测试的重点。单测吃的是手写夹具，只能证明"代码符合我对格式的
+    // 理解"；只有真实文件能证明那个理解本身没错。
+    let scan = codex::discover::discover(&codex_dir, now_ms, 90i64 * 24 * 3600 * 1000);
+    println!("
+=== 逐个解析（{} 个）===", scan.entries.len());
+    let mut ok = 0usize;
+    let mut with_digest = 0usize;
+    let mut meta_fail = 0usize;
+    for e in &scan.entries {
+        match codex::rollout::read_rollout(e, types::DEFAULT_TAIL_BYTES) {
+            Ok(parsed) => {
+                ok += 1;
+                let m = &parsed.meta;
+                println!(
+                    "
+  {} 
+    cwd={} 
+    入口={} / {} 版本={} 分支={:?}",
+                    e.session_id,
+                    m.cwd,
+                    m.originator,
+                    m.source.as_deref().unwrap_or("-"),
+                    m.cli_version,
+                    m.git_branch
+                );
+                // 文件名里的 id 与 session_meta 里的 id 是否一致——不一致说明
+                // 我们对命名规则的理解有问题。
+                if let Some(inner) = &m.session_id {
+                    if inner != &e.session_id {
+                        println!("    ⚠️ 文件名 id 与 session_meta.session_id 不一致：{inner}");
+                    }
+                }
+                match &parsed.digest {
+                    None => println!("    （只有 session_meta，未开始）"),
+                    Some(d) => {
+                        with_digest += 1;
+                        let pct = match (d.context_tokens, parsed.context_window) {
+                            (Some(t), Some(w)) if w > 0 => {
+                                format!("{:.1}%", t as f64 * 100.0 / w as f64)
+                            }
+                            _ => "—".to_string(),
+                        };
+                        println!(
+                            "    状态: role={:?} stop={:?} kind={:?} tools={:?}",
+                            d.last_role, d.last_stop_reason, d.last_tail_kind, d.last_tool_names
+                        );
+                        println!(
+                            "    模型={:?} 档位={:?} | context {:?}/{:?} = {pct} | 坏行 {}",
+                            d.model, d.effort, d.context_tokens, parsed.context_window, d.parse_errors
+                        );
+                        if let Some(p) = &d.last_prompt {
+                            let one_line: String =
+                                p.chars().filter(|c| !c.is_control()).take(60).collect();
+                            println!("    最后提问: {one_line}");
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                meta_fail += 1;
+                println!("
+  {} → 解析失败 {:?}", e.session_id, err);
+            }
+        }
+    }
+    println!(
+        "
+---- 汇总：{} 个成功 / {} 个有 digest / {} 个失败",
+        ok, with_digest, meta_fail
+    );
+
+    // 解析失败是硬错误：这些文件是 discover 认过的真 rollout，
+    // 读不出 session_meta 说明首行格式与我们的理解不符。
+    assert_eq!(
+        meta_fail, 0,
+        "有 {meta_fail} 个 rollout 读不出 session_meta——首行格式可能变了"
+    );
+
     // 唯一的硬断言，而且只在"目录里确实有 rollout 文件"时才成立：
     // 磁盘上有文件却一条都发现不了，说明文件名规则或目录布局变了——
     // 那正是这个测试存在的意义（单测吃自造夹具，发现不了上游漂移）。

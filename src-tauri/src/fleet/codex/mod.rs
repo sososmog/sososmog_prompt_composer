@@ -16,3 +16,4 @@
 //! 被否决的理由记在方案文档 §8。
 
 pub mod discover;
+pub mod rollout;
