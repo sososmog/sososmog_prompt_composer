@@ -344,7 +344,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
   let errorBannerEl = null;
   let contentEl = null;
   let warningsOpen = false; // 警告折叠区展开状态，重渲染后要保持（同 openQuickGroupId 的做法）
-  let openSubagentSessionId = null; // 当前展开子 agent 树的会话 id，同一时刻只有一个（同 openQuickGroupId 范式）
+  let openSubagentSessionId = null; // 当前展开子 agent 树的会话（存 sessionKey，含 provider），同一时刻只有一个（同 openQuickGroupId 范式）
   let lastReport = null; // 最近一次成功渲染的报告，供子 agent 折叠区点击后立即重渲染用
 
   function ensureSkeleton() {
@@ -445,6 +445,10 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       glyphClass: 'fw-fleet-glyph' + (def.animated ? ' is-animated' : ''),
       glyph: def.glyph,
       name: session.name,
+      // 只给非 Claude 的会话打标。Claude 是这个面板的默认居民，给它也挂一个
+      // 徽章等于每张卡片都多一坨噪声，而"没有徽章"本身就是可读的信息。
+      // 空字符串时 setText 写入空文本，CSS 的 :empty 让它不占位。
+      provider: session.provider === 'codex' ? 'Codex' : '',
       // 后台会话常常没有 transcript，也就没有 model 可显示。那个位置改标"后台"
       // 比留空有用：这类会话的 CPU 是 "—"、没有进程，看到标记才知道那是它本来
       // 的样子，而不是采集失败了。
@@ -514,13 +518,26 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     return el;
   }
 
+  /**
+   * 卡片在 keyed 更新里的身份。
+   *
+   * 带上 provider 而不是只用 sessionId：两家的 id 都是 uuid、撞车概率可以忽略，
+   * 但这是零成本的保险——真撞上了，症状是两个不同会话的卡片轮流覆盖对方的
+   * 内容，那种 bug 从界面上根本看不出是 id 冲突。
+   *
+   * @param {import('./fleet.js').AgentSession} session
+   */
+  function sessionKey(session) {
+    return session.provider + ':' + session.sessionId;
+  }
+
   /** @param {import('./fleet.js').AgentSession} session @param {object} def @param {number} scannedAt */
   function buildCard(session, def, scannedAt) {
     const f = cardFields(session, def, scannedAt);
 
     const card = document.createElement('div');
     card.className = f.cardClass;
-    card.dataset.sessionId = session.sessionId;
+    card.dataset.sessionKey = sessionKey(session);
 
     const head = document.createElement('div');
     head.className = 'fw-fleet-card-head';
@@ -535,6 +552,11 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     name.textContent = f.name;
     name.title = f.name;
     head.appendChild(name);
+
+    const provider = document.createElement('span');
+    provider.className = 'fw-fleet-provider';
+    provider.textContent = f.provider;
+    head.appendChild(provider);
 
     const model = document.createElement('span');
     model.className = 'fw-fleet-model';
@@ -574,6 +596,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     card._fleetRefs = {
       glyph: glyph,
       name: name,
+      provider: provider,
       model: model,
       titleLine: titleLine,
       branchLine: branchLine,
@@ -606,6 +629,10 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     setText(r.glyph, f.glyph);
     setText(r.name, f.name);
     setTitle(r.name, f.name);
+    // provider 实际上不会变（一个会话不会从 Codex 变成 Claude），但仍然逐字段
+    // 同步：cardFields 是唯一事实源，这里漏一个字段就等于给未来埋一个"某种
+    // 情况下建和更新显示不一致"的坑。setText 只在真变了时才写，代价为零。
+    setText(r.provider, f.provider);
     setText(r.model, f.model);
     setText(r.titleLine, f.title);
     setTitle(r.titleLine, f.title);
@@ -687,7 +714,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     const subagents = session.subagents;
     if (!subagents || subagents.length === 0) return null;
 
-    const isOpen = openSubagentSessionId === session.sessionId;
+    const isOpen = openSubagentSessionId === sessionKey(session);
     const wrap = document.createElement('div');
     wrap.className = 'fw-fleet-sub';
 
@@ -711,7 +738,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       // 同一时刻只展开一个：点开自己就置为自己，点开的是自己就收起。
       // 直接置换 id 就自动实现了"展开 B 时 A 跟着收起"——不需要另外
       // 遍历"关掉其它展开项"，因为渲染时每张卡片都只认这一个 id。
-      openSubagentSessionId = isOpen ? null : session.sessionId;
+      openSubagentSessionId = isOpen ? null : sessionKey(session);
       // 用 renderContent 而不是 applyReport：这是用户主动点出来的重渲染，
       // 不该被 C4 附的焦点守卫拦下（那条守卫防的是轮询自动重建打断
       // 正在输入，不是这种一次性点击操作）。
@@ -814,7 +841,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     if (
       openSubagentSessionId &&
       !report.sessions.some(function (s) {
-        return s.sessionId === openSubagentSessionId;
+        return sessionKey(s) === openSubagentSessionId;
       })
     ) {
       openSubagentSessionId = null;
@@ -854,7 +881,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
     /** @type {Map<string, HTMLElement>} */
     const existing = new Map();
     for (const el of list.querySelectorAll('.fw-fleet-card')) {
-      existing.set(el.dataset.sessionId, el);
+      existing.set(el.dataset.sessionKey, el);
     }
 
     // ---- 第一趟：把这一轮该有的节点按目标顺序攒出来（先不动 DOM）----
@@ -889,7 +916,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       groupIndex += 1;
 
       for (const session of group.items) {
-        const old = existing.get(session.sessionId);
+        const old = existing.get(sessionKey(session));
         const card = old
           ? updateCard(old, session, def, report.scannedAt)
           : buildCard(session, def, report.scannedAt);

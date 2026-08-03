@@ -514,7 +514,10 @@ describe('groupSessions', () => {
     expect(byKey['needs-input'].items).toHaveLength(2); // sid-needs-input + sid-job(blocked)
     expect(byKey['needs-input'].label).toBe(STATUS_DEFS['needs-input'].label);
     // sid-working + sid-no-cpu + sid-job-headless（无进程的后台会话，job.state=working）
-    expect(byKey.working.items).toHaveLength(3);
+    // + sid-codex-working（v3：Codex 会话，采集层把 task_started 未配对翻译成
+    //   assistant + tool_use，于是走的是与 Claude 完全相同的判定路径——
+    //   这一条同时验证了"前端不需要为 provider 分支"这个设计前提）
+    expect(byKey.working.items).toHaveLength(4);
     expect(byKey.working.label).toBe(STATUS_DEFS.working.label);
     expect(byKey.failed.items).toHaveLength(1);
     expect(byKey.fresh.items).toHaveLength(1);

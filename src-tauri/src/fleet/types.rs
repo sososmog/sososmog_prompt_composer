@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 /// - v2：接入 L4 后台会话。`AgentSession.pid` 由 `u32` 改成 `Option<u32>`、
 ///   `Liveness` 增加 `NoProcess`——daemon 托管的 `/loop`、`--bg` 会话根本
 ///   没有对应进程，硬塞一个假 pid 会让存活校验和 CPU 采样一起说谎。
-pub const SCHEMA_VERSION: u32 = 2;
+/// - v3：接入 Codex 会话。`AgentSession` 加必填的 `provider`，
+///   `TranscriptDigest` 加可选的 `contextWindow`。前者是新增字段而非可选，
+///   因为「这张卡片是谁家的」不该有"不知道"这个状态。
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// 终态 job（`done`/`failed`/`stopped`）在列表里保留多久。
 ///
@@ -68,6 +71,11 @@ pub struct FleetOptions {
     pub include_subagents: Option<bool>,
     /// 默认 `true`（v2 起）。关掉就看不到 `/loop` 和 `--bg` 起的后台会话。
     pub include_jobs: Option<bool>,
+    /// 默认 `true`（v3 起）。关掉就只看 Claude Code 的会话。
+    ///
+    /// 存在的意义和 `include_jobs` 一样：没装 Codex 的机器上这一路本来就静默
+    /// 返回空，**不需要**靠这个开关去省成本；它是给"我只想看 Claude"的用户的。
+    pub include_codex: Option<bool>,
     /// 默认 `true`
     pub cpu: Option<bool>,
 }
@@ -83,6 +91,9 @@ impl FleetOptions {
     }
     pub fn include_jobs(&self) -> bool {
         self.include_jobs.unwrap_or(true)
+    }
+    pub fn include_codex(&self) -> bool {
+        self.include_codex.unwrap_or(true)
     }
     pub fn cpu(&self) -> bool {
         self.cpu.unwrap_or(true)
@@ -167,9 +178,23 @@ pub enum WarningCode {
 /// L1 字段来自 `sessions/<pid>.json`，必有；其余各层可能为 null，
 /// 且 **null 不等于错误**——最典型的是 `transcript: null` 表示"已启动但一句话
 /// 没说"，这是实测存在的真实状态（本机 5 个会话里有 2 个是这样）。
+/// 这个会话是哪个 CLI 的。v3 起。
+///
+/// 不做成 `Option`：每张卡片必然属于某一家，"不知道是谁的"不是一个有意义的
+/// 状态。真有第三家进来时该加枚举变体，而不是靠 null 表示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Claude,
+    Codex,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSession {
+    /// v3 新增。前端据此显示徽章，并把它拼进 keyed 更新的身份键。
+    pub provider: Provider,
+
     // ---- L1：名册 ----
     /// **`None` = 这个会话没有对应进程**，不是"没采到"。daemon 托管的后台
     /// 会话（`/loop`、`--bg`）就是这样：作业还在，执行它的进程可能压根不
@@ -293,6 +318,14 @@ pub struct TranscriptDigest {
     /// `opus[1m]`，**从 jsonl 里区分不出 200k 还是 1M 窗口**，显示错的百分比比不
     /// 显示更糟。
     pub context_tokens: Option<u64>,
+
+    /// 模型上下文窗口大小。**只有 Codex 侧有**（`task_started` 和 `token_count`
+    /// 都明确写了这个数字），Claude 侧恒为 `None`。
+    ///
+    /// 有了它前端才能显示真实的占用百分比。Claude 侧之所以给不出，见上面
+    /// `context_tokens` 的注释：从 jsonl 里区分不出 200k 还是 1M 窗口，
+    /// 显示错的百分比比不显示更糟。
+    pub context_window: Option<u64>,
 
     /// 尾部解析失败的行数。>0 说明格式可能漂移了，是我们唯一的诊断信号。
     pub parse_errors: u32,
@@ -481,6 +514,7 @@ mod tests {
                 "pid 62222 的启动时间与名册记录不符",
             )],
             sessions: vec![AgentSession {
+                provider: Provider::Claude,
                 pid: Some(52052),
                 session_id: "11111111-2222-3333-4444-555555555555".into(),
                 name: "demo-proj-18".into(),
@@ -512,6 +546,7 @@ mod tests {
                     api_error_status: None,
                     api_error_code: None,
                     context_tokens: Some(68_000),
+                    context_window: None,
                     parse_errors: 0,
                 }),
                 subagents: vec![SubagentDigest {

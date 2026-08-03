@@ -19,6 +19,11 @@
 //! | L4 后台会话 | [`jobs`] | `$CONFIG/jobs/<id>/state.json` |
 //! | L5 进程指标 | [`proc`] | sysinfo，只刷 L1 拿到的 pid |
 //!
+//! v3 起还有一条**平级**的采集链：[`codex`] 扫 `~/.codex/sessions/`，自己走完
+//! 发现→解析→组装，产出同样形状的 [`types::AgentSession`]（`provider: codex`）。
+//! 它与上面五层没有任何耦合——Codex 没有名册、没有进程、没有 subagent，
+//! 那几层对它根本不适用。合流点在 [`list_agent_sessions`]。
+//!
 //! 本文件是**编排层**：把上面几层拼成一份 [`types::FleetReport`]。各层自己不知道
 //! 彼此的存在，拼装规则集中在这里，好让"哪个失败该降级成什么"只有一处定义。
 
@@ -184,6 +189,7 @@ fn build_job_session(
     };
 
     AgentSession {
+        provider: types::Provider::Claude,
         pid: None,
         // 没有 sessionId 时退回 jobId：这个字段是前端的去重键（渲染时
         // data-session-id、展开子 agent 时的身份），不能是空串。
@@ -207,8 +213,13 @@ fn build_job_session(
     }
 }
 
-/// 一次完整扫描。所有阻塞 I/O 都在这个函数里，由调用方放进 `spawn_blocking`。
-fn scan_blocking(
+/// 一次完整扫描（Claude 侧）。所有阻塞 I/O 都在这个函数里，由调用方放进
+/// `spawn_blocking`。
+///
+/// `pub` 是为了 `tests/fleet_real_machine.rs` 能验"两条采集链合流"——那个场景
+/// 没法走 `list_agent_sessions`（要 AppHandle）。这个 crate 只被自家 Tauri 二
+/// 进制消费，没有外部 API 负担。
+pub fn scan_blocking(
     state: &FleetState,
     config_dir: &Path,
     opts: &FleetOptions,
@@ -307,6 +318,7 @@ fn scan_blocking(
         let job = job_by_session.remove(&entry.session_id);
 
         sessions.push(AgentSession {
+            provider: types::Provider::Claude,
             pid: Some(entry.pid),
             session_id: entry.session_id,
             name: entry.name,
@@ -355,6 +367,16 @@ pub async fn list_agent_sessions(
     // 配置目录解析只是读环境变量 + 拼路径，不值得进 spawn_blocking。
     let resolved = config::resolve(&app);
 
+    // Codex 目录：**不存在就静默跳过，不报 warning**——没装 Codex 的机器上
+    // 这是正常状态，为它刷一条告警只会淹没真正要紧的信息。
+    // 与 Claude 侧的 NoConfigDir 待遇不同是刻意的：那边目录缺失意味着功能主体
+    // 失效，这边只是少一类会话。
+    let codex_dir = if opts.include_codex() {
+        config::resolve_codex(&app).filter(|d| d.is_dir())
+    } else {
+        None
+    };
+
     let (config_dir_display, dir_for_scan, mut warnings) = match resolved {
         Some(dir) if dir.is_dir() => (dir.to_string_lossy().into_owned(), Some(dir), Vec::new()),
         Some(dir) => {
@@ -378,14 +400,30 @@ pub async fn list_agent_sessions(
         ),
     };
 
+    // Claude 目录缺失时**不能**直接返回：一台只装了 Codex 的机器照样该看到自己的
+    // 会话。所以两条链各自判断能不能跑，任一条有结果就照常出报告。
     let mut sessions = Vec::new();
-    if let Some(dir) = dir_for_scan {
+    if dir_for_scan.is_some() || codex_dir.is_some() {
         // Arc clone 进 spawn_blocking —— `State<'_, _>` 是借用的，不能直接 move，
         // 所以托管的是 Arc<FleetState> 而不是 FleetState。
         let st = state.inner().clone();
-        let joined = tauri::async_runtime::spawn_blocking(move || scan_blocking(&st, &dir, &opts))
-            .await
-            .map_err(|e| format!("采集线程异常退出：{e}"))?;
+        let joined = tauri::async_runtime::spawn_blocking(move || {
+            let mut sessions = Vec::new();
+            let mut warnings = Vec::new();
+            if let Some(dir) = dir_for_scan {
+                let (s, w) = scan_blocking(&st, &dir, &opts);
+                sessions.extend(s);
+                warnings.extend(w);
+            }
+            if let Some(dir) = codex_dir {
+                let (s, w) = codex::scan(&dir, &opts, scanned_at);
+                sessions.extend(s);
+                warnings.extend(w);
+            }
+            (sessions, warnings)
+        })
+        .await
+        .map_err(|e| format!("采集线程异常退出：{e}"))?;
         sessions = joined.0;
         warnings.extend(joined.1);
     }

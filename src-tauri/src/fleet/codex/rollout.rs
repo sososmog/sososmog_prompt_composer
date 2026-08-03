@@ -71,11 +71,9 @@ pub struct RolloutParsed {
     /// `None` = 尾部窗口里没有任何可用内容（刚建的会话只有 `session_meta` 一行）。
     /// 这**不是错误**，对应前端的「已启动 · 未开始」，同 Claude 侧的语义。
     pub digest: Option<TranscriptDigest>,
-    /// 模型上下文窗口。Codex 在 `token_count` 和 `task_started` 里都明确给了这个
-    /// 数字，Claude 侧则根本判不出来（见 `TranscriptDigest::context_tokens` 注释）。
-    ///
-    /// 暂时放在 digest 外面：把它塞进 `TranscriptDigest` 属于改契约，那要连
-    /// `SCHEMA_VERSION` 和前端一起动，是 E4b 的事。
+    /// 模型上下文窗口。v3 起它同时也写进了 `digest.context_window`（那才是发给
+    /// 前端的那份）；这里保留一份是为了"只有 session_meta、没有 digest"的会话
+    /// 也能把它带出去，以及给真机诊断脚本一个不用解包 Option 的入口。
     pub context_window: Option<u64>,
 }
 
@@ -474,6 +472,7 @@ pub fn read_rollout(entry: &RolloutEntry, tail_bytes: u64) -> Result<RolloutPars
         api_error_status: None,
         api_error_code: None,
         context_tokens: extracted.context_tokens,
+        context_window: extracted.context_window,
         parse_errors: extracted.parse_errors,
     };
 

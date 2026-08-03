@@ -14,8 +14,8 @@ Codex 会话也纳进同一个面板的方案。主方案见 [agent-fleet.md](./
 |---|---|
 | 调研（本机 56 个 rollout 实测） | ✅ 完成 |
 | E4a Rust 采集层 | ✅ 完成：config / discover / rollout / index，45 个单测 + 真机验证（9 个会话全部解析成功、标题全部匹配） |
-| E4b 契约升 3 + 前端接入 | ⬜ 未开始 |
-| E4c 上下文百分比 + 保留窗口调优 | ⬜ 未开始 |
+| E4b 契约升 3 + 前端接入 | ✅ 完成：provider 字段 / contextWindow / 徽章 / keyed 身份键，前端 709 测试全绿 |
+| E4c 上下文百分比显示 | ⬜ 未开始（数据已到前端，差渲染） |
 | E4d approval / error 精确状态 | ⬜ 阻塞：缺样本 |
 
 ---
@@ -233,7 +233,7 @@ pub context_window: Option<u64>,
 | `provider` | 常量 `codex` | 新增字段 |
 | `pid` | — | 恒 `None` |
 | `sessionId` | 文件名的 uuid | 与 `session_meta.session_id` 一致 |
-| `name` | `session_index.jsonl` 的 `thread_name` → 首条 `user_message` 截断 → cwd basename | 三级退路 |
+| `name` | **cwd 的最后一段** → 退到 sessionId 前 8 位 | 见下方修正 |
 | `cwd` | `session_meta.cwd` | |
 | `entrypoint` | `originator` + `source`（如 `Codex Desktop / vscode`） | |
 | `kind` | 常量 `interactive` | 暂无后台概念 |
@@ -244,7 +244,7 @@ pub context_window: Option<u64>,
 | `subagents` | — | 恒 `[]` |
 | `job` | — | 恒 `None` |
 | **`transcript.*`** | | |
-| `aiTitle` | `session_index.jsonl` 的 `thread_name` | |
+| `aiTitle` | `session_index.jsonl` 的 `thread_name` | 查不到很正常，那个索引不全 |
 | `lastPrompt` | 最后一条 `user_message.message` | |
 | `gitBranch` | `session_meta.git.branch` | 直接有，不用像 Claude 侧那样推 |
 | `model` / `effort` | **最后一条** `turn_context` | 见 §1.3 坑 2 |
@@ -256,6 +256,21 @@ pub context_window: Option<u64>,
 | `contextWindow` | `model_context_window` | 新字段 |
 | `hasApiError` | 未验证 | 保守恒 `false`，见 §7 |
 | `parseErrors` | 解析失败行数 | 同 Claude 侧，格式漂移的唯一诊断信号 |
+
+### 3.1 `name` 的映射改了（初稿把两个字段搞反了）
+
+初稿写的是 `name` 取 `thread_name`（会话标题）。**那是错的**：Claude 侧
+`name` 来自名册，语义是「这个会话在哪儿干活」（如 `demo-proj-18`），
+而会话标题是另一个字段 `aiTitle`，两者在卡片上各占一行。
+
+所以实现里改成：`name` = cwd 的最后一段，`aiTitle` = `thread_name`。
+这样两侧卡片的同一行显示的是同一类东西。
+
+**已知的可用性折衷**：同一个目录开多个 Codex 会话时，几张卡片的抬头会完全一样
+（真机实测有 4 张都是 `sososmog-personal-website`）。没有加短 id 后缀去区分，
+理由是标题行本来就不同（"Find project improvements" / "评估 Taste 和 Inpeccable
+skills" / "Review project and await tasks"），而 380px 宽的面板里抬头越短越好。
+Claude 侧靠名册自带的 `-b7` 后缀天然避开了这个问题，Codex 没有对应物可用。
 
 ---
 

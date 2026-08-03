@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "scannedAt": 1785416160000,
   "configDir": "C:Usersdemo.claude",
   "sessions": [
     {
+      "provider": "claude",
       "pid": 42772,
       "sessionId": "sid-needs-input",
       "name": "demo-web-5b",
@@ -35,12 +36,14 @@
         "apiErrorStatus": null,
         "apiErrorCode": null,
         "contextTokens": 41000,
+        "contextWindow": null,
         "parseErrors": 0
       },
       "subagents": [],
       "job": null
     },
     {
+      "provider": "claude",
       "pid": 52052,
       "sessionId": "sid-working",
       "name": "demo-composer-18",
@@ -74,6 +77,7 @@
         "apiErrorStatus": null,
         "apiErrorCode": null,
         "contextTokens": 70424,
+        "contextWindow": null,
         "parseErrors": 0
       },
       "subagents": [
@@ -151,6 +155,7 @@
       "job": null
     },
     {
+      "provider": "claude",
       "pid": 63340,
       "sessionId": "sid-idle",
       "name": "demo-web-c5",
@@ -182,12 +187,14 @@
         "apiErrorStatus": null,
         "apiErrorCode": null,
         "contextTokens": 70424,
+        "contextWindow": null,
         "parseErrors": 0
       },
       "subagents": [],
       "job": null
     },
     {
+      "provider": "claude",
       "pid": 5468,
       "sessionId": "sid-fresh",
       "name": "demo-web-44",
@@ -207,6 +214,7 @@
       "job": null
     },
     {
+      "provider": "claude",
       "pid": 61111,
       "sessionId": "sid-failed",
       "name": "demo-api-fail",
@@ -238,12 +246,14 @@
         "apiErrorStatus": "403",
         "apiErrorCode": "oauth_org_not_allowed",
         "contextTokens": 0,
+        "contextWindow": null,
         "parseErrors": 0
       },
       "subagents": [],
       "job": null
     },
     {
+      "provider": "claude",
       "pid": 62222,
       "sessionId": "sid-no-cpu",
       "name": "demo-no-cpu",
@@ -277,12 +287,14 @@
         "apiErrorStatus": null,
         "apiErrorCode": null,
         "contextTokens": 70424,
+        "contextWindow": null,
         "parseErrors": 0
       },
       "subagents": [],
       "job": null
     },
     {
+      "provider": "claude",
       "pid": 63333,
       "sessionId": "sid-job",
       "name": "demo-bg-job",
@@ -314,6 +326,7 @@
         "apiErrorStatus": null,
         "apiErrorCode": null,
         "contextTokens": 70424,
+        "contextWindow": null,
         "parseErrors": 0
       },
       "subagents": [],
@@ -332,6 +345,7 @@
       }
     },
     {
+      "provider": "claude",
       "pid": null,
       "sessionId": "sid-job-headless",
       "name": "demo-bg-headless",
@@ -359,6 +373,7 @@
       }
     },
     {
+      "provider": "claude",
       "pid": 64444,
       "sessionId": "sid-unknown",
       "name": "demo-unparsable",
@@ -390,7 +405,45 @@
         "apiErrorStatus": null,
         "apiErrorCode": null,
         "contextTokens": null,
+        "contextWindow": null,
         "parseErrors": 12
+      },
+      "subagents": [],
+      "job": null
+    },
+    {
+      "provider": "codex",
+      "pid": null,
+      "sessionId": "sid-codex-working",
+      "name": "demo-site",
+      "cwd": "C:/work/demo-site",
+      "entrypoint": "Codex Desktop / vscode",
+      "kind": "interactive",
+      "startedAt": 1785414000000,
+      "cliVersion": "0.146.0-alpha.9.2",
+      "liveness": "no-process",
+      "proc": null,
+      "transcript": {
+        "sizeBytes": 3735956,
+        "mtimeMs": 1785416070000,
+        "aiTitle": "占位：Codex 会话标题",
+        "lastPrompt": "占位：帮我看下这个项目",
+        "gitBranch": "main",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "lastRole": "assistant",
+        "lastStopReason": "tool_use",
+        "lastTailKind": "tool_use",
+        "lastToolNames": [
+          "exec"
+        ],
+        "lastMsgTsMs": 1785416069000,
+        "hasApiError": false,
+        "apiErrorStatus": null,
+        "apiErrorCode": null,
+        "contextTokens": 165900,
+        "contextWindow": 258400,
+        "parseErrors": 0
       },
       "subagents": [],
       "job": null

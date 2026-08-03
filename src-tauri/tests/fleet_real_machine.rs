@@ -297,6 +297,65 @@ fn dump_what_the_collector_sees_on_this_machine() {
     );
 }
 
+/// E4b 合流验证：两条采集链拼出来的会话能不能出现在同一份列表里。
+///
+/// 前面两个测试各自只验一侧。这个验的是编排层：provider 字段有没有填对、
+/// 会不会有一侧把另一侧挤掉。**不经过 Tauri 命令**（那要 AppHandle），
+/// 直接调两条链再合并，与 `list_agent_sessions` 里的拼装逻辑等价。
+#[test]
+#[ignore]
+fn dump_both_providers_merged() {
+    let opts = types::FleetOptions::default();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let mut all: Vec<types::AgentSession> = Vec::new();
+
+    if let Some(dir) = real_config_dir().filter(|d| d.is_dir()) {
+        let state = composer_lib::fleet::FleetState::new();
+        let (s, _) = composer_lib::fleet::scan_blocking(&state, &dir, &opts);
+        all.extend(s);
+    }
+    if let Some(dir) = real_codex_dir().filter(|d| d.is_dir()) {
+        let (s, _) = codex::scan(&dir, &opts, now_ms);
+        all.extend(s);
+    }
+
+    let claude = all.iter().filter(|s| s.provider == types::Provider::Claude).count();
+    let cx = all.iter().filter(|s| s.provider == types::Provider::Codex).count();
+    println!("
+=== 合流：{} 条（claude {claude} / codex {cx}）===", all.len());
+    for s in &all {
+        println!(
+            "  [{:?}] {:<28} pid={:?} liveness={:?} 窗口={:?}",
+            s.provider,
+            s.name,
+            s.pid,
+            s.liveness,
+            s.transcript.as_ref().and_then(|t| t.context_window)
+        );
+    }
+
+    // 每一侧的不变量。Codex 侧那几条恒等式是数据源决定的，
+    // 哪天变了说明有人给它硬塞了假数据。
+    for s in all.iter().filter(|s| s.provider == types::Provider::Codex) {
+        assert!(s.pid.is_none(), "Codex 会话不该有 pid");
+        assert!(s.proc.is_none(), "Codex 会话不该有进程指标");
+        assert_eq!(s.liveness, types::Liveness::NoProcess);
+        assert!(s.subagents.is_empty());
+        assert!(s.job.is_none());
+        assert!(!s.cwd.is_empty(), "cwd 必须读出来，否则卡片没有展示价值");
+    }
+    for s in all.iter().filter(|s| s.provider == types::Provider::Claude) {
+        assert!(
+            s.transcript.as_ref().and_then(|t| t.context_window).is_none(),
+            "Claude 侧给不出窗口大小，必须是 None"
+        );
+    }
+}
+
 /// 与 `fleet::config::resolve_codex` 同规则的无 Tauri 版本，理由同
 /// [`real_config_dir`]。
 fn real_codex_dir() -> Option<PathBuf> {

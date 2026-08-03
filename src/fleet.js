@@ -29,15 +29,20 @@
 
 /**
  * @typedef {Object} FleetWarning
- * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'} code
+ * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'|'codex-rollout-unreadable'|'codex-rollout-unparsable'} code
  * @property {string} detail
  */
 
 /**
  * @typedef {Object} AgentSession
+ * @property {'claude'|'codex'} provider  这张卡片是谁家的（v3 起）。不是可选——
+ *                                每个会话必然属于某一家，"不知道"不是有效状态。
+ *                                Codex 会话恒为 pid:null / liveness:'no-process' /
+ *                                proc:null / subagents:[] / job:null，那不是缺陷，
+ *                                是数据源就没有这些东西
  * @property {number|null} pid    null = 这个会话没有对应进程（daemon 托管的后台
- *                                会话），不是"没采到"。前端不读它，留在这里是为了
- *                                让契约完整
+ *                                会话，或任何 Codex 会话），不是"没采到"。
+ *                                前端不读它，留在这里是为了让契约完整
  * @property {string} sessionId
  * @property {string} name
  * @property {string} cwd
@@ -83,6 +88,10 @@
  * @property {string|null} apiErrorStatus    源数据里是数字且可能缺失，采集侧已归一化成字符串
  * @property {string|null} apiErrorCode      如 oauth_org_not_allowed / invalid_request
  * @property {number|null} contextTokens     官方口径：input + cache_creation + cache_read
+ * @property {number|null} contextWindow     模型上下文窗口（v3 起）。**只有 Codex 有**，
+ *                                           Claude 侧恒为 null——jsonl 区分不出 200k
+ *                                           还是 1M 窗口，显示错的百分比比不显示更糟。
+ *                                           有值时才算占用率
  * @property {number} parseErrors            >0 = 格式可能漂移了
  */
 
@@ -136,8 +145,13 @@
  * 常量
  * ============================================================ */
 
-/** 必须与 src-tauri/src/fleet/types.rs 的 SCHEMA_VERSION 一致。 */
-export const SCHEMA_VERSION = 2;
+/**
+ * 必须与 src-tauri/src/fleet/types.rs 的 SCHEMA_VERSION 一致。
+ * fleet.test.js 有一条测试直接读那个文件比对，改漏一边会立刻变红。
+ *
+ * v3：接入 Codex，`AgentSession.provider` 与 `TranscriptDigest.contextWindow`。
+ */
+export const SCHEMA_VERSION = 3;
 
 /**
  * 多久没有写入算"空闲"。
