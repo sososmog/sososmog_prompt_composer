@@ -51,9 +51,15 @@ function cloneFixture() {
   return JSON.parse(JSON.stringify(fleetReportFixture));
 }
 
-/** 与 fleetView.js 内部的 sessionKey 同口径。卡片的 dataset 存的是这个。 */
+/**
+ * 与 fleetView.js 内部的 sessionKey 同口径。卡片的 dataset 存的是这个。
+ *
+ * v4 起多了 install 段（Antigravity 的两个安装 channel）。这里是刻意重写一遍
+ * 而不是 import 那个函数——它是模块内私有的，而且这份"另写一遍"本身就是对
+ * 键格式的独立钉子：真改了格式，这里和实现必须一起动。
+ */
 function keyOf(session) {
-  return session.provider + ':' + session.sessionId;
+  return session.provider + ':' + (session.install || '') + ':' + session.sessionId;
 }
 
 function makeSession(overrides) {
@@ -645,7 +651,11 @@ describe('createFleetView：C9/C10 子 agent 折叠区与树形渲染', function
 
   /** @returns {HTMLElement|null} */
   function findCard(refs, sessionId) {
-    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude:' + sessionId + '"]');
+    // 走 keyOf 而不是自己拼 'claude:' + id：键格式 v4 加了 install 段，
+    // 手拼的选择器会静默匹配不到（症状是 findCard 返回 null，报错指向
+    // 完全无关的 querySelector 行）。
+    var key = keyOf({ provider: 'claude', install: null, sessionId: sessionId });
+    return refs.root.querySelector('.fw-fleet-card[data-session-key="' + key + '"]');
   }
 
   it('会话②（5 个 subagent）显示折叠行「子 agent 5」；subagents 为空的会话不渲染该行', async function () {
@@ -920,7 +930,11 @@ describe('createFleetView：失败卡片错误码', function () {
 
   /** @returns {HTMLElement|null} */
   function findCard(refs, sessionId) {
-    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude:' + sessionId + '"]');
+    // 走 keyOf 而不是自己拼 'claude:' + id：键格式 v4 加了 install 段，
+    // 手拼的选择器会静默匹配不到（症状是 findCard 返回 null，报错指向
+    // 完全无关的 querySelector 行）。
+    var key = keyOf({ provider: 'claude', install: null, sessionId: sessionId });
+    return refs.root.querySelector('.fw-fleet-card[data-session-key="' + key + '"]');
   }
 
   function makeFailedSession(errOverrides) {
@@ -1091,7 +1105,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([makeJobSession()]);
     await advance(0);
 
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::sid-bg"]');
     expect(card, 'no-process 的后台会话必须画出来').not.toBe(null);
     expect(card.classList.contains('tone-active')).toBe(true); // job.state=working
   });
@@ -1122,7 +1136,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([makeJobSession()]);
     await advance(0);
 
-    var title = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"] .fw-fleet-title-line');
+    var title = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::sid-bg"] .fw-fleet-title-line');
     expect(title.textContent).toBe('占位：后台任务的原始 prompt');
     expect(title.textContent).not.toBe('（无标题）');
   });
@@ -1132,7 +1146,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([withTranscript]);
     await advance(0);
 
-    var title = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"] .fw-fleet-title-line');
+    var title = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::sid-bg"] .fw-fleet-title-line');
     expect(title.textContent).toBe('占位标题');
   });
 
@@ -1140,7 +1154,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
     var refs = mount([makeJobSession()]);
     await advance(0);
 
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::sid-bg"]');
     expect(card.querySelector('.fw-fleet-model').textContent).toBe('后台');
     // 没有进程 ≠ 0% 占用，这个区别正是 cpuPercent 用 Option 的原因
     expect(card.querySelector('.fw-fleet-meta').textContent).toContain('CPU —');
@@ -1150,7 +1164,7 @@ describe('createFleetView：E1 后台会话卡片', function () {
   it('后台会话有 model 时不覆盖它', async function () {
     var refs = mount([makeJobSession({ transcript: makeSession({}).transcript })]);
     await advance(0);
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:sid-bg"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::sid-bg"]');
     expect(card.querySelector('.fw-fleet-model').textContent).toBe('claude-opus-5');
   });
 
@@ -1170,7 +1184,10 @@ describe('createFleetView：E1 后台会话卡片', function () {
  * 什么时候必须熄灭。归约本身（谁赢）由 fleet.test.js 的 reduceFleetTone
  * 用例负责，这里只验 tone → class 的映射和熄灭时机。
  * ============================================================ */
-describe('createFleetView：E4 Codex 会话', function () {
+// 两家共用一个 describe：它们在前端是同一类居民——都没有进程、都靠 provider
+// 徽章区分、都走同一套 keyed 身份键。分成两个 describe 就得把 mount / makeReport
+// 那套脚手架抄一遍，而真正该并排钉住的恰恰是"多一家之后徽章和身份键还对不对"。
+describe('createFleetView：E4 Codex 会话 / E9 Antigravity 会话', function () {
   beforeEach(function () {
     mountFleetDom();
     vi.useFakeTimers();
@@ -1188,6 +1205,31 @@ describe('createFleetView：E4 Codex 会话', function () {
           liveness: 'no-process',
           entrypoint: 'Codex Desktop / vscode',
           cliVersion: '0.146.0-alpha.9.2',
+          proc: null,
+          subagents: [],
+          job: null,
+        },
+        overrides
+      )
+    );
+  }
+
+  /**
+   * Antigravity 会话（E9）。与 Codex 同样是"没有进程"的一侧，额外多一个
+   * install 字段区分两个安装 channel。
+   */
+  function makeAgySession(overrides) {
+    return makeSession(
+      Object.assign(
+        {
+          provider: 'antigravity',
+          install: 'antigravity',
+          sessionId: 'sid-agy',
+          name: 'my-proj',
+          pid: null,
+          liveness: 'no-process',
+          entrypoint: 'Antigravity',
+          cliVersion: '',
           proc: null,
           subagents: [],
           job: null,
@@ -1221,9 +1263,9 @@ describe('createFleetView：E4 Codex 会话', function () {
     await advance(0);
 
     var claudeBadge = refs.root
-      .querySelector('.fw-fleet-card[data-session-key="claude:c1"] .fw-fleet-provider');
+      .querySelector('.fw-fleet-card[data-session-key="claude::c1"] .fw-fleet-provider');
     var codexBadge = refs.root
-      .querySelector('.fw-fleet-card[data-session-key="codex:x1"] .fw-fleet-provider');
+      .querySelector('.fw-fleet-card[data-session-key="codex::x1"] .fw-fleet-provider');
 
     expect(codexBadge).not.toBe(null);
     expect(codexBadge.textContent).toBe('Codex');
@@ -1241,7 +1283,7 @@ describe('createFleetView：E4 Codex 会话', function () {
     var refs = mount([makeCodexSession({})]);
     await advance(0);
 
-    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:sid-cx"]');
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="codex::sid-cx"]');
     expect(card, 'liveness=no-process 的 Codex 会话必须画出来').not.toBe(null);
     var meta = card.querySelector('.fw-fleet-meta').textContent;
     expect(meta).toContain('CPU —');
@@ -1269,9 +1311,9 @@ describe('createFleetView：E4 Codex 会话', function () {
     await advance(0);
 
     var claudeMeta = refs.root
-      .querySelector('.fw-fleet-card[data-session-key="claude:c1"] .fw-fleet-meta').textContent;
+      .querySelector('.fw-fleet-card[data-session-key="claude::c1"] .fw-fleet-meta').textContent;
     var codexMeta = refs.root
-      .querySelector('.fw-fleet-card[data-session-key="codex:x1"] .fw-fleet-meta').textContent;
+      .querySelector('.fw-fleet-card[data-session-key="codex::x1"] .fw-fleet-meta').textContent;
 
     expect(codexMeta).toContain('166k/258k (64%)');
     // Claude 侧判不出窗口大小，不能凭空显示一个百分比。
@@ -1291,13 +1333,154 @@ describe('createFleetView：E4 Codex 会话', function () {
     await advance(0);
 
     expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(2);
-    var a = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:same"]');
-    var b = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:same"]');
+    var a = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::same"]');
+    var b = refs.root.querySelector('.fw-fleet-card[data-session-key="codex::same"]');
     expect(a).not.toBe(null);
     expect(b).not.toBe(null);
     expect(a).not.toBe(b);
     expect(a.querySelector('.fw-fleet-name').textContent).toBe('claude-side');
     expect(b.querySelector('.fw-fleet-name').textContent).toBe('codex-side');
+  });
+
+  it('Antigravity 两个安装 channel 的徽章文案不同', async function () {
+    // 用户同时开着正式版和 IDE 版时，两张卡片长得一样会让人不知道该切到哪个
+    // 窗口去。徽章是唯一的区分线索。
+    var refs = mount([
+      makeAgySession({ sessionId: 'a1', install: 'antigravity' }),
+      makeAgySession({ sessionId: 'a2', install: 'antigravity-ide' }),
+    ]);
+    await advance(0);
+
+    var main = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity:a1"] .fw-fleet-provider');
+    var ide = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity-ide:a2"] .fw-fleet-provider');
+
+    expect(main).not.toBe(null);
+    expect(main.textContent).toBe('Antigravity');
+    expect(ide).not.toBe(null);
+    expect(ide.textContent).toBe('Antigravity IDE');
+  });
+
+  it('install 缺失或陌生取值时退到不带后缀的 Antigravity，不显示 undefined', async function () {
+    // 契约说 install 只有这一侧有值，但前端不该因为它是 null 就画出
+    // "Antigravity undefined"。
+    var refs = mount([
+      makeAgySession({ sessionId: 'a1', install: null }),
+      makeAgySession({ sessionId: 'a2', install: 'antigravity-canary' }),
+    ]);
+    await advance(0);
+
+    var badges = Array.prototype.map.call(
+      refs.root.querySelectorAll('.fw-fleet-provider'),
+      function (el) { return el.textContent; }
+    );
+    expect(badges).toEqual(['Antigravity', 'Antigravity']);
+    badges.forEach(function (b) {
+      expect(b).not.toContain('undefined');
+      expect(b).not.toContain('null');
+    });
+  });
+
+  it('同一个 cascadeId 出现在两个 channel 时不互相覆盖', async function () {
+    // 身份键带 install 的意义。实测本机 18 个会话跨 channel 不重叠，
+    // 但撞上时的症状是两张卡片轮流覆盖对方的内容——从界面上看不出是 id 冲突。
+    var refs = mount([
+      makeAgySession({ sessionId: 'same', install: 'antigravity', name: 'main-side' }),
+      makeAgySession({ sessionId: 'same', install: 'antigravity-ide', name: 'ide-side' }),
+    ]);
+    await advance(0);
+
+    expect(refs.root.querySelectorAll('.fw-fleet-card').length).toBe(2);
+    var a = refs.root.querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity:same"]');
+    var b = refs.root.querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity-ide:same"]');
+    expect(a).not.toBe(null);
+    expect(b).not.toBe(null);
+    expect(a).not.toBe(b);
+    expect(a.querySelector('.fw-fleet-name').textContent).toBe('main-side');
+    expect(b.querySelector('.fw-fleet-name').textContent).toBe('ide-side');
+  });
+
+  it('没有标题也没有提问时，标题位用 activitySummary 兜底', async function () {
+    // Antigravity 侧既没有会话标题也拿不到用户提问。没有这条兜底，卡片标题
+    // 会是"（无标题）"——而我们手里明明有一句它自己写的人话摘要。
+    var refs = mount([
+      makeAgySession({
+        sessionId: 'a1',
+        transcript: Object.assign({}, makeSession({}).transcript, {
+          aiTitle: null,
+          lastPrompt: null,
+          activitySummary: 'Creating walkthrough.md artifact',
+        }),
+      }),
+    ]);
+    await advance(0);
+
+    var title = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity:a1"] .fw-fleet-title-line');
+    expect(title.textContent).toBe('Creating walkthrough.md artifact');
+  });
+
+  it('aiTitle 存在时不被 activitySummary 顶掉', async function () {
+    var refs = mount([
+      makeAgySession({
+        sessionId: 'a1',
+        transcript: Object.assign({}, makeSession({}).transcript, {
+          aiTitle: '真标题',
+          activitySummary: 'Running command',
+        }),
+      }),
+    ]);
+    await advance(0);
+
+    var title = refs.root
+      .querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity:a1"] .fw-fleet-title-line');
+    expect(title.textContent).toBe('真标题');
+  });
+
+  it('Antigravity 会话没有进程也照常渲染，CPU 显示占位', async function () {
+    var refs = mount([makeAgySession({})]);
+    await advance(0);
+
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity:sid-agy"]');
+    expect(card, 'liveness=no-process 的 Antigravity 会话必须画出来').not.toBe(null);
+    var meta = card.querySelector('.fw-fleet-meta').textContent;
+    expect(meta).toContain('CPU —');
+    expect(meta).not.toContain('undefined');
+    expect(meta).not.toContain('NaN');
+  });
+
+  it('契约里 Antigravity 恒缺的那几样一起缺时，卡片没有空的分隔符', async function () {
+    // 这一侧 None 特别多：没有 cliVersion、没有 token、没有分支、没有标题。
+    // 现有渲染没被这么空的数据考验过——孤零零的 "·" 是最容易漏的症状。
+    var refs = mount([
+      makeAgySession({
+        sessionId: 'a1',
+        cwd: '',
+        transcript: Object.assign({}, makeSession({}).transcript, {
+          aiTitle: null,
+          lastPrompt: null,
+          activitySummary: null,
+          gitBranch: null,
+          model: null,
+          effort: null,
+          contextTokens: null,
+          contextWindow: null,
+          lastToolNames: [],
+        }),
+      }),
+    ]);
+    await advance(0);
+
+    var card = refs.root.querySelector('.fw-fleet-card[data-session-key="antigravity:antigravity:a1"]');
+    expect(card).not.toBe(null);
+    var meta = card.querySelector('.fw-fleet-meta').textContent;
+    expect(meta).not.toContain('undefined');
+    expect(meta).not.toContain('NaN');
+    expect(meta).not.toMatch(/·\s*·/);
+    expect(meta.trim()).not.toMatch(/·$/);
+    // 分支行整行不该出现（syncOptionalLine 的职责）
+    expect(card.querySelector('.fw-fleet-branch')).toBe(null);
   });
 
   it('Codex 会话跨轮询复用同一个节点（keyed 更新对它同样生效）', async function () {
@@ -1317,10 +1500,10 @@ describe('createFleetView：E4 Codex 会话', function () {
       getVisibility: function () { return true; },
     });
     await advance(0);
-    var before = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:sid-cx"]');
+    var before = refs.root.querySelector('.fw-fleet-card[data-session-key="codex::sid-cx"]');
 
     await advance(2000);
-    var after = refs.root.querySelector('.fw-fleet-card[data-session-key="codex:sid-cx"]');
+    var after = refs.root.querySelector('.fw-fleet-card[data-session-key="codex::sid-cx"]');
 
     expect(after).toBe(before);
     expect(after.querySelector('.fw-fleet-name').textContent).toBe('demo-site-renamed');
@@ -1525,7 +1708,7 @@ describe('createFleetView：E3 打开工作目录', function () {
     var refs = mount([makeSession({ sessionId: 's1', cwd: 'D:/proj/alpha' })], { openPath: openPath });
     await advance(0);
 
-    var btn = refs.root.querySelector('.fw-fleet-card[data-session-key="claude:s1"] .fw-fleet-open-cwd');
+    var btn = refs.root.querySelector('.fw-fleet-card[data-session-key="claude::s1"] .fw-fleet-open-cwd');
     expect(btn).not.toBe(null);
     expect(btn.title).toContain('D:/proj/alpha');
 
@@ -1545,7 +1728,7 @@ describe('createFleetView：E3 打开工作目录', function () {
     );
     await advance(0);
 
-    refs.root.querySelector('.fw-fleet-card[data-session-key="claude:s2"] .fw-fleet-open-cwd').click();
+    refs.root.querySelector('.fw-fleet-card[data-session-key="claude::s2"] .fw-fleet-open-cwd').click();
     expect(openPath).toHaveBeenCalledWith('D:/proj/beta');
   });
 
@@ -1714,7 +1897,7 @@ describe('createFleetView：E6 keyed 原地更新', function () {
   }
 
   function cardOf(refs, sid) {
-    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude:' + sid + '"]');
+    return refs.root.querySelector('.fw-fleet-card[data-session-key="claude::' + sid + '"]');
   }
 
   /** 在指定卡片的标题上拖蓝头两个字，返回 Selection 供后续断言。 */
@@ -1811,7 +1994,7 @@ describe('createFleetView：E6 keyed 原地更新', function () {
       refs.root.querySelectorAll('.fw-fleet-card'),
       function (el) { return el.dataset.sessionKey; }
     );
-    expect(ids).toEqual(['claude:s2', 'claude:s3']);
+    expect(ids).toEqual([keyOf({ provider: 'claude', install: null, sessionId: 's2' }), keyOf({ provider: 'claude', install: null, sessionId: 's3' })]);
     expect(cardOf(refs, 's1')).toBe(null);
     expect(cardOf(refs, 's2')).toBe(s2Before); // 幸存者仍是同一个节点
   });
@@ -1997,7 +2180,7 @@ describe('createFleetView：E6 keyed 原地更新', function () {
       refs.root.querySelectorAll('.fw-fleet-card'),
       function (el) { return el.dataset.sessionKey; }
     );
-    expect(ids).toEqual(['claude:B', 'claude:A']);
+    expect(ids).toEqual([keyOf({ provider: 'claude', install: null, sessionId: 'B' }), keyOf({ provider: 'claude', install: null, sessionId: 'A' })]);
     expect(sel.toString().length).toBe(2);
   });
 
