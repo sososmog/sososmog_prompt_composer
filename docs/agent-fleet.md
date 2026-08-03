@@ -1,6 +1,6 @@
 # Agent Fleet Monitor 实现方案
 
-浮窗新增一个 tab，展示本机在跑的 AI coding agent：横向是多个 Claude Code 会话，纵向是每个会话内部的 subagent 树。
+浮窗新增一个 tab，展示本机在跑的 AI coding agent：横向是多个会话（Claude Code / Codex / Antigravity 三家），纵向是每个会话内部的 subagent 树。
 
 - 分支：`feat/agent-fleet-monitor`
 - 定位：**观察者**（observe, never control）。只读展示，不 spawn、不终止、不拦权限。
@@ -16,10 +16,10 @@
 | 阶段 1 轨 C（浮窗 UI） | ✅ 完成，含真浏览器冒烟 + 用户真机验收 |
 | 阶段 2 subagent 树 | ✅ 完成，含真机验证 |
 | 阶段 3 收尾 | ✅ 完成 |
-| 阶段 4 可选增强 | 🔶 E1/E2/E3/E5/E6 完成；E4（Codex）a/b/c 完成、d 缺样本阻塞，见 [agent-fleet-codex.md](./agent-fleet-codex.md)；E7/E8 待触发 |
+| 阶段 4 可选增强 | 🔶 E1/E2/E3/E5/E6 完成；E4（Codex）a/b/c 完成、d 缺样本阻塞，见 [agent-fleet-codex.md](./agent-fleet-codex.md)；E9（Antigravity）a/b/c 完成、d 缺样本阻塞，见 [agent-fleet-antigravity.md](./agent-fleet-antigravity.md)；E7/E8 待触发 |
 
-当前规模：Rust 102 个单测 + 5 个 sysinfo 探针 + 1 个默认跳过的真机诊断测试；
-前端 705 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本（10 项）；
+当前规模：Rust 208 个单测 + 5 个 sysinfo 探针 + 4 个默认跳过的真机诊断测试；
+前端 723 个测试 + 3 个真浏览器冒烟脚本 + 1 个对比度校验脚本（10 项）；
 clippy 0 新增警告；lint 0/0。
 
 **D4 全量回归全绿**：前端 654 单测 / lint 0-0 / 对比度 4 项达标 / 主冒烟 30 项 /

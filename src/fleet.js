@@ -29,17 +29,21 @@
 
 /**
  * @typedef {Object} FleetWarning
- * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'|'codex-rollout-unreadable'|'codex-rollout-unparsable'} code
+ * @property {'no-config-dir'|'roster-unreadable'|'roster-entry-invalid'|'transcript-unreadable'|'transcript-unparsable'|'subagents-unreadable'|'pid-reused'|'jobs-unreadable'|'job-entry-invalid'|'codex-rollout-unreadable'|'codex-rollout-unparsable'|'antigravity-db-unreadable'|'antigravity-db-unparsable'} code
  * @property {string} detail
  */
 
 /**
  * @typedef {Object} AgentSession
- * @property {'claude'|'codex'} provider  这张卡片是谁家的（v3 起）。不是可选——
- *                                每个会话必然属于某一家，"不知道"不是有效状态。
- *                                Codex 会话恒为 pid:null / liveness:'no-process' /
- *                                proc:null / subagents:[] / job:null，那不是缺陷，
- *                                是数据源就没有这些东西
+ * @property {'claude'|'codex'|'antigravity'} provider  这张卡片是谁家的（v3 起）。
+ *                                不是可选——每个会话必然属于某一家，"不知道"不是
+ *                                有效状态。Codex 与 Antigravity 会话恒为 pid:null /
+ *                                liveness:'no-process' / proc:null / subagents:[] /
+ *                                job:null，那不是缺陷，是数据源就没有这些东西
+ * @property {string|null} install  同一 provider 下的安装 channel（v4 起）。
+ *                                只有 Antigravity 有值（'antigravity' |
+ *                                'antigravity-ide'），其余恒 null。
+ *                                **要拼进 keyed 更新的身份键**，见 sessionKey()
  * @property {number|null} pid    null = 这个会话没有对应进程（daemon 托管的后台
  *                                会话，或任何 Codex 会话），不是"没采到"。
  *                                前端不读它，留在这里是为了让契约完整
@@ -72,6 +76,10 @@
  * @property {number} mtimeMs                最可靠的"最后活动时间"
  * @property {string|null} aiTitle
  * @property {string|null} lastPrompt
+ * @property {string|null} activitySummary  「现在在干什么」的一句人话（v4 起）。
+ *                                目前只有 Antigravity 侧有——那是它自己写给它的
+ *                                UI 看的 toolSummary，不是我们编的。用在标题位的
+ *                                兜底上，见 cardTitle()
  * @property {string|null} gitBranch
  * @property {string|null} model
  * @property {string|null} effort
@@ -150,8 +158,10 @@
  * fleet.test.js 有一条测试直接读那个文件比对，改漏一边会立刻变红。
  *
  * v3：接入 Codex，`AgentSession.provider` 与 `TranscriptDigest.contextWindow`。
+ * v4：接入 Antigravity，`Provider` 加 `antigravity`、`AgentSession.install`、
+ *     `TranscriptDigest.activitySummary`。
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * 多久没有写入算"空闲"。

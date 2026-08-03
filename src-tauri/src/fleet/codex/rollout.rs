@@ -457,6 +457,9 @@ pub fn read_rollout(entry: &RolloutEntry, tail_bytes: u64) -> Result<RolloutPars
         // 上层补进来（见 `index.rs`），这一层拿不到。
         ai_title: None,
         last_prompt: extracted.last_prompt,
+        // v4 新增，Codex 侧没有对应物：thread_name / user_message 已经覆盖了
+        // 标题位，不需要再合成一句活动摘要。
+        activity_summary: None,
         git_branch: meta.git_branch.clone(),
         model: extracted.model,
         effort: extracted.effort,

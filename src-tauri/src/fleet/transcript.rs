@@ -124,6 +124,9 @@ pub fn read_digest(path: &Path, tail_bytes: u64) -> Result<TranscriptDigest, Dig
                 mtime_ms: tail.mtime_ms,
                 ai_title: extracted.ai_title,
                 last_prompt: extracted.last_prompt,
+                // v4 新增，Claude 侧没有对应物：这一侧的"在干什么"由
+                // aiTitle / lastPrompt 表达，不需要再合成一句。
+                activity_summary: None,
                 git_branch: extracted.git_branch,
                 model: extracted.model,
                 effort: extracted.effort,

@@ -77,10 +77,37 @@ function cardTitle(session) {
   const t = session.transcript;
   if (t && t.aiTitle) return t.aiTitle;
   if (t && t.lastPrompt) return t.lastPrompt;
+  // Antigravity 侧既没有会话标题也拿不到用户提问，但它自己写了一句活动摘要
+  // （实测"Creating walkthrough.md artifact"、"Find log date range"）。
+  // 放在这个位置的理由与下面 job.intent 那条完全一致：它回答的正是标题该回答
+  // 的问题——"这是在干什么"。
+  if (t && t.activitySummary) return t.activitySummary;
   // 后台会话可能一条 transcript 都没有，但它有 intent（起这个任务时的原始
   // prompt）——那回答的正是标题该回答的问题："这是在干什么"。
   if (session.job && session.job.intent) return session.job.intent;
   return '（无标题）';
+}
+
+/**
+ * 卡片右上角的 provider 徽章文案。
+ *
+ * **只给非 Claude 的会话打标**：Claude 是这个面板的默认居民，给它也挂一个徽章
+ * 等于每张卡片都多一坨噪声，而"没有徽章"本身就是可读的信息。返回空字符串时
+ * CSS 的 `:empty` 让它不占位。
+ *
+ * v4 起改成查表而不是接着堆三元：三家之后每加一个 provider 就多一层嵌套三元，
+ * 那是必然会写歪的地方。Antigravity 的两个安装 channel 要分开显示——用户同时
+ * 开着正式版和 IDE 版时，两张卡片长得一样会让人不知道该切到哪个窗口去。
+ *
+ * @param {import('./fleet.js').AgentSession} session
+ * @returns {string}
+ */
+function providerBadge(session) {
+  if (session.provider === 'codex') return 'Codex';
+  if (session.provider === 'antigravity') {
+    return session.install === 'antigravity-ide' ? 'Antigravity IDE' : 'Antigravity';
+  }
+  return '';
 }
 
 /**
@@ -450,7 +477,7 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
       // 只给非 Claude 的会话打标。Claude 是这个面板的默认居民，给它也挂一个
       // 徽章等于每张卡片都多一坨噪声，而"没有徽章"本身就是可读的信息。
       // 空字符串时 setText 写入空文本，CSS 的 :empty 让它不占位。
-      provider: session.provider === 'codex' ? 'Codex' : '',
+      provider: providerBadge(session),
       // 后台会话常常没有 transcript，也就没有 model 可显示。那个位置改标"后台"
       // 比留空有用：这类会话的 CPU 是 "—"、没有进程，看到标记才知道那是它本来
       // 的样子，而不是采集失败了。
@@ -530,7 +557,11 @@ export function createFleetView({ root, tabButton, badge, orbDot, invoke, openPa
    * @param {import('./fleet.js').AgentSession} session
    */
   function sessionKey(session) {
-    return session.provider + ':' + session.sessionId;
+    // v4 起把 install 也拼进来：Antigravity 有两个安装 channel，实测本机 18 个
+    // 会话的 cascadeId 跨 channel 不重叠，但这是零成本的保险。同一个 id 在两个
+    // channel 下都出现时，症状是两张卡片轮流覆盖对方的内容——那种 bug 从界面上
+    // 根本看不出是 id 冲突。
+    return session.provider + ':' + (session.install || '') + ':' + session.sessionId;
   }
 
   /** @param {import('./fleet.js').AgentSession} session @param {object} def @param {number} scannedAt */

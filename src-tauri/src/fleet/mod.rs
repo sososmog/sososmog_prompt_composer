@@ -27,6 +27,7 @@
 //! 本文件是**编排层**：把上面几层拼成一份 [`types::FleetReport`]。各层自己不知道
 //! 彼此的存在，拼装规则集中在这里，好让"哪个失败该降级成什么"只有一处定义。
 
+pub mod antigravity;
 pub mod codex;
 pub mod config;
 pub mod jobs;
@@ -190,6 +191,7 @@ fn build_job_session(
 
     AgentSession {
         provider: types::Provider::Claude,
+        install: None,
         pid: None,
         // 没有 sessionId 时退回 jobId：这个字段是前端的去重键（渲染时
         // data-session-id、展开子 agent 时的身份），不能是空串。
@@ -319,6 +321,7 @@ pub fn scan_blocking(
 
         sessions.push(AgentSession {
             provider: types::Provider::Claude,
+            install: None,
             pid: Some(entry.pid),
             session_id: entry.session_id,
             name: entry.name,
@@ -377,6 +380,18 @@ pub async fn list_agent_sessions(
         None
     };
 
+    // Antigravity 同理，但这一侧是**两个安装 channel**（`antigravity` /
+    // `antigravity-ide`），所以拿到的是一个列表。目录不存在的那些会在
+    // discover 里被静默跳过，这里不预先过滤——两个都没装时列表非空但扫描
+    // 结果为空，与「压根没装」的表现一致。
+    let antigravity_installs = if opts.include_antigravity() {
+        config::resolve_antigravity(&app)
+            .map(|root| config::antigravity_installs(&root))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     let (config_dir_display, dir_for_scan, mut warnings) = match resolved {
         Some(dir) if dir.is_dir() => (dir.to_string_lossy().into_owned(), Some(dir), Vec::new()),
         Some(dir) => {
@@ -400,10 +415,11 @@ pub async fn list_agent_sessions(
         ),
     };
 
-    // Claude 目录缺失时**不能**直接返回：一台只装了 Codex 的机器照样该看到自己的
-    // 会话。所以两条链各自判断能不能跑，任一条有结果就照常出报告。
+    // Claude 目录缺失时**不能**直接返回：一台只装了 Codex（或只装了 Antigravity）
+    // 的机器照样该看到自己的会话。所以三条链各自判断能不能跑，任一条有结果就
+    // 照常出报告。
     let mut sessions = Vec::new();
-    if dir_for_scan.is_some() || codex_dir.is_some() {
+    if dir_for_scan.is_some() || codex_dir.is_some() || !antigravity_installs.is_empty() {
         // Arc clone 进 spawn_blocking —— `State<'_, _>` 是借用的，不能直接 move，
         // 所以托管的是 Arc<FleetState> 而不是 FleetState。
         let st = state.inner().clone();
@@ -417,6 +433,11 @@ pub async fn list_agent_sessions(
             }
             if let Some(dir) = codex_dir {
                 let (s, w) = codex::scan(&dir, &opts, scanned_at);
+                sessions.extend(s);
+                warnings.extend(w);
+            }
+            if !antigravity_installs.is_empty() {
+                let (s, w) = antigravity::scan(&antigravity_installs, &opts, scanned_at);
                 sessions.extend(s);
                 warnings.extend(w);
             }

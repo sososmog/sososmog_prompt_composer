@@ -45,6 +45,46 @@ pub fn resolve_codex_from(env_value: Option<&str>, home: Option<PathBuf>) -> Opt
     resolve_with(env_value, home, ".codex")
 }
 
+/// Antigravity 版，回落到 `<home>/.gemini`。
+///
+/// ⚠️ **`GEMINI_HOME` 未经证实**。Claude 的 `CLAUDE_CONFIG_DIR` 有官方文档、
+/// Codex 的 `CODEX_HOME` 能从 `base_instructions` 里反推出来，而 Antigravity
+/// 这边两样都没有——这个变量名是照着前两家的惯例猜的。成本只有几行，且与既有
+/// 结构一致，所以留着当防御；但**不要**因为这里有它就以为它被验证过。
+pub fn resolve_antigravity_from(
+    env_value: Option<&str>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    resolve_with(env_value, home, ".gemini")
+}
+
+/// Antigravity 的两个安装 channel。
+///
+/// **这是与 Claude/Codex 最大的结构差异：不是一个根目录，是两个。**
+/// 正式版和 IDE 版在本机并存且数据完全同构（实测两边 schema 一致、
+/// cascadeId 不重叠），采集器写一份扫两个根就行。
+///
+/// 元组的第一项是 install 标识，会原样进 IPC 的 `AgentSession.install`，
+/// 前端用它区分徽章文案并拼进 keyed 更新的身份键。
+pub const ANTIGRAVITY_INSTALLS: [&str; 2] = ["antigravity", "antigravity-ide"];
+
+/// 把 `.gemini` 根展开成各 install 的会话目录候选。
+///
+/// **不做 `is_dir()` 过滤**，纯拼路径好单测；存在性由调用方判断
+/// （同 `resolve_codex` 在 `mod.rs` 里 `.filter(|d| d.is_dir())` 的分工）。
+pub fn antigravity_installs(gemini_root: &std::path::Path) -> Vec<(String, PathBuf)> {
+    ANTIGRAVITY_INSTALLS
+        .iter()
+        .map(|name| ((*name).to_string(), gemini_root.join(name)))
+        .collect()
+}
+
+/// Antigravity 的项目定义目录。**两个 install 共享这一份**（实测
+/// `~/.gemini/config/projects/`，不在任何 install 目录下面）。
+pub fn antigravity_projects_dir(gemini_root: &std::path::Path) -> PathBuf {
+    gemini_root.join("config").join("projects")
+}
+
 /// 真实环境版。用 Tauri 自带的 `path().home_dir()`，不额外引 `dirs` crate。
 pub fn resolve(app: &AppHandle) -> Option<PathBuf> {
     let env_value = std::env::var("CLAUDE_CONFIG_DIR").ok();
@@ -57,6 +97,13 @@ pub fn resolve_codex(app: &AppHandle) -> Option<PathBuf> {
     let env_value = std::env::var("CODEX_HOME").ok();
     let home = app.path().home_dir().ok();
     resolve_codex_from(env_value.as_deref(), home)
+}
+
+/// Antigravity 的真实环境版。返回的是 `.gemini` 根，不是某个 install。
+pub fn resolve_antigravity(app: &AppHandle) -> Option<PathBuf> {
+    let env_value = std::env::var("GEMINI_HOME").ok();
+    let home = app.path().home_dir().ok();
+    resolve_antigravity_from(env_value.as_deref(), home)
 }
 
 #[cfg(test)]
@@ -153,14 +200,87 @@ mod tests {
         assert!(resolve_codex_from(None, None).is_none());
     }
 
+    // ---- Antigravity 侧 ----
+
+    #[test]
+    fn antigravity_falls_back_to_home_dot_gemini_when_env_unset() {
+        let got = resolve_antigravity_from(None, home()).unwrap();
+        assert_eq!(got, PathBuf::from("C:\\Users\\demo").join(".gemini"));
+    }
+
+    #[test]
+    fn antigravity_env_var_wins_and_is_used_verbatim() {
+        let got = resolve_antigravity_from(Some("D:\\gemini-home"), home()).unwrap();
+        assert_eq!(got, PathBuf::from("D:\\gemini-home"));
+    }
+
+    #[test]
+    fn antigravity_empty_and_whitespace_env_var_is_treated_as_unset() {
+        for raw in ["", "   ", "\t"] {
+            let got = resolve_antigravity_from(Some(raw), home()).unwrap();
+            assert_eq!(
+                got,
+                PathBuf::from("C:\\Users\\demo").join(".gemini"),
+                "GEMINI_HOME 为 {raw:?} 时应回落到 home"
+            );
+        }
+    }
+
+    #[test]
+    fn antigravity_none_when_no_env_and_no_home() {
+        assert!(resolve_antigravity_from(None, None).is_none());
+    }
+
+    #[test]
+    fn antigravity_expands_to_both_installs() {
+        // 双安装是这一侧的结构核心：漏掉任何一个都会让一半会话不显示，
+        // 而那种缺失在真机上很难看出来（用户只会觉得"有几个会话没出现"）。
+        let root = PathBuf::from("C:\\Users\\demo\\.gemini");
+        let installs = antigravity_installs(&root);
+        assert_eq!(installs.len(), 2);
+        assert_eq!(installs[0].0, "antigravity");
+        assert_eq!(installs[0].1, root.join("antigravity"));
+        assert_eq!(installs[1].0, "antigravity-ide");
+        assert_eq!(installs[1].1, root.join("antigravity-ide"));
+    }
+
+    #[test]
+    fn antigravity_install_ids_are_distinct() {
+        // 防呆：两个 install 的标识如果相同，前端的身份键就会撞，
+        // E6 的加权 LIS 会把两个会话的卡片串在一起。
+        let root = PathBuf::from("/home/demo/.gemini");
+        let installs = antigravity_installs(&root);
+        assert_ne!(installs[0].0, installs[1].0);
+        assert_ne!(installs[0].1, installs[1].1);
+    }
+
+    #[test]
+    fn antigravity_projects_dir_is_shared_not_per_install() {
+        // 实测 projects/ 在 ~/.gemini/config/ 下，**不在** install 目录里。
+        // 写成 <root>/antigravity/config/projects 会让项目名全查不到。
+        let root = PathBuf::from("C:\\Users\\demo\\.gemini");
+        let got = antigravity_projects_dir(&root);
+        assert_eq!(got, root.join("config").join("projects"));
+        for (_, install_dir) in antigravity_installs(&root) {
+            assert!(
+                !got.starts_with(&install_dir),
+                "projects 目录不该落在 install 目录 {install_dir:?} 下面"
+            );
+        }
+    }
+
     #[test]
     fn codex_and_claude_resolve_to_different_dirs_under_the_same_home() {
         // 防呆：抽 `resolve_with` 时把 dir_name 传错（两边都拼 .claude）
         // 是最容易犯且最难发现的错——两个函数各自看都"对"，只有并排比才露馅。
         let claude = resolve_from(None, home()).unwrap();
         let codex = resolve_codex_from(None, home()).unwrap();
+        let antigravity = resolve_antigravity_from(None, home()).unwrap();
         assert_ne!(claude, codex);
+        assert_ne!(claude, antigravity);
+        assert_ne!(codex, antigravity);
         assert!(claude.ends_with(".claude"));
         assert!(codex.ends_with(".codex"));
+        assert!(antigravity.ends_with(".gemini"));
     }
 }

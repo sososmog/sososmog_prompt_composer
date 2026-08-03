@@ -70,6 +70,8 @@ fn build_session(
 
     AgentSession {
         provider: Provider::Codex,
+        // 只有 Antigravity 有多个安装 channel 的概念。
+        install: None,
         // 没有名册就没有 pid。这条路 E1 的后台会话已经趟平，见 types.rs。
         pid: None,
         // 以**文件名里的 id** 为准而不是 session_meta 里的：文件名是我们发现

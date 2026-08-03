@@ -29,6 +29,10 @@ tauri-plugin-window-state = "2"
 tauri-plugin-http = "2"
 enigo = "0.6"
 sysinfo = { version = "0.36.1", default-features = false, features = ["system"] }
+# Antigravity 的会话落在 SQLite 里（E9）。`bundled` 自带 SQLite 源码编译，
+# 不依赖系统库——CI 的 macOS/Windows 编译检查不会因为找不到 libsqlite3 而挂。
+# 代价是首次编译要跑一遍 C 编译。
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }

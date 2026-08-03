@@ -10,7 +10,11 @@ use serde::{Deserialize, Serialize};
 /// - v3：接入 Codex 会话。`AgentSession` 加必填的 `provider`，
 ///   `TranscriptDigest` 加可选的 `contextWindow`。前者是新增字段而非可选，
 ///   因为「这张卡片是谁家的」不该有"不知道"这个状态。
-pub const SCHEMA_VERSION: u32 = 3;
+/// - v4：接入 Antigravity 会话。`Provider` 加 `Antigravity` 变体，
+///   `AgentSession` 加可选的 `install`（区分 `antigravity` / `antigravity-ide`
+///   两个安装 channel），`TranscriptDigest` 加可选的 `activitySummary`
+///   （Antigravity 自带的一句人话活动摘要，前端用在标题位兜底）。
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// 终态 job（`done`/`failed`/`stopped`）在列表里保留多久。
 ///
@@ -32,6 +36,16 @@ pub const JOB_TERMINAL_RETENTION_MS: i64 = 60 * 60 * 1000;
 /// 比 `IDLE_MS`（5 分钟）宽得多是故意的：idle 是"闲着但还在"，这里是"根本不该
 /// 再出现在面板上"，两个尺度不该对齐。
 pub const CODEX_RETENTION_MS: i64 = 8 * 60 * 60 * 1000;
+
+/// Antigravity 会话的保留窗口：mtime 早于这个时长的 `.db` 不进列表。
+///
+/// 与 [`CODEX_RETENTION_MS`] 取同一个值（8 小时），理由也一样：这一侧同样没有
+/// 进程可查，"还算不算数"只能靠最后写入时间判断。刻意对齐而不是各自取值——
+/// 两个 provider 的会话并排显示在同一个面板里，用不同的保留窗口会让用户困惑
+/// 「为什么 Codex 的还在、Antigravity 的没了」。
+///
+/// `conversations/` 同样是只增不删的归档（本机最老的一条是 6 天前）。
+pub const ANTIGRAVITY_RETENTION_MS: i64 = CODEX_RETENTION_MS;
 
 /// 最多进几个日期目录（`sessions/YYYY/MM/DD`）。
 ///
@@ -76,6 +90,11 @@ pub struct FleetOptions {
     /// 存在的意义和 `include_jobs` 一样：没装 Codex 的机器上这一路本来就静默
     /// 返回空，**不需要**靠这个开关去省成本；它是给"我只想看 Claude"的用户的。
     pub include_codex: Option<bool>,
+    /// 默认 `true`（v4 起）。关掉就不看 Antigravity 的会话。
+    ///
+    /// 同 `include_codex`：没装 Antigravity 的机器上这一路本来就静默返回空，
+    /// 这个开关是给"我只想看某几家"的用户的，不是用来省成本的。
+    pub include_antigravity: Option<bool>,
     /// 默认 `true`
     pub cpu: Option<bool>,
 }
@@ -94,6 +113,9 @@ impl FleetOptions {
     }
     pub fn include_codex(&self) -> bool {
         self.include_codex.unwrap_or(true)
+    }
+    pub fn include_antigravity(&self) -> bool {
+        self.include_antigravity.unwrap_or(true)
     }
     pub fn cpu(&self) -> bool {
         self.cpu.unwrap_or(true)
@@ -161,6 +183,13 @@ pub enum WarningCode {
     CodexRolloutUnreadable,
     /// Codex rollout 读到了，但尾部窗口里解析不出任何消息（格式漂移的信号）
     CodexRolloutUnparsable,
+    /// Antigravity 的 `conversations/` 目录存在但读不了，或某个 `.db` 打不开。
+    ///
+    /// 同 Codex 侧，**没有** "目录不存在" 那一条：没装 Antigravity 的机器上
+    /// `~/.gemini/antigravity{,-ide}/` 本来就不存在，正常状态不报警。
+    AntigravityDbUnreadable,
+    /// 库打开了，但查不出任何可用的 step（表缺失、schema 漂移）。
+    AntigravityDbUnparsable,
 }
 
 // 关于这里**没有**哪两个 code，理由值得留着，否则以后会有人"顺手补上"：
@@ -187,6 +216,11 @@ pub enum WarningCode {
 pub enum Provider {
     Claude,
     Codex,
+    /// v4 起。两个安装 channel（`antigravity` / `antigravity-ide`）**共用这一个
+    /// 变体**，具体是哪个看 [`AgentSession::install`]——它们是同一个产品的两条
+    /// 发布线，数据格式完全同构，做成两个变体会让所有按 provider 分支的地方
+    /// 都要写两遍。
+    Antigravity,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,6 +228,14 @@ pub enum Provider {
 pub struct AgentSession {
     /// v3 新增。前端据此显示徽章，并把它拼进 keyed 更新的身份键。
     pub provider: Provider,
+
+    /// 同一个 provider 下的安装 channel。v4 新增，**只有 Antigravity 侧有值**
+    /// （`antigravity` / `antigravity-ide`），其余 provider 恒 `None`。
+    ///
+    /// 为什么不复用 `entrypoint`：那个字段在 Claude 侧的语义是"怎么启动的"
+    /// （`claude-vscode` 一类），塞安装 channel 进去是语义污染；而且前端的
+    /// keyed 身份键需要它是个独立字段，混在一起就得靠字符串切分。
+    pub install: Option<String>,
 
     // ---- L1：名册 ----
     /// **`None` = 这个会话没有对应进程**，不是"没采到"。daemon 托管的后台
@@ -279,6 +321,22 @@ pub struct TranscriptDigest {
     pub ai_title: Option<String>,
     /// `type:"last-prompt"` 的 `lastPrompt`。截断到 TEXT_LIMIT。
     pub last_prompt: Option<String>,
+
+    /// 「这个会话现在在干什么」的一句人话。v4 新增，**目前只有 Antigravity 侧有**。
+    ///
+    /// 来源是 Antigravity 自己写给它的 UI 看的 `toolSummary` / `toolAction`
+    /// 字段（实测 `Find log date range`、`Read skill document`），
+    /// 不是我们从工具参数里编的。
+    ///
+    /// 为什么单开一个字段而不是塞进 `ai_title` 或 `last_prompt`：那两个有明确
+    /// 语义（会话标题 / 用户最后的提问），而这句话两者都不是。把它塞进去能少
+    /// 改一次契约，但那正是这个功能反复否决过的事——`defaultBranch` 冒充
+    /// `gitBranch` 也是同一类错误。
+    ///
+    /// 前端把它用在标题位的兜底上（`aiTitle` → `lastPrompt` → 这个 →
+    /// `job.intent` → `（无标题）`），理由与 `job.intent` 那条兜底完全一致：
+    /// 它回答的正是标题该回答的问题。
+    pub activity_summary: Option<String>,
     pub git_branch: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -501,6 +559,47 @@ mod tests {
             serde_json::to_string(&WarningCode::TranscriptUnparsable).unwrap(),
             "\"transcript-unparsable\""
         );
+
+        // Provider 之前漏在这批断言外面了。这三个字符串是 fleetView.js 的
+        // providerBadge() 和 sessionKey() 直接比对的字面量——`Provider` 上的
+        // `rename_all = "lowercase"` 哪天被人删掉，序列化会变成 `"Antigravity"`，
+        // 结果是徽章空掉、身份键跟着变，**而且不会有任何编译错误**。
+        assert_eq!(serde_json::to_string(&Provider::Claude).unwrap(), "\"claude\"");
+        assert_eq!(serde_json::to_string(&Provider::Codex).unwrap(), "\"codex\"");
+        assert_eq!(
+            serde_json::to_string(&Provider::Antigravity).unwrap(),
+            "\"antigravity\""
+        );
+
+        assert_eq!(
+            serde_json::to_string(&WarningCode::AntigravityDbUnreadable).unwrap(),
+            "\"antigravity-db-unreadable\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WarningCode::AntigravityDbUnparsable).unwrap(),
+            "\"antigravity-db-unparsable\""
+        );
+    }
+
+    /// v4 新增的两个字段必须以 camelCase 上线。
+    ///
+    /// `AgentSession` / `TranscriptDigest` 上都有 `rename_all = "camelCase"`，
+    /// 但那是**结构体级**的属性——新加字段时忘了它不会报错，而前端读的是
+    /// `session.install` / `t.activitySummary`，名字不对就静默变 undefined。
+    #[test]
+    fn v4_fields_go_on_the_wire_in_camel_case() {
+        let report = full_report();
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"install\""), "install 应出现在 IPC 里");
+        assert!(
+            json.contains("\"activitySummary\""),
+            "activitySummary 必须是 camelCase，不能是 activity_summary"
+        );
+        assert!(
+            !json.contains("activity_summary"),
+            "出现了 snake_case 的 activity_summary —— 前端读不到"
+        );
+        assert!(json.contains("\"schemaVersion\":4"), "契约版本应是 4");
     }
 
     /// 构造一个**每个字段都填满**的报告，用于钉住出线格式。
@@ -515,6 +614,7 @@ mod tests {
             )],
             sessions: vec![AgentSession {
                 provider: Provider::Claude,
+                install: None,
                 pid: Some(52052),
                 session_id: "11111111-2222-3333-4444-555555555555".into(),
                 name: "demo-proj-18".into(),
@@ -534,6 +634,7 @@ mod tests {
                     mtime_ms: 1_785_416_160_000,
                     ai_title: Some("占位标题".into()),
                     last_prompt: Some("占位提问".into()),
+                    activity_summary: None,
                     git_branch: Some("main".into()),
                     model: Some("claude-opus-5".into()),
                     effort: Some("xhigh".into()),
@@ -592,6 +693,8 @@ mod tests {
 
         let s = &v["sessions"][0];
         for k in [
+            "provider",
+            "install",
             "pid",
             "sessionId",
             "name",
@@ -619,6 +722,7 @@ mod tests {
             "mtimeMs",
             "aiTitle",
             "lastPrompt",
+            "activitySummary",
             "gitBranch",
             "model",
             "effort",
