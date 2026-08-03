@@ -559,6 +559,47 @@ mod tests {
             serde_json::to_string(&WarningCode::TranscriptUnparsable).unwrap(),
             "\"transcript-unparsable\""
         );
+
+        // Provider 之前漏在这批断言外面了。这三个字符串是 fleetView.js 的
+        // providerBadge() 和 sessionKey() 直接比对的字面量——`Provider` 上的
+        // `rename_all = "lowercase"` 哪天被人删掉，序列化会变成 `"Antigravity"`，
+        // 结果是徽章空掉、身份键跟着变，**而且不会有任何编译错误**。
+        assert_eq!(serde_json::to_string(&Provider::Claude).unwrap(), "\"claude\"");
+        assert_eq!(serde_json::to_string(&Provider::Codex).unwrap(), "\"codex\"");
+        assert_eq!(
+            serde_json::to_string(&Provider::Antigravity).unwrap(),
+            "\"antigravity\""
+        );
+
+        assert_eq!(
+            serde_json::to_string(&WarningCode::AntigravityDbUnreadable).unwrap(),
+            "\"antigravity-db-unreadable\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WarningCode::AntigravityDbUnparsable).unwrap(),
+            "\"antigravity-db-unparsable\""
+        );
+    }
+
+    /// v4 新增的两个字段必须以 camelCase 上线。
+    ///
+    /// `AgentSession` / `TranscriptDigest` 上都有 `rename_all = "camelCase"`，
+    /// 但那是**结构体级**的属性——新加字段时忘了它不会报错，而前端读的是
+    /// `session.install` / `t.activitySummary`，名字不对就静默变 undefined。
+    #[test]
+    fn v4_fields_go_on_the_wire_in_camel_case() {
+        let report = full_report();
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"install\""), "install 应出现在 IPC 里");
+        assert!(
+            json.contains("\"activitySummary\""),
+            "activitySummary 必须是 camelCase，不能是 activity_summary"
+        );
+        assert!(
+            !json.contains("activity_summary"),
+            "出现了 snake_case 的 activity_summary —— 前端读不到"
+        );
+        assert!(json.contains("\"schemaVersion\":4"), "契约版本应是 4");
     }
 
     /// 构造一个**每个字段都填满**的报告，用于钉住出线格式。
@@ -652,6 +693,8 @@ mod tests {
 
         let s = &v["sessions"][0];
         for k in [
+            "provider",
+            "install",
             "pid",
             "sessionId",
             "name",
@@ -679,6 +722,7 @@ mod tests {
             "mtimeMs",
             "aiTitle",
             "lastPrompt",
+            "activitySummary",
             "gitBranch",
             "model",
             "effort",
