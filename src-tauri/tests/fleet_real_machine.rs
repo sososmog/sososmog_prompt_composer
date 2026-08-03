@@ -1,4 +1,5 @@
-//! 真机诊断：对**真实**的 `~/.claude` 跑一遍采集链路，把认出来的东西打印出来。
+//! 真机诊断：对**真实**的 `~/.claude` / `~/.codex` 跑一遍采集链路，把认出来的
+//! 东西打印出来。
 //!
 //! ## 为什么需要它
 //!
@@ -18,6 +19,9 @@
 //! cargo test --test fleet_real_machine -- --ignored --nocapture
 //! ```
 //!
+//! 两个测试：`dump_what_the_collector_sees_on_this_machine`（Claude Code）与
+//! `dump_codex_rollouts_on_this_machine`（Codex）。
+//!
 //! ## 隐私提醒
 //!
 //! 输出里会包含真实的会话标题、git 分支、工作目录——那都是你自己的工作内容。
@@ -26,7 +30,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use composer_lib::fleet::{jobs, proc, roster, subagents, transcript, types};
+use composer_lib::fleet::{codex, jobs, proc, roster, subagents, transcript, types};
 
 /// 把扁平的 subagent 列表按 parentAgentId 打印成树。
 ///
@@ -291,4 +295,113 @@ fn dump_what_the_collector_sees_on_this_machine() {
         "名册里有 {} 条会话，却没有一个通过存活校验——check_liveness 的启动时间对齐可能在本平台失效了",
         scan.entries.len()
     );
+}
+
+/// 与 `fleet::config::resolve_codex` 同规则的无 Tauri 版本，理由同
+/// [`real_config_dir`]。
+fn real_codex_dir() -> Option<PathBuf> {
+    if let Ok(v) = std::env::var("CODEX_HOME") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return Some(PathBuf::from(v));
+        }
+    }
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .map(|h| PathBuf::from(h).join(".codex"))
+}
+
+/// Codex 侧的同类诊断：`discover` 在真实 `~/.codex` 上认出了哪些会话。
+///
+/// 同样不断言具体内容——本机有几个 Codex 会话完全取决于你今天用没用它。
+/// 它要暴露的是"扫描链路还通不通"：路径规则变了、文件名换格式了，
+/// 这里会直接变成 0 条，而全部单测照样绿（夹具是我们自己造的）。
+///
+/// 顺带用一个放宽到 90 天的窗口对照跑一次。两个数字差得多是正常的，
+/// 差成 0 vs 0 才说明有问题。
+#[test]
+#[ignore]
+fn dump_codex_rollouts_on_this_machine() {
+    let Some(codex_dir) = real_codex_dir() else {
+        println!("拿不到 home 目录，跳过");
+        return;
+    };
+    println!("Codex 配置目录：{}", codex_dir.display());
+    if !codex_dir.is_dir() {
+        println!("本机没有这个目录——没装 Codex 就是这样，不是错误。");
+        return;
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let mut fresh_count = 0usize;
+    for (label, retention) in [
+        ("默认保留窗口", types::CODEX_RETENTION_MS),
+        ("放宽到 90 天", 90i64 * 24 * 3600 * 1000),
+    ] {
+        let scan = codex::discover::discover(&codex_dir, now_ms, retention);
+        println!(
+            "
+=== {label}（{:.1} 小时）→ {} 条会话，{} 条 warning ===",
+            retention as f64 / 3_600_000.0,
+            scan.entries.len(),
+            scan.warnings.len()
+        );
+        for w in &scan.warnings {
+            println!("  [warn] {:?} {}", w.code, w.detail);
+        }
+        for e in scan.entries.iter().take(10) {
+            println!(
+                "  {:<40} {:>9} bytes  {:>7.1} 小时前",
+                e.session_id,
+                e.size_bytes,
+                (now_ms - e.mtime_ms) as f64 / 3_600_000.0
+            );
+        }
+        if scan.entries.len() > 10 {
+            println!("  ... 还有 {} 条", scan.entries.len() - 10);
+        }
+        if label == "放宽到 90 天" {
+            fresh_count = scan.entries.len();
+        }
+    }
+
+    // 唯一的硬断言，而且只在"目录里确实有 rollout 文件"时才成立：
+    // 磁盘上有文件却一条都发现不了，说明文件名规则或目录布局变了——
+    // 那正是这个测试存在的意义（单测吃自造夹具，发现不了上游漂移）。
+    let has_any_rollout = walk_has_rollout(&codex_dir.join("sessions"));
+    if has_any_rollout {
+        assert!(
+            fresh_count > 0,
+            "磁盘上有 rollout 文件，discover 却一条都没认出来——文件名规则或目录布局可能变了"
+        );
+    } else {
+        println!("
+（sessions/ 下没有任何 rollout 文件，跳过硬断言）");
+    }
+}
+
+/// 递归找一个 rollout 文件，只为给上面的硬断言判定前提条件。
+/// 刻意不复用 `discover` 的任何逻辑——用被测代码去证明被测代码的前提是循环论证。
+fn walk_has_rollout(dir: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            if walk_has_rollout(&path) {
+                return true;
+            }
+        } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with("rollout-") && name.ends_with(".jsonl") {
+                return true;
+            }
+        }
+    }
+    false
 }

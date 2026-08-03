@@ -19,6 +19,28 @@ pub const SCHEMA_VERSION: u32 = 2;
 /// 进行中的 job（`working`/`blocked`）不受此限制，永远显示。
 pub const JOB_TERMINAL_RETENTION_MS: i64 = 60 * 60 * 1000;
 
+/// Codex 会话的保留窗口：mtime 早于这个时长的 rollout 不进列表。
+///
+/// `~/.codex/sessions/` 和 `jobs/` 一样是**只增不删的归档**（本机 56 个 rollout
+/// 里有 19 个是同一秒导入的历史），不设窗口面板就是个垃圾堆。
+///
+/// 8 小时的取舍：Codex 没有进程可查，"这个会话还算不算数"只能靠最后写入时间判断。
+/// 8 小时约等于一个工作日的跨度——早上开的会话下午还看得到，隔夜的就算历史了。
+/// 比 `IDLE_MS`（5 分钟）宽得多是故意的：idle 是"闲着但还在"，这里是"根本不该
+/// 再出现在面板上"，两个尺度不该对齐。
+pub const CODEX_RETENTION_MS: i64 = 8 * 60 * 60 * 1000;
+
+/// 最多进几个日期目录（`sessions/YYYY/MM/DD`）。
+///
+/// 只是为了给遍历成本封顶，不是保留策略——真正决定显不显示的是
+/// [`CODEX_RETENTION_MS`]。取 3 是因为 8 小时的窗口最多也就跨两个自然日
+/// （夜里跑的会话），留一个余量。
+///
+/// **按字典序取最后 N 个，不与当前日期比较**：用户几天没开 Codex 时，
+/// 按当前日期算会一个目录都取不到，而按排序取总能拿到最近的那几天——
+/// 反正超窗口的会在 mtime 那关被筛掉，多看几个目录不会多显示任何东西。
+pub const CODEX_DATE_DIRS_MAX: usize = 3;
+
 /// transcript 尾部默认读取字节数。
 ///
 /// 64KB 在实测数据上足够覆盖最后若干轮消息（本机最大的 session 文件 3.7MB，
@@ -120,6 +142,14 @@ pub enum WarningCode {
     JobsUnreadable,
     /// 单个 `jobs/<id>/state.json` 解析失败（跳过该条，其余照常）
     JobEntryInvalid,
+    /// Codex 的 `sessions/` 目录存在但读不了（权限问题一类），或某个 rollout
+    /// 文件打不开。
+    ///
+    /// 注意**没有** `CodexNoSessionsDir`：没装 Codex 的机器上那个目录本来就不
+    /// 存在，那是正常状态不是错误，静默跳过（同 `TranscriptNotFound` 那条的理由）。
+    CodexRolloutUnreadable,
+    /// Codex rollout 读到了，但尾部窗口里解析不出任何消息（格式漂移的信号）
+    CodexRolloutUnparsable,
 }
 
 // 关于这里**没有**哪两个 code，理由值得留着，否则以后会有人"顺手补上"：

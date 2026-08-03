@@ -22,6 +22,7 @@
 //! 本文件是**编排层**：把上面几层拼成一份 [`types::FleetReport`]。各层自己不知道
 //! 彼此的存在，拼装规则集中在这里，好让"哪个失败该降级成什么"只有一处定义。
 
+pub mod codex;
 pub mod config;
 pub mod jobs;
 pub mod proc;
