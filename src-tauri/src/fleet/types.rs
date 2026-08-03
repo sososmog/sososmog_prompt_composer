@@ -33,6 +33,16 @@ pub const JOB_TERMINAL_RETENTION_MS: i64 = 60 * 60 * 1000;
 /// 再出现在面板上"，两个尺度不该对齐。
 pub const CODEX_RETENTION_MS: i64 = 8 * 60 * 60 * 1000;
 
+/// Antigravity 会话的保留窗口：mtime 早于这个时长的 `.db` 不进列表。
+///
+/// 与 [`CODEX_RETENTION_MS`] 取同一个值（8 小时），理由也一样：这一侧同样没有
+/// 进程可查，"还算不算数"只能靠最后写入时间判断。刻意对齐而不是各自取值——
+/// 两个 provider 的会话并排显示在同一个面板里，用不同的保留窗口会让用户困惑
+/// 「为什么 Codex 的还在、Antigravity 的没了」。
+///
+/// `conversations/` 同样是只增不删的归档（本机最老的一条是 6 天前）。
+pub const ANTIGRAVITY_RETENTION_MS: i64 = CODEX_RETENTION_MS;
+
 /// 最多进几个日期目录（`sessions/YYYY/MM/DD`）。
 ///
 /// 只是为了给遍历成本封顶，不是保留策略——真正决定显不显示的是
@@ -161,6 +171,13 @@ pub enum WarningCode {
     CodexRolloutUnreadable,
     /// Codex rollout 读到了，但尾部窗口里解析不出任何消息（格式漂移的信号）
     CodexRolloutUnparsable,
+    /// Antigravity 的 `conversations/` 目录存在但读不了，或某个 `.db` 打不开。
+    ///
+    /// 同 Codex 侧，**没有** "目录不存在" 那一条：没装 Antigravity 的机器上
+    /// `~/.gemini/antigravity{,-ide}/` 本来就不存在，正常状态不报警。
+    AntigravityDbUnreadable,
+    /// 库打开了，但查不出任何可用的 step（表缺失、schema 漂移）。
+    AntigravityDbUnparsable,
 }
 
 // 关于这里**没有**哪两个 code，理由值得留着，否则以后会有人"顺手补上"：
